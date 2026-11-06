@@ -229,3 +229,47 @@ EC=0 异常，属 virt/A710 模拟缺口，不是寻址错误）。
 `MIDR 0x412fd471`（Cortex-A710）是 QEMU 的 CPU；真机是 A76（0x414fd0b1 一族）。
 若真机在同一位置停下，说明是内核里某条 armv8.2 之外的指令；届时用
 `fastboot boot` 的屏幕输出即可区分。
+
+### 9.4 QEMU 里 XNU 停在哪（round 9 追加）
+
+用内核符号表反查第一条异常的落点：
+
+```
+异常 ELR 0xfffffe0007bdc684 ∈ __TEXT_EXEC（段内 0x874684）
+前一条指令 0xfffffe0007bdc680 = brk #0xbffc，所属符号 _timer_queue_assign.cold.1
+  → 这是 timer_queue_assign() 里 assert 的冷路径（panic 陷阱）
+```
+
+`osfmk/arm/arm_timer.c:217 timer_queue_assign()` 的冷路径条件是：
+
+```c
+if (cpu_data_ptr->cpu_running) { … } else {
+    assert(ml_is_quiescing());          /* ← 这里炸 */
+    queue = &cpu_datap(boot_cpu_id)->rtclock_timer.queue;
+}
+```
+
+而 `cpu_running` 只有 `osfmk/arm64/cpu.c:753`（`cpu_init()` 末尾）会置 TRUE。也就是说
+引擎跑到“某处比 `cpu_init()` 更早地武装了 rtclock 定时器”，且 QEMU 的 62.5 MHz 计数
+频率与我们 ADT 里写的 19.2 MHz 不一致（`/cpus/timebase-frequency`），中断提前到来，
+于是踩到这条 assert。
+
+结论分两层：
+
+1. **对 nabu 是利好**：能走到 `timer_queue_assign`，说明 XNU 已经完成 `pmap_bootstrap`
+   → 平台发现（我们的 ADT 被 `ArmDTPlatform` 接受）→ GIC/定时器注册 → Mach 初始化，
+   这是“裸内核能在没有 kext 的情况下跑起来”的最强证据。
+2. **真机首启要盯的一处**：如果 nabu 上也在这条 assert 停下，说明 timebase 或
+   timer 中断路径与 ADT 不一致（nabu 实测 19.2 MHz，与 ADT 相同，正常不该踩）。
+
+### 9.5 指令集安全性扫描
+
+对 24.8 MB 的成品内核做 PAC 指令全量扫描：
+
+```
+PACIA/PACIB (0x3f23_03d5 / 0x7f23_03d5) → 0 处
+AUTIA/AUTIB (0xff23_03d5 / 0xbf23_03d5) → 0 处
+```
+
+即内核中**没有任何指针认证指令**，与 SM8150 的 Cortex-A76/A55（armv8.2，无 PAC）匹配；
+`cpusubtype` 也是低字节 0（arm64，非 arm64e）。这条与 §7 的 DarwinBoot 检查互为印证。
