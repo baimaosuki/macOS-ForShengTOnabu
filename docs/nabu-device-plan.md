@@ -7,8 +7,8 @@
 DarwinBoot 的载荷契约（`UniXNU/drivers/DarwinBoot/DarwinBootPkg/Driver/DarwinBoot.c`）：
 
 ```
-\EFI\UniXNU\Payloads\kernel.macho              ← prelink 产物（当前缺）
-\EFI\UniXNU\Payloads\kernel.macho.adt          ← make-*-adt.py 生成，DRAM 描述
+\EFI\UniXNU\Payloads\kernel.macho              ← out/nabu/kernel/kernel.development.nabu（0008 版）
+\EFI\UniXNU\Payloads\kernel.macho.adt          ← native_devtree.make_nabu_adt（14/14 严格校验通过）
 \EFI\UniXNU\Payloads\kernel.macho.trustcache   ← 与 kernel.macho 同源
 \EFI\UniXNU\Payloads\kernel.macho.gpuaddon     ← make-gpu-addon.py（可选）
 ```
@@ -46,7 +46,7 @@ adb shell su -c 'sync && umount /mnt/esp'
 ```bash
 adb reboot bootloader
 fastboot devices
-fastboot boot out/nabu/boot.img      # 临时 RAM 载入；绝不使用 fastboot flash
+fastboot boot out/nabu/image/nabu-macos26-kernel.img   # 临时 RAM 载入；绝不使用 fastboot flash
 fastboot getvar slot-retry-count:b   # 记录（期望 7）
 fastboot getvar slot-unbootable:b    # 记录（期望 no）
 ```
@@ -62,3 +62,24 @@ fastboot getvar slot-unbootable:b    # 记录（期望 no）
 - `fastboot flash` 任何分区（boot/system/vendor/super/esp）；
 - 改 `boot_b` 的 slot 状态；
 - 在没有 ESP 备份完成的情况下写 ESP。
+
+
+## 5. 夜间产出（可行条件已备齐）
+
+```
+out/nabu/kernel/kernel.development.nabu          24,787,072 B  83ec42f2…  MH_EXECUTE arm64
+  符号 _kalloc_sparse_prelink_index_version = 0xfffffe0007007f48，值 1
+out/nabu/image/nabu-macos26-kernel.img           24,813,568 B  2c61f094…  ← 直接用于 fastboot boot
+  Android boot v0；kernel 字段 = gzip(stage1 7,264 B) + nabu.dtb 3,335 B
+  NRAM ramdisk：kernel 24,787,072 B + adt 11,424 B + unixnu.toml
+  镜像内 ADT 严格校验 14/14 通过
+out/esp-payload/                                  ESP 安装目录树 + NABU-ESP-MANIFEST.json
+```
+
+已知边界（上机前必须知道）：
+
+1. 内核是**裸内核**，不含任何 kext：Apple 缓存里的 345 个 kext 的指针 74.5% 指向 Apple 版
+   `com.apple.kernel`，跨构建无法重绑，因此首次启动预期在 IOPlatformExpert/ArmDTPlatform
+   阶段就停下（或拿不到 root 设备），但能看到 `NABULOG2` 沙盒日志并确认 EL1 交接/显示/串口链路。
+2. 首启单核（ADT 仅 `cpu@0`，boot-args `cpus=1`），UFS/GPU 节点全部不出现。
+3. 全程 `fastboot boot`，不写任何分区；`fastboot flash` 在本文档中是禁止项。

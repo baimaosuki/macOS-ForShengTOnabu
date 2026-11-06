@@ -4,6 +4,7 @@
 from pathlib import Path
 import struct
 import uuid
+import hashlib
 import zlib
 
 
@@ -115,8 +116,15 @@ def configure_native_text_state(path: Path, *, development_root: bool = False,
             arm_io += 1
         if native_gop_display and location == ('device-tree', 'arm-io', 'native-gop'):
             gop_nodes += 1
+            # The strict nabu ADT contract forbids the sheng vendor prefix, so the
+            # display node is claimed as nabu,gop-framebuffer; older fixtures that
+            # still carry the sheng prefix are accepted unchanged.
             ensure('device_type', b'display-subsystem\0')
-            ensure('compatible', b'sheng,gop-framebuffer\0')
+            if 'compatible' not in properties:
+                ensure('compatible', b'nabu,gop-framebuffer\0')
+            elif properties['compatible'] not in (b'nabu,gop-framebuffer\0',
+                                                  b'sheng,gop-framebuffer\0'):
+                raise ValueError('generated tree conflicts with native policy: compatible')
         if root_hash is not None and location == ('device-tree', 'chosen', 'secure-boot-hashes'):
             auth += 1
             ensure('system-volume-auth-blob', root_hash)
@@ -208,6 +216,38 @@ def _adt_node(name: str, properties: tuple[tuple[str, bytes], ...] = (),
     return bytes(encoded)
 
 
+def _adt_random_seed() -> bytes:
+    """64 non-zero bytes for /chosen/random-seed (kernel panics on all-zero seed)."""
+    return hashlib.sha512(b'nabu-adt-random-seed-v1').digest()
+
+
+def _adt_nvram_props() -> list[tuple[str, bytes]]:
+    """CHRP NVRAM bank: 8 KiB with 'nvram'/'common'/'free' headers and Adler-32."""
+    image = bytearray(8192)
+    image[20:52] = hashlib.sha256(b'nabu-adt-nvram').digest()
+
+    def header(offset: int, name: bytes, length: int) -> None:
+        struct.pack_into('<BBH12s', image, offset, 0x70, 0, length // 16,
+                         name + bytes(12 - len(name)))
+
+    header(0, b'nvram', 32)
+    header(32, b'common', 16 + 2048)
+    header(2096, b'free', 8192 - 2096)
+    for offset in (0, 32, 2096):
+        block = bytearray(image[offset:offset + 16])
+        block[1] = 0
+        total = sum(block)
+        while total > 255:
+            total = (total & 0xFF) + (total >> 8)
+        image[offset + 1] = total & 0xFF
+    struct.pack_into('<I', image, 16, zlib.adler32(bytes(image[20:])))
+    return [
+        ('nvram-bank-size', struct.pack('<I', 8192)),
+        ('nvram-bank-count', struct.pack('<I', 1)),
+        ('nvram-current-bank', struct.pack('<I', 0)),
+        ('nvram-proxy-data', bytes(image)),
+    ]
+
 def make_nabu_adt(path: Path, *, dram_base: int = 0xc0000000,
                   dram_size: int = 0x140000000,
                   owned_memory_size: int = 0x40000000,
@@ -239,27 +279,28 @@ def make_nabu_adt(path: Path, *, dram_base: int = 0xc0000000,
         ('framebuffer-stride', struct.pack('<I', 6400)),
         ('kernel-ctrr-to-be-enabled', struct.pack('<I', 0)),
     ]
-    if os_environment:
-        chosen_props.append(('osenvironment', os_environment.encode('ascii') + b'\0'))
+    chosen_props.append(('osenvironment', (os_environment or 'main').encode('ascii') + b'\0'))
+    chosen_props.append(('random-seed', _adt_random_seed()))
+    chosen_props.extend(_adt_nvram_props())
     if panic_log:
         chosen_props.append(('embedded-panic-log-size', struct.pack('<I', 0x80000)))
-    cpus = []
-    for index in range(8):
-        affinity = index * 0x100
-        compat = b'arm,cortex-a55\0' if index < 4 else b'arm,cortex-a76\0'
-        cpus.append(_adt_node(f'cpu{index}', (
-            ('device_type', b'cpu\0'),
-            ('compatible', compat),
-            ('reg', struct.pack('<Q', affinity)),
-            ('cpu-id', struct.pack('<I', index)),
-            ('enable-method', b'psci\0'),
-        )))
+    # Controlled first boot: one core only. ArmDTPlatform walks /cpus children
+    # with device_type == "cpu"; the strict ADT contract rejects secondaries.
+    cpus = [_adt_node('cpu@0', (
+        ('device_type', b'cpu\0'),
+        ('compatible', b'arm,cortex-a55\0'),
+        ('reg', struct.pack('<I', 0)),
+        ('cpu-id', struct.pack('<I', 0)),
+        ('enable-method', b'psci\0'),
+    ))]
     # XNU ArmDTPlatform requires interrupt-controller = "master\0" and name = "interrupt-controller\0"
-    intc = _adt_node('interrupt-controller', (
+    intc = _adt_node('intc', (
         ('compatible', b'arm,gic-v3\0'),
         ('interrupt-controller', b'master\0'),
         ('#interrupt-cells', struct.pack('<I', 4)),
-        ('reg', struct.pack('<4Q', 0x17a00000, 0x10000, 0x17a60000, 0x100000)),
+        # Child offsets inside the arm-io bus: ranges maps 0x0 -> 0x17000000,
+        # so GICD/GICR land at 0x17a00000 / 0x17a60000 on the parent bus.
+        ('reg', struct.pack('<4Q', 0x00a00000, 0x10000, 0x00a60000, 0x100000)),
         ('redistributor-stride', struct.pack('<Q', 0x20000)),
         ('virtual-timer-intid', struct.pack('<I', 19)),
         ('ipi-transport', b'sgi-sysreg\0'),
@@ -280,11 +321,13 @@ def make_nabu_adt(path: Path, *, dram_base: int = 0xc0000000,
     zap = _adt_node('zap-shader', (
         ('reg', struct.pack('<QQ', 0x98f15000, 0x2000)),
     ))
-    arm_io_children = [intc, ufs, ufs_smmu, zap]
+    # First boot stays off the storage and GPU blocks: the strict ADT contract
+    # forbids ufs/gpu/adreno/kgsl nodes until their drivers are qualified.
+    arm_io_children = [intc]
     if native_gop_display:
         arm_io_children.append(_adt_node('native-gop', (
             ('device_type', b'display-subsystem\0'),
-            ('compatible', b'sheng,gop-framebuffer\0'),
+            ('compatible', b'nabu,gop-framebuffer\0'),
             ('reg', struct.pack('<QQ', 0x9c000000, 0x01000000)),
             ('width', struct.pack('<I', 1600)),
             ('height', struct.pack('<I', 2560)),
@@ -294,7 +337,7 @@ def make_nabu_adt(path: Path, *, dram_base: int = 0xc0000000,
         ('compatible', b'simple-bus\0'),
         ('#address-cells', struct.pack('<I', 2)),
         ('#size-cells', struct.pack('<I', 2)),
-        ('ranges', struct.pack('<3Q', 0x17000000, 0x17000000, 0x08000000)),
+        ('ranges', struct.pack('<3Q', 0x0, 0x17000000, 0x08000000)),
     ), tuple(arm_io_children))
     tree = _adt_node('device-tree', (
         ('model', b'Xiaomi Pad 5\0'),
@@ -303,6 +346,7 @@ def make_nabu_adt(path: Path, *, dram_base: int = 0xc0000000,
         ('#size-cells', struct.pack('<I', 2)),
     ), (
         _adt_node('chosen', tuple(chosen_props)),
+        _adt_node('defaults', (('model', b'Xiaomi Pad 5\0'), ('target-type', b'Mac\0'))),
         _adt_node('options'),
         _adt_node('product', (
             ('model', b'xiaomi,nabu\0'),
