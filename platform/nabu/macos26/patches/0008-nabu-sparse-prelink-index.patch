@@ -1,0 +1,37 @@
+diff --git a/osfmk/kern/kalloc.c b/osfmk/kern/kalloc.c
+index 9261d06..aa76736 100644
+--- a/osfmk/kern/kalloc.c
++++ b/osfmk/kern/kalloc.c
+@@ -1026,9 +1026,13 @@ kalloc_type_view_copy(
+ 	}
+ }
+ 
+-#if SHENG
++#if SHENG || defined(ARM64_BOARD_CONFIG_NABU)
+ __attribute__((used)) const uint32_t sheng_security_prelink_version = 1;
+ __attribute__((used)) const uint32_t sheng_native_boot_prelink_version = 1;
++#if defined(ARM64_BOARD_CONFIG_NABU)
++/* Sparse native prelink ABI marker consumed by kits/NativePrelink. */
++__attribute__((used)) const uint32_t kalloc_sparse_prelink_index_version = 1;
++#endif
+ #endif
+ 
+ __startup_func
+@@ -1114,7 +1118,7 @@ kalloc_type_view_parse(const kalloc_type_variant_t type)
+ 		cur = prelink_sect->addr;
+ 		end = prelink_sect->addr + prelink_sect->size;
+ 
+-#if SHENG
++#if SHENG || defined(ARM64_BOARD_CONFIG_NABU)
+ 		kernel_section_t *headers = getsectbynamefromheader(
+ 			xnu_mh, kPrelinkTextSegment, "__macho_list");
+ 		uint64_t header_index = 0, header_count = 0;
+@@ -1214,7 +1218,7 @@ kalloc_type_view_parse(const kalloc_type_variant_t type)
+ 				break;
+ 			}
+ 
+-#if SHENG
++#if SHENG || defined(ARM64_BOARD_CONFIG_NABU)
+ 			if (!headers)
+ #endif
+ 			cur += ((kext_text_sz + (KEXT_ALIGN_BYTES - 1)) & (~KEXT_ALIGN_MASK));
