@@ -356,7 +356,7 @@ def prepare() -> dict:
                     'pexpert/arm/pe_sheng_framebuffer.h', 'pexpert/arm/pe_sheng_smp_log.h',
                     'pexpert/arm/pe_sheng_qr_encoder.h', 'pexpert/arm/pe_sheng_qr_runtime.h',
                     'pexpert/arm/qrcodegen.h'], check=True)
-    record = dict(xnu='12377.121.6', darwin='25.5.0', build='25F71', machine='SHENG',
+    record = dict(xnu='12377.121.6', darwin='25.5.0', build='25F71', machine=MACHINE,
                   deployment='macOS 26.5', sources=identities,
                   architecture=ARCH, native_el1_pac=ARCH == 'arm64e',
                   el0_pac_lifecycle_qualified=False,
@@ -548,7 +548,7 @@ def compile_sources(args, record: dict) -> None:
             record.update(source_archive_built=True, source_archive_sha256=sha(archive),
                           source_archive_bytes=archive.stat().st_size)
         save(record)
-    recipe = OUT / 'obj/DEVELOPMENT_ARM64_SHENG/iokit/DEVELOPMENT/IOPlatformExpert.cpo.json'
+    recipe = OUT / f'obj/DEVELOPMENT_ARM64_{MACHINE}/iokit/DEVELOPMENT/IOPlatformExpert.cpo.json'
     if not recipe.is_file():
         record['build_failures'] = failures + ['no IOPlatformExpert compilation record was produced']
         save(record)
@@ -668,15 +668,15 @@ def link_kernel(args, record, common, sdk, source, env):
                   'LD_KERNEL_ARCHIVES=' + ' '.join(archives),
                   'NATIVE_KERNEL_LINK_FLAGS=' + native_link_flags,
                   'DO_CTFMERGE=0'], 'kernel-link', record, env=env)
-    binary = OUT / 'obj/DEVELOPMENT_ARM64_SHENG/kernel.development.sheng.unstripped.noctf'
+    binary = OUT / f'obj/DEVELOPMENT_ARM64_{MACHINE}/kernel.development.{BOARD}.unstripped.noctf'
     if not binary.exists() or struct.unpack_from('<I', binary.read_bytes(), 12)[0] != 2:
         raise ValueError('the native linker did not produce an executable Mach-O kernel')
     kernel_bytes = binary.read_bytes()
     for personality in (b"'IOClass'         = ArmDTPlatform;",
                         b"'IOClass'         = ArmCpu;",
-                        b"'IONameMatch'     = ( 'device-tree', 'xiaomi,sheng' );"):
+                        b"'IONameMatch'     = ( 'device-tree', 'xiaomi," + BOARD.encode() + b"' );"):
         if personality not in kernel_bytes:
-            raise ValueError('linked kernel omitted a required SHENG platform personality')
+            raise ValueError('linked kernel omitted a required ' + MACHINE + ' platform personality')
     record['native_platform_personalities_compiled'] = True
     if ARCH == 'arm64e':
         from native_macho import native_chained_fixups
