@@ -1,0 +1,11 @@
+--- a/pexpert/pexpert/arm64/NABU.h
++++ b/pexpert/pexpert/arm64/NABU.h
+@@ -7,6 +7,8 @@
+ #define NO_MONITOR                       1
+ #define NO_ECORE                         1
+ #define ARM_ARCH_TIMER
++/* macOS arm64 builds with the 16K granule; the pmap VA layout asserts depend on it. */
++#define __ARM_16K_PG__                   1
+ #define __ARM_ARCH__                     8
+ #define __ARM_VMSA__                     8
+ #define __ARM_VFP__                      4
