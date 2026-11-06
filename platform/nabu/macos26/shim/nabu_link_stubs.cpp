@@ -12,6 +12,10 @@ extern "C" {
 
 typedef unsigned int nabu_boolean_t;
 
+nabu_boolean_t ml_device_is_prod_fused(void);
+bool pmap_pending_preemption(void);
+void tb_transport_startup(void);
+
 nabu_boolean_t
 ml_device_is_prod_fused(void)
 {
