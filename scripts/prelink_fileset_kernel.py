@@ -24,7 +24,12 @@ import hashlib
 import json
 import plistlib
 import struct
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import kc_chains
+
 
 MH_MAGIC_64 = 0xfeedfacf
 LC_SEGMENT_64 = 0x19
@@ -142,7 +147,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--kernel', required=True, type=Path)
     parser.add_argument('--kernelcache', required=True, type=Path)
-    parser.add_argument('--root', required=True, action='append')
+    parser.add_argument('--root', action='append', default=[])
+    parser.add_argument('--all', action='store_true',
+                        help='prelink every component declared by __PRELINK_INFO')
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--report', required=True, type=Path)
     parser.add_argument('--base', type=lambda v: int(v, 0), default=None,
@@ -157,7 +164,8 @@ def main():
     if top['filetype'] != 12:
         raise ValueError('kernel cache is not a file set (filetype %d)' % top['filetype'])
 
-    info = next(s for s in segments(kc, top) if s['name'] == '__PRELINK_INFO')
+    top_segments = segments(kc, top)
+    info = next(s for s in top_segments if s['name'] == '__PRELINK_INFO')
     blob = kc[info['fileoff']:info['fileoff'] + info['filesize']]
     closing = blob.find(b'</plist>')
     if closing != -1:
@@ -167,7 +175,13 @@ def main():
                 for entry in metadata['_PrelinkInfoDictionary']}
     located = {entry['entry_id']: entry for entry in fileset(kc, top)}
 
-    selected, interfaces, pending = [], set(), list(args.root)
+    roots = list(args.root)
+    if args.all:
+        roots = sorted(identifier for identifier, entry in declared.items()
+                       if entry.get('OSKernelResource') is not True)
+    if not roots:
+        raise SystemExit('no roots selected')
+    selected, interfaces, pending = [], set(), list(roots)
     while pending:
         identifier = pending.pop()
         if identifier in selected or identifier in interfaces:
@@ -181,11 +195,12 @@ def main():
         selected.append(identifier)
         pending.extend(entry.get('OSBundleLibraries') or {})
 
-    modules = {}
+    modules, codeless = {}, []
     for identifier in selected:
         found = located.get(identifier)
         if found is None:
-            raise ValueError('component %s missing from the file set' % identifier)
+            codeless.append(identifier)   # properties-only kext: no image in the collection
+            continue
         image = commands(kc, found['fileoff'])
         segs = segments(kc, image)
         modules[identifier] = dict(image=image, segments=segs, fileoff=found['fileoff'],
@@ -198,7 +213,7 @@ def main():
     base = args.base if args.base is not None else align(native_end, 0x100000)
 
     output = bytearray(native_data)
-    placements, emitted = {}, []
+    placements, emitted, ranges = {}, [], []
 
     def append(name, va, blob, protection, section_name):
         nonlocal output
@@ -222,11 +237,14 @@ def main():
     cursor = base
     for coalesced_name, (component_name, protection) in COALESCED.items():
         blob = bytearray()
-        for identifier in selected:
+        for identifier in modules:
             for segment in modules[identifier]['segments']:
                 if segment['name'] != component_name or not segment['filesize']:
                     continue
                 placements.setdefault(identifier, {})[segment['name']] = len(blob)
+                ranges.append(dict(component=identifier, segment=segment['name'],
+                                   old_va=segment['vmaddr'], size=segment['filesize'],
+                                   offset_in_blob=len(blob), coalesced=coalesced_name))
                 blob.extend(kc[segment['fileoff']:segment['fileoff'] + segment['filesize']])
                 blob.extend(bytes(align(len(blob)) - len(blob)))
         if not blob:
@@ -235,8 +253,42 @@ def main():
                         '__macho_list' if coalesced_name == '__PRELINK_TEXT' else '__const')
         cursor = placed['va'] + placed['size']
 
+    # Resolve each copied segment's destination address/file offset.
+    for record in ranges:
+        placed = next(e for e in emitted if e['segment'] == record['coalesced'])
+        record['new_va'] = placed['va'] + record['offset_in_blob']
+        record['new_off'] = placed['fileoff'] + record['offset_in_blob']
+
+    chain = kc_chains.chain_header(kc, top['commands'])
+    base = kc_chains.image_base(top_segments)
+    rewrites, external, chain_slots = [], {}, 0
+    if chain is not None:
+        for slot in kc_chains.walk_slots(kc, chain, top_segments):
+            chain_slots += 1
+            host = next((r for r in ranges
+                         if r['old_va'] <= slot['va'] < r['old_va'] + r['size'] - 7), None)
+            if host is None:
+                continue
+            absolute = base + slot['target']
+            target = next((r for r in ranges
+                           if r['old_va'] <= absolute < r['old_va'] + r['size']), None)
+            if target is not None:
+                value = target['new_va'] + (absolute - target['old_va'])
+                kind = 'component'
+            else:
+                value = absolute
+                kind = 'external'
+                owner = next((s['name'] for s in top_segments
+                              if s['vmaddr'] <= absolute < s['vmaddr'] + s['vmsize']), 'unmapped')
+                external[owner] = external.get(owner, 0) + 1
+            offset = host['new_off'] + (slot['va'] - host['old_va'])
+            rewrites.append((offset, value, kind))
+
+    for offset, value, _ in rewrites:
+        struct.pack_into('<Q', output, offset, value)
+
     header_index, headers = [], []
-    for identifier in selected:
+    for identifier in modules:
         segment_offsets = placements.get(identifier, {})
         text = modules[identifier]['segments']
         first = next((s for s in text if s['name'] in segment_offsets), None)
@@ -261,18 +313,24 @@ def main():
     report = dict(
         native=str(args.kernel), native_sha256=hashlib.sha256(native_data).hexdigest(),
         kernelcache=str(args.kernelcache), kernelcache_sha256=hashlib.sha256(kc).hexdigest(),
-        roots=args.root, components=len(selected), kernel_interfaces=sorted(interfaces),
-        component_names=sorted(selected), component_text_bytes=total_text,
+        roots=roots, components=len(selected), kernel_interfaces=sorted(interfaces),
+        component_names=sorted(selected), codeless=sorted(codeless), component_text_bytes=total_text,
         emitted_segments=emitted, header_index=header_index,
         base=hex(base), output=str(args.output),
         output_sha256=hashlib.sha256(output).hexdigest(), output_bytes=len(output),
-        pointer_slots_total=sum(m['fixups']['slots'] for m in modules.values() if m['fixups']),
-        stage='layout-only', pointers_rebound=False, loadable=False)
+        pointer_slots_seen=chain_slots,
+        kernelcache_base=hex(base), chain_format=chain['version'] if chain else None,
+        copied_segments=len(ranges),
+        pointer_rewrites=len(rewrites),
+        pointer_rewrites_component=sum(1 for _, _, k in rewrites if k == 'component'),
+        pointer_rewrites_external=sum(1 for _, _, k in rewrites if k == 'external'),
+        external_targets=dict(sorted(external.items(), key=lambda item: -item[1])[:8]),
+        stage='layout+rebind', pointers_rebound=True, loadable=False)
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(json.dumps(report, indent=2) + '\n')
     print(json.dumps({key: report[key] for key in (
-        'components', 'component_text_bytes', 'emitted_segments', 'header_index',
-        'pointer_slots_total', 'output_bytes', 'loadable')}, indent=2))
+        'components', 'component_text_bytes', 'copied_segments', 'header_index',
+        'pointer_rewrites', 'pointer_rewrites_external', 'output_bytes', 'loadable')}, indent=2))
 
 
 if __name__ == '__main__':

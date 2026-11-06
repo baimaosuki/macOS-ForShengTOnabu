@@ -222,3 +222,37 @@ __PRELINK_DATA   va 0xfffffe0008daf000  size 86,016
 3. **kmod 元数据**：组件的 `_PrelinkKmodInfo` 结构（start/stop、header 地址）也要按新
    布局重写，否则 kext 加载链表断开。
 4. 之后才轮到 `__PRELINK_INFO` plist 重写（新 VA 下的 kext 表）。
+
+## 07:25 更新：阶段二（指针重绑）实测数据
+
+`scripts/kc_chains.py` 解出顶层链式修复的真实布局：
+
+```
+LC_DYLD_CHAINED_FIXUPS 只有顶层 1 个；格式 8（DYLD_CHAINED_PTR_64_KERNEL_CACHE）
+槽字：target:30 | cacheLevel:2 | diversity:16 | addrDiv:1 | key:2 | next:12 | isAuth:1
+target 是相对镜像基址 0xfffffe0007004000 的偏移
+全部 982,911 个槽的 target 都落在本镜像顶层段内（0 个越界）→ 基址假设成立
+```
+顶层段：`__TEXT 0x7004000/32K`、`__PRELINK_TEXT 0x700c000/12.75M`、`__DATA_CONST 0x7ccc000/12.4M`、
+`__TEXT_EXEC 0x88a0000/57.8M`、`__PRELINK_INFO 0xbfcc000/4.29M`、`__DATA 0xc3e4000/3.8M`、
+`__LINKEDIT 0xc788000/24.8M`。
+
+全量（345 个有镜像的 kext，另 26 个 codeless 只有 plist）：
+```
+component_text_bytes      59,873,163
+copied_segments          1,377
+pointer_slots_seen        982,911
+pointer_rewrites          916,450（其余 66,461 个槽不在被搬运的段内）
+  ├ 指向被搬运组件 → 重定位   250,759
+  └ 指向未搬运区间   665,691  （__TEXT_EXEC 658,265 / __DATA 5,120 / __DATA_CONST 2,303）
+输出 /tmp/nabu-full.macho  99,581,952 B  sha256 3f207388f3b6bb21…
+耗时 2m47s，稀疏头索引 345 条
+```
+最小集（apfs + AMFI，9 组件）：24,848 槽重写，内部 11,859、外部 12,989。
+
+结论：**内部引用重定位已闭环**（组件→组件全部改到新 VA）。剩余 66 万“外部”目标不是枚举不足
+（346 个子镜像的 `__TEXT/__TEXT_EXEC/__DATA_CONST/__DATA` 已全部纳入、区间零重叠），而是目标落在
+子镜像未被搬运的段里（`__LINKEDIT`/`__KLD`/`__PPLTEXT`/`__LASTDATA_CONST` 等，共 23 段/镜像），
+以及指向原生内核符号的引用（内核符号地址由源码重建决定，不能沿用缓存里的旧地址）。
+下一轮做两件事：①把每镜像全部 23 段按属性并入对应 coalesced 段；②对落在原生内核符号表的
+目标改用 `kernel.development.nabu` 的符号解析结果（名称 → 新地址）。
