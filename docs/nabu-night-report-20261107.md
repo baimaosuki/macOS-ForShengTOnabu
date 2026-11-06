@@ -180,3 +180,52 @@ stage1 生效参数：-v debug=0x14e keepsyms=1 cpus=1 armcpu-self-ipi=1 nabu-vc
 
 > 注意：fastboot 路线用的 boot-args 来自 stage1 里的 C 字符串，**不是** NRAM 里的
 > `unixnu.toml`（后者只对 EFI/UniXNU 路线生效）。今天两者已统一为同一组参数。
+
+---
+
+## 9. QEMU 预跑 stage1（round 8 新增，真机前唯一一次运行时验证）
+
+装好 `qemu-system-aarch64 8.2.2` 后，把 fastboot 路线真正执行的那段裸机代码搬进
+`-M virt` 里跑了一遍。给 `nabu_boot_common.h` 加了 `#ifdef NABU_QEMU_SERIAL`
+诊断镜像（把屏显文字同时写到 PL011），生产镜像编译结果逐字节不变
+（stage1 仍 7,232 B / `a8eac3b2…`，boot image 仍 `d9557c9e…`）。
+
+复跑命令：`python3 scripts/qemu_stage1_preflight.py`（自动编诊断版、把 NRAM 放到
+`0x81000000`、跑 15 s、解析串口、判定契约）。
+
+### 9.1 结果：stage1 契约 PASS
+
+```
+DARWINBOOT NABU SM8150 - FASTBOOT RAM LOADER (macOS 26.5 / 25F71)
+EL:                  0x0000000000000001      ← 以 EL1h 进入
+MIDR:                0x00000000412fd471      ← QEMU cortex-a710
+MPIDR:               0x0000000080000000
+SCTLR:               0x0000000030c50838      ← 入口时 MMU 状态，随后被 DarwinEnter 关闭
+FDT PA:              0x0000000048000000
+NRAM PA:             0x0000000081000000      ← Bank0 扫描命中我们放的容器
+KERNEL BYTES:        0x00000000017a3880      ← 24,787,072，与内核文件字节数完全一致
+HANDOFF -> ENTRY PA: 0x00000000c059b488      ← 0xc0000000 + (0x759f488 - 0x7004000)
+ARGS PA:             0x00000000c18c0000      ← 窗口内 args（span 0x18c0000 对齐）
+```
+
+这一段证明：NRAM 定位、Mach-O 头校验、10 个段逐个搬进 `0xc0000000` 窗口、
+`DarwinBootArgs`（0x480 字节）构造、`DeviceTree` 指向窗口内 ADT、以及
+`DarwinEnter` 的 cache 维护 + 关 MMU + 跳转，全部按设计执行。
+
+### 9.2 跳转之后：XNU 已经跑在虚拟地址上
+
+QEMU 记录到第一条异常时 `ELR = 0xfffffe0007bdc684`——这是**内核虚拟地址**
+（`__TEXT_EXEC` 内），说明 XNU 的 `__start` 已经完成页表建立、把 PC 切到
+`0xfffffe00…` 空间后继续执行了十几 MB 才停下（该处指令是普通的
+`sub sp, sp, #0xd0` 函数序言，说明是 QEMU 的 CPU 模型在更早的指令上抛
+EC=0 异常，属 virt/A710 模拟缺口，不是寻址错误）。
+
+也就是说 `VirtualBase = 0xfffffe0007004000` / `PhysicalBase = 0xc0000000` 这套
+重定位在运行时是成立的；真机上 SM8150 的 A76/A55 与 QEMU 的 A710 模型不同，
+这一步不能作为真机结论，但足以排除“交接参数写错导致第一步就崩”的可能。
+
+### 9.3 一个待观察项
+
+`MIDR 0x412fd471`（Cortex-A710）是 QEMU 的 CPU；真机是 A76（0x414fd0b1 一族）。
+若真机在同一位置停下，说明是内核里某条 armv8.2 之外的指令；届时用
+`fastboot boot` 的屏幕输出即可区分。

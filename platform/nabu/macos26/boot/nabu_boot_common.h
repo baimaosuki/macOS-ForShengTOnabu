@@ -49,6 +49,18 @@ static inline void nabu_memcpy(void *dst, const void *src, size_t n)
     }
 }
 
+#ifdef NABU_QEMU_SERIAL
+// Diagnostic-only path: mirror console text to the QEMU virt PL011 so the
+// stage-1 banner can be captured before any real hardware is available.
+#define NABU_QEMU_PL011_BASE 0x09000000ULL
+
+static inline void nabu_serial_putc(char c)
+{
+    volatile uint8_t *uart = (volatile uint8_t *)(uintptr_t)NABU_QEMU_PL011_BASE;
+    uart[0] = (uint8_t)c;
+}
+#endif
+
 static inline void nabu_fb_fill_rect(uint32_t x0, uint32_t y0, uint32_t w, uint32_t h, uint32_t bgra)
 {
     volatile uint32_t *fb = (volatile uint32_t *)(uintptr_t)NABU_GOP_PHYS_BASE;
@@ -66,6 +78,9 @@ static inline void nabu_fb_draw_char(uint32_t x0, uint32_t y0, char c, uint32_t 
     if (c < 32 || c > 127) {
         c = '?';
     }
+#ifdef NABU_QEMU_SERIAL
+    nabu_serial_putc(c);
+#endif
     const uint64_t glyph = kNabuGlyphFont[(unsigned char)c - 32U];
     volatile uint32_t *fb = (volatile uint32_t *)(uintptr_t)NABU_GOP_PHYS_BASE;
     const uint32_t stride_px = NABU_GOP_PANEL_STRIDE / 4U;
@@ -95,6 +110,9 @@ static inline void nabu_fb_draw_char(uint32_t x0, uint32_t y0, char c, uint32_t 
 static inline uint32_t nabu_fb_draw_string(uint32_t x, uint32_t y, const char *s, uint32_t fg, uint32_t bg, uint32_t scale)
 {
     const uint32_t adv = 6U * scale;
+#ifdef NABU_QEMU_SERIAL
+    nabu_serial_putc('\n');
+#endif
     while (*s) {
         nabu_fb_draw_char(x, y, *s++, fg, bg, scale);
         x += adv;
