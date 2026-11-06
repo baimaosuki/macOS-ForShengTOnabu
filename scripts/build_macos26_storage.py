@@ -210,3 +210,60 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
                 sparse_disk_header_sha256=hashlib.sha256((upstream.parent.parent / 'NativeRamBlock/SparseDisk.h').read_bytes()).hexdigest())
     (destination / 'build.json').write_text(json.dumps(evidence, indent=2) + '\n')
     record['storage_driver' if transport == 'virtio' else 'ufs_driver'] = evidence
+
+
+def nabu_ufs_contract(root: Path | None = None) -> dict:
+    """Return the verified Xiaomi Pad 5 (nabu / SM8150) UFS and NABULOG2 storage contract."""
+    from nabu_log_volume import CONTRACT as nabulog, validate_contract as validate_nabulog
+    base = root or Path(__file__).resolve().parents[1]
+    validate_nabulog(nabulog)
+    baseline = json.loads((base / 'config/nabu-baseline.json').read_text())
+    ufs = baseline['ufs']
+    storage_dir = base / 'platform/nabu/macos26/storage'
+    log_dir = base / 'platform/nabu/macos26/log'
+    headers = ('NabuBoard.h', 'NabuUfsResources.h', 'NabuUfsHostSafety.h', 'NabuUfsQueue.h', 'NabuUfsService.h')
+    log_headers = ('NabuLogFormat.h', 'NabuLogCore.h', 'NabuLogVolume.h', 'NabuLogUfs.h', 'NabuLogWatch.h')
+    return dict(
+        board='nabu',
+        soc='SM8150',
+        compatible=ufs['compatible'],
+        hc_base=int(ufs['hc_base'], 16),
+        hc_bytes=int(ufs['hc_bytes'], 16),
+        hc_map_bytes=int(ufs['hc_map_bytes'], 16),
+        hc_resource_bytes=int(ufs['hc_resource_bytes'], 16),
+        gcc_base=int(ufs['gcc_base'], 16),
+        gcc_ufs_window=int(ufs['gcc_ufs_window'], 16),
+        gcc_ufs_bytes=int(ufs['gcc_ufs_bytes'], 16),
+        smmu_base=int(ufs['smmu_base'], 16),
+        smmu_bytes=int(ufs['smmu_bytes'], 16),
+        smmu_resource_bytes=int(ufs['smmu_resource_bytes'], 16),
+        stream_id=int(ufs['stream_id'], 16),
+        logical_block_bytes=ufs['logical_block_bytes'],
+        writes_allowed=False,
+        windows=dict(
+            unallocated_first_lba=ufs['unallocated_first_lba'],
+            unallocated_last_lba=ufs['unallocated_last_lba'],
+            os_lba=ufs['os_lba'],
+            os_sectors_512=ufs['os_sectors_512'],
+            systemos_lba=ufs['systemos_lba'],
+            systemos_sectors_512=ufs['systemos_sectors_512'],
+            boot_args=(
+                'native-ufs-root=1 '
+                f'native-ufs-os-lba={ufs["os_lba"]} '
+                f'native-ufs-os-sectors={ufs["os_sectors_512"]} '
+                f'native-ufs-systemos-lba={ufs["systemos_lba"]} '
+                f'native-ufs-systemos-sectors={ufs["systemos_sectors_512"]}'
+            ),
+        ),
+        esp_log=dict(
+            contract=nabulog,
+            headers_sha256={name: hashlib.sha256((log_dir / name).read_bytes()).hexdigest()
+                            for name in log_headers},
+        ),
+        storage_headers_sha256={name: hashlib.sha256((storage_dir / name).read_bytes()).hexdigest()
+                                for name in headers},
+        board_patch_sha256=hashlib.sha256(
+            (base / 'patches/UniXNU-nabu/nabu-nativeufs-board.patch').read_bytes()
+        ).hexdigest(),
+    )
+

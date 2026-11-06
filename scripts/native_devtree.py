@@ -194,3 +194,130 @@ def configure_native_text_state(path: Path, *, development_root: bool = False,
             or native_gop_display and (arm_io != 1 or gop_nodes != 1)):
         raise ValueError('requires one complete generated /chosen node')
     path.write_bytes(result)
+
+
+def _adt_node(name: str, properties: tuple[tuple[str, bytes], ...] = (),
+              children: tuple[bytes, ...] = ()) -> bytes:
+    props = (('name', name.encode('ascii') + b'\0'), *properties)
+    encoded = bytearray(struct.pack('<II', len(props), len(children)))
+    for key, value in props:
+        encoded.extend(struct.pack('<32sI', key.encode('ascii'), len(value)) +
+                       value + bytes(-len(value) % 4))
+    for child in children:
+        encoded.extend(child)
+    return bytes(encoded)
+
+
+def make_nabu_adt(path: Path, *, dram_base: int = 0xc0000000,
+                  dram_size: int = 0x140000000,
+                  owned_memory_size: int = 0x40000000,
+                  os_environment: str | None = None,
+                  panic_log: bool = True,
+                  native_gop_display: bool = False) -> None:
+    """Emit the Xiaomi Pad 5 (nabu / SM8150) Apple DeviceTree (.adt)."""
+    # Nabu has 3 physical DRAM banks separated by the TrustZone hole 0xb9900000..0xc0000000.
+    # XNU owns the upper contiguous 5 GiB window [0xc0000000, 0x200000000), while stock UEFI GOP
+    # scanout remains in Bank 0 at 0x9c000000 (1600x2560, stride 6400).
+    if dram_base < 0xc0000000 or dram_base + dram_size > 0x200000000:
+        raise ValueError('nabu XNU DRAM window must avoid the 0xb9900000..0xc0000000 TrustZone hole')
+    if not 0 < owned_memory_size <= dram_size:
+        raise ValueError('nabu darwinboot-memory-size must lie within the XNU DRAM window')
+    chosen_props = [
+        ('dram-base', struct.pack('<Q', dram_base)),
+        ('dram-size', struct.pack('<Q', dram_size)),
+        ('darwinboot-memory-size', struct.pack('<Q', owned_memory_size)),
+        ('nabu-dram-banks', struct.pack('<6Q',
+            0x80000000, 0x3cc00000,
+            0xc0000000, 0x80000000,
+            0x140000000, 0xc0000000)),
+        ('trustzone-hole', struct.pack('<QQ', 0xb9900000, 0x06700000)),
+        ('framebuffer-base', struct.pack('<Q', 0x9c000000)),
+        ('framebuffer-size', struct.pack('<Q', 0x01000000)),
+        ('framebuffer-width', struct.pack('<I', 1600)),
+        ('framebuffer-height', struct.pack('<I', 2560)),
+        ('framebuffer-depth', struct.pack('<I', 32)),
+        ('framebuffer-stride', struct.pack('<I', 6400)),
+        ('kernel-ctrr-to-be-enabled', struct.pack('<I', 0)),
+    ]
+    if os_environment:
+        chosen_props.append(('osenvironment', os_environment.encode('ascii') + b'\0'))
+    if panic_log:
+        chosen_props.append(('embedded-panic-log-size', struct.pack('<I', 0x80000)))
+    cpus = []
+    for index in range(8):
+        affinity = index * 0x100
+        compat = b'arm,cortex-a55\0' if index < 4 else b'arm,cortex-a76\0'
+        cpus.append(_adt_node(f'cpu{index}', (
+            ('device_type', b'cpu\0'),
+            ('compatible', compat),
+            ('reg', struct.pack('<Q', affinity)),
+            ('cpu-id', struct.pack('<I', index)),
+            ('enable-method', b'psci\0'),
+        )))
+    # XNU ArmDTPlatform requires interrupt-controller = "master\0" and name = "interrupt-controller\0"
+    intc = _adt_node('interrupt-controller', (
+        ('compatible', b'arm,gic-v3\0'),
+        ('interrupt-controller', b'master\0'),
+        ('#interrupt-cells', struct.pack('<I', 4)),
+        ('reg', struct.pack('<4Q', 0x17a00000, 0x10000, 0x17a60000, 0x100000)),
+        ('redistributor-stride', struct.pack('<Q', 0x20000)),
+        ('virtual-timer-intid', struct.pack('<I', 19)),
+        ('ipi-transport', b'sgi-sysreg\0'),
+    ))
+    ufs = _adt_node('ufs', (
+        ('compatible', b'qcom,sm8150-ufshc\0'),
+        ('reg', struct.pack('<QQ', 0x01d84000, 0x2500)),
+        ('nabu,ufs-hc', struct.pack('<QQ', 0x01d84000, 0x2500)),
+        ('nabu,ufs-gcc', struct.pack('<QQ', 0x00177000, 0x1000)),
+        ('nabu,ufs-smmu', struct.pack('<QQ', 0x15000000, 0x100000)),
+        ('nabu,ufs-stream', struct.pack('<I', 0x300)),
+        ('nabu,ufs-block-bytes', struct.pack('<I', 4096)),
+    ))
+    ufs_smmu = _adt_node('ufs-smmu', (
+        ('compatible', b'qcom,sm8150-smmu\0arm,smmu-v2\0'),
+        ('reg', struct.pack('<QQ', 0x15000000, 0x100000)),
+    ))
+    zap = _adt_node('zap-shader', (
+        ('reg', struct.pack('<QQ', 0x98f15000, 0x2000)),
+    ))
+    arm_io_children = [intc, ufs, ufs_smmu, zap]
+    if native_gop_display:
+        arm_io_children.append(_adt_node('native-gop', (
+            ('device_type', b'display-subsystem\0'),
+            ('compatible', b'sheng,gop-framebuffer\0'),
+            ('reg', struct.pack('<QQ', 0x9c000000, 0x01000000)),
+            ('width', struct.pack('<I', 1600)),
+            ('height', struct.pack('<I', 2560)),
+            ('stride', struct.pack('<I', 6400)),
+        )))
+    arm_io = _adt_node('arm-io', (
+        ('compatible', b'simple-bus\0'),
+        ('#address-cells', struct.pack('<I', 2)),
+        ('#size-cells', struct.pack('<I', 2)),
+        ('ranges', struct.pack('<3Q', 0x17000000, 0x17000000, 0x08000000)),
+    ), tuple(arm_io_children))
+    tree = _adt_node('device-tree', (
+        ('model', b'Xiaomi Pad 5\0'),
+        ('compatible', b'xiaomi,nabu\0qcom,sm8150\0'),
+        ('#address-cells', struct.pack('<I', 2)),
+        ('#size-cells', struct.pack('<I', 2)),
+    ), (
+        _adt_node('chosen', tuple(chosen_props)),
+        _adt_node('options'),
+        _adt_node('product', (
+            ('model', b'xiaomi,nabu\0'),
+            ('soc-name', b'sm8150\0'),
+        )),
+        _adt_node('psci', (
+            ('compatible', b'arm,psci-1.0\0'),
+            ('method', b'smc\0'),
+        )),
+        _adt_node('cpus', (
+            ('#address-cells', struct.pack('<I', 2)),
+            ('#size-cells', struct.pack('<I', 0)),
+            ('timebase-frequency', struct.pack('<I', 19200000)),
+        ), tuple(cpus)),
+        arm_io,
+    ))
+    path.write_bytes(tree)
+

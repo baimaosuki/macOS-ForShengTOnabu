@@ -113,6 +113,20 @@
       "url": "https://github.com/LongSoft/UEFITool.git",
       "commit": "dac91b26733ca21cb204e41614c1b8c81cc50860",
       "group": "feeds"
+    },
+    {
+      "name": "nabu",
+      "path": "UniXNU-nabu",
+      "url": "https://github.com/zzweiqing/UniXNU-nabu.git",
+      "commit": "54b4f98457f8e9e232cc0a077c20d08d0b2f0ac9",
+      "group": "nabu"
+    },
+    {
+      "name": "sm8150",
+      "path": "UniXNU-sm8150-common",
+      "url": "https://github.com/zzweiqing/UniXNU-sm8150-common.git",
+      "commit": "f363dcda920101a99e440ce3e8b68849122a3c0a",
+      "group": "nabu"
     }
   ]
 }

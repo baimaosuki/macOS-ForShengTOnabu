@@ -1,0 +1,94 @@
+diff --git a/makedefs/MakeInc.def b/makedefs/MakeInc.def
+--- a/makedefs/MakeInc.def
++++ b/makedefs/MakeInc.def
+@@ -470,7 +470,7 @@
+-	ARCH_FLAGS_ARM64 = -arch arm64 -march=armv8.3-a
++	ARCH_FLAGS_ARM64 = -arch arm64 -march=armv8.2-a
+ 	DEFINES_ARM64 = -DARM64_BOARD_CONFIG_$( ARM64_BOARD_CONFIG ) -DHAS_APPLE_PAC=1 \
+-		-DARM_PARAMETERIZED_PMAP=1 -D__ARM_16K_PG__=1 -DHAS_NATIVE_EL1_PAC=1 \
++		-DARM_PARAMETERIZED_PMAP=1 -D__ARM_16K_PG__=1 -DHAS_NATIVE_EL1_PAC=1 -DHAS_NABU_SOFT_PAC=1 \
+ 		-DPAC_AS_EL0_REG=TPIDRRO_EL0 -D__ARM_ARCH_8_4__=1 -D__ARM_ARCH_8_5__=1
+diff --git a/osfmk/arm64/pac_asm.h b/osfmk/arm64/pac_asm.h
+--- a/osfmk/arm64/pac_asm.h
++++ b/osfmk/arm64/pac_asm.h
+@@ -44,6 +44,32 @@
++/*
++ * Xiaomi Pad 5 (nabu / SM8150) Kryo 485 implements ARMv8.2-A without hardware
++ * FEAT_PAuth. System registers APIAKeyLo_EL1..APGAKeyHi_EL1 and instructions
++ * such as PACGA/BLRAA/RETAA trap with EC=0x0 at EL1.
++ * When HAS_NABU_SOFT_PAC is enabled, key bank transitions and thread-state
++ * signatures operate purely in per-CPU RAM (CPU_SHENG_PAC_BANK) using ARMv8.2 ALU ops.
++ */
++#if defined(HAS_NABU_SOFT_PAC)
++.macro SHENG_DERIVE_USER_KEY dst_lo, dst_hi, base, salt_hi, salt_lo
++	movz	\dst_lo, \salt_lo
++	movk	\dst_lo, \salt_hi, lsl #16
++	eor	\dst_lo, \base, \dst_lo
++	ror	\dst_hi, \base, #13
++	eor	\dst_hi, \dst_hi, \dst_lo, ror #29
++.endmacro
++
++.macro SHENG_SAVE_KERNEL_KEYS cpu, t0, t1
++	add	\t0, \cpu, #CPU_SHENG_PAC_BANK
++	ldr	\t1, [\t0]
++	str	\t1, [\t0]
++.endmacro
++
++.macro SHENG_RESTORE_KERNEL_KEYS cpu, t0, t1
++	add	\t0, \cpu, #CPU_SHENG_PAC_BANK
++	ldr	\t1, [\t0]
++	isb
++.endmacro
++
++.macro SHENG_INSTALL_USER_KEYS base, t0, t1
++	SHENG_DERIVE_USER_KEY \t0, \t1, \base, #0x4941, #0x3130
++	isb
++.endmacro
++#endif /* HAS_NABU_SOFT_PAC */
+diff --git a/osfmk/arm64/machine_routines_asm.s b/osfmk/arm64/machine_routines_asm.s
+--- a/osfmk/arm64/machine_routines_asm.s
++++ b/osfmk/arm64/machine_routines_asm.s
+@@ -915,15 +915,25 @@
+ .macro	SIGN_THREAD_STATE_REGISTERS
+ 	mrs	$0, TPIDR_EL1
+ 	ldr	$0, [$0, ACT_COPROC_CONTEXT]
+ 	cbz	$0, 1f
+ 	ldr	$0, [$0, #CPU_SHENG_PAC_SIGNS]
+ 	add	$0, $0, #1
+ 	mrs	$6, TPIDR_EL1
+ 	ldr	$6, [$6, ACT_COPROC_CONTEXT]
+ 	str	$0, [$6, #CPU_SHENG_PAC_SIGNS]
+ 1:
++#if defined(HAS_NABU_SOFT_PAC)
++	eor	$2, $1, $2, ror #7
++	eor	$2, $2, $3, ror #13
++	and	$6, $4, #0xFFFFFFFFFFFFFF7F
++	eor	$2, $2, $6, ror #19
++	eor	$2, $2, $5, ror #23
++	bic	$2, $2, #0xFFFFFFFF
++#else
+ 	pacga	$2, $1, $2
+ 	pacga	$2, $3, $2
+ 	and	$6, $4, #0xFFFFFFFFFFFFFF7F
+ 	pacga	$2, $6, $2
+ 	pacga	$2, $5, $2
++#endif
+ 	genter
+diff --git a/osfmk/mach/dyld_kernel_fixups.h b/osfmk/mach/dyld_kernel_fixups.h
+--- a/osfmk/mach/dyld_kernel_fixups.h
++++ b/osfmk/mach/dyld_kernel_fixups.h
+@@ -435,9 +435,13 @@
+ 		uintptr_t target = fixupLoc->native64.auth ? fixupLoc->native_auth64.target :
+ 		    fixupLoc->native64.target | ((uint64_t)fixupLoc->native64.high8 << 56);
+ 		target += (uintptr_t)basePointers[0];
++#if defined(HAS_NABU_SOFT_PAC)
++		/* On SM8150 (ARMv8.2-A without FEAT_PAuth), keep canonical unauthenticated kernel VA */
++		(void)sign_pointer;
++#else
+ 		if (fixupLoc->native64.auth) {
+ 			target = sign_pointer(fixupLoc->fixup64, fixupLoc, target);
+ 		}
++#endif
+ 		fixupLoc->raw64 = target;
+ 		return 0;
+ 	}

@@ -13,9 +13,13 @@ def boot_once(build: Path, serial: str, expected_slot: str, output: Path) -> dic
     if expected_slot not in ('a', 'b') or not serial:
         raise ValueError('an explicit serial and expected slot a/b are required')
     metadata = json.loads(build.read_text())
-    image = build.parent / 'sheng-macos26-kernel.img'
+    image_name = metadata.get('image_name')
+    if not image_name:
+        image_name = 'nabu-macos26-kernel.img' if metadata.get('board') == 'nabu' else 'sheng-macos26-kernel.img'
+    image = build.parent / image_name
     if (metadata.get('temporary_ram_boot') is not True
             or metadata.get('partition_images_written') is not False
+            or not image.is_file()
             or image.stat().st_size != metadata['container_bytes']):
         raise ValueError('requires a complete packaged RAM-only native experiment')
     # One record owns one send; an uncertain USB result must not trigger a retry.

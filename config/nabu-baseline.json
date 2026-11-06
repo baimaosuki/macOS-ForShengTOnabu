@@ -1,0 +1,145 @@
+{
+  "board": "nabu",
+  "soc": "SM8150",
+  "model": "Xiaomi Pad 5",
+  "compatible": [
+    "xiaomi,nabu",
+    "qcom,sm8150"
+  ],
+  "architecture": "armv8.2-a",
+  "hardware_pac": false,
+  "board_sha256": "35d58193bc4ae1663520f7684a320afd290fb9e0ad2bb693523cb1bbf45b1d14",
+  "defconfig_sha256": "ac92913ec992811a2336b2c63f59516ad8c64472db9c1699a143addbbcca14bb",
+  "dts_sha256": "8921f6add06c7dc0d1b5528d4c0a71b90ac22ea5dcfdb0ec0f6e28191441b34b",
+  "soc_dtsi_sha256": "6675f64393502ddb1adfeee49d47646628ba0d3f1da74551e959ec209f1cee1c",
+  "dram_banks": [
+    {
+      "base": "0x80000000",
+      "size": "0x3cc00000",
+      "role": "Bank 0 (stock UEFI GOP framebuffer 0x9c000000 and GPU ZAP shader 0x98f15000)"
+    },
+    {
+      "base": "0xc0000000",
+      "size": "0x80000000",
+      "role": "Bank 1 (XNU owned DRAM window lower 2 GiB)"
+    },
+    {
+      "base": "0x140000000",
+      "size": "0xc0000000",
+      "role": "Bank 2 (XNU owned DRAM window upper 3 GiB)"
+    }
+  ],
+  "trustzone_carveout_hole": {
+    "base": "0xb9900000",
+    "end": "0xc0000000",
+    "size": "0x06700000"
+  },
+  "memory_window": {
+    "dram_base": "0xc0000000",
+    "dram_size": "0x140000000",
+    "darwinboot_memory_size": "0x40000000",
+    "fastboot_ram_memory_size": "0x20000000"
+  },
+  "framebuffer": {
+    "base": "0x9c000000",
+    "size": "0x01000000",
+    "width": 1600,
+    "height": 2560,
+    "depth": 32,
+    "stride": 6400
+  },
+  "zap_region": {
+    "base": "0x98f15000",
+    "size": "0x00002000"
+  },
+  "smp": {
+    "cpus": 8,
+    "affinities": [
+      "0x000",
+      "0x100",
+      "0x200",
+      "0x300",
+      "0x400",
+      "0x500",
+      "0x600",
+      "0x700"
+    ],
+    "silver_compatible": "arm,cortex-a55",
+    "gold_prime_compatible": "arm,cortex-a76",
+    "psci_method": "smc",
+    "gic_dist_base": "0x17a00000",
+    "gic_dist_size": "0x00010000",
+    "gic_redist_base": "0x17a60000",
+    "gic_redist_size": "0x00100000",
+    "gic_redist_stride": "0x00020000",
+    "intc_name": "interrupt-controller",
+    "intc_property": "master",
+    "virtual_timer_intid": 19,
+    "timer_frequency_hz": 19200000,
+    "ipi_mode": "sgi",
+    "ipi_register": "ICC_SGI1R_EL1",
+    "boot_arg_ipi": "armcpu-self-ipi=1",
+    "spi_ipi_supported": false
+  },
+  "ufs": {
+    "compatible": "qcom,sm8150-ufshc",
+    "compatible_fallback": "qcom,ufshc",
+    "hc_base": "0x01d84000",
+    "hc_bytes": "0x00002500",
+    "hc_map_bytes": "0x00003000",
+    "hc_resource_bytes": "0x00001000",
+    "gcc_base": "0x00100000",
+    "gcc_ufs_window": "0x00177000",
+    "gcc_ufs_bytes": "0x00001000",
+    "smmu_base": "0x15000000",
+    "smmu_bytes": "0x00100000",
+    "smmu_resource_bytes": "0x00040000",
+    "stream_id": "0x0300",
+    "logical_block_bytes": 4096,
+    "writes_allowed": false,
+    "unallocated_first_lba": 2739968,
+    "unallocated_last_lba": 5011208,
+    "os_lba": 2739968,
+    "os_sectors_512": 11718723,
+    "systemos_lba": 4204809,
+    "systemos_sectors_512": 6451200
+  },
+  "esp_log": {
+    "format": "NABULOG2",
+    "config_magic": "NABUCFG2",
+    "slot_magic": "NABULOG2",
+    "filename": "XNU2LOG.BIN",
+    "esp_size_mib": 334,
+    "block_bytes": 4096,
+    "capacity_bytes": 4194304,
+    "slot_bytes": 4198400,
+    "file_bytes": 8400896,
+    "boot_arg_enable": "nabu-log=1",
+    "boot_arg_token": "nabu-log-token"
+  },
+  "fastboot_boot": {
+    "preferred_transport": "fastboot boot",
+    "temporary_ram_boot": true,
+    "partition_images_written": false,
+    "slot_changes": false,
+    "image_name": "nabu-macos26-kernel.img",
+    "header_version": 0,
+    "pagesize": 4096,
+    "base": "0x00000000",
+    "kernel_offset": "0x00008000",
+    "ramdisk_offset": "0x01000000",
+    "tags_offset": "0x00000100"
+  },
+  "archives": [
+    "libcorecrypto_14.a",
+    "libcorecrypto_14_namespaced.a",
+    "libArmDTPlatform.a",
+    "libArmCpu.a",
+    "libpthread_kernel.a",
+    "libNativeUfs.a",
+    "libNativeVirtioBlock.a",
+    "libNativeRamBlock.a",
+    "libNativeLegacyDisplay.late.a",
+    "libAdreno6xx.a"
+  ]
+}

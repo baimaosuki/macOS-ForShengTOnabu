@@ -1,0 +1,81 @@
+diff --git a/config/MASTER.arm64.MacOSX b/config/MASTER.arm64.MacOSX
+index 27c6d77..bd6f298 100644
+--- a/config/MASTER.arm64.MacOSX
++++ b/config/MASTER.arm64.MacOSX
+@@ -21,7 +21,7 @@
+ #else
+ #  ARM_EXTRAS_BASE = [ config_pmap_ppl ]
+ #endif
+-#if SOC_CONFIG_sheng
++#if SOC_CONFIG_sheng || SOC_CONFIG_nabu
+ #  SHENG_MACHINE = [ nos_arm_asm nos_arm_pmap ]
+ #else
+ #  SHENG_MACHINE = [ ]
+diff --git a/makedefs/MakeInc.def b/makedefs/MakeInc.def
+index d229106..140ff56 100644
+--- a/makedefs/MakeInc.def
++++ b/makedefs/MakeInc.def
+@@ -29,7 +29,7 @@ SUPPORTED_ARM64_MACHINE_CONFIGS = NONE
+ else ifneq ($(findstring _host,$(RC_ProjectName)),)
+ SUPPORTED_ARM64_MACHINE_CONFIGS = NONE
+ else
+-SUPPORTED_ARM64_MACHINE_CONFIGS = T6000 T6020 T6030 T6031 T6041 T6050 T8101 T8103 T8112 T8122 T8132 T8142 VMAPPLE SHENG
++SUPPORTED_ARM64_MACHINE_CONFIGS = T6000 T6020 T6030 T6031 T6041 T6050 T8101 T8103 T8112 T8122 T8132 T8142 VMAPPLE SHENG NABU
+ 
+ SPTM_ENABLED_SOCS_MacOSX = t6000 t8112 t6020 t8122 t6030 t6031 t6041 t6050 t8132 t8142
+ EXCLAVES_ENABLED_SOCS_MacOSX = t8142 t6050
+@@ -92,6 +92,8 @@ MACHINE_FLAGS_ARM64_T8122 = -DARM64_BOARD_CONFIG_T8122_T8130		-mcpu=apple-m3
+ MACHINE_FLAGS_ARM64_T8132 = -DARM64_BOARD_CONFIG_T8132			-mcpu=apple-m4
+ MACHINE_FLAGS_ARM64_T8142 = -DARM64_BOARD_CONFIG_T8142 			-mcpu=apple-m4+memtag+predres2
+ 
++MACHINE_FLAGS_ARM64_NABU = -DARM64_BOARD_CONFIG_NABU -march=armv8.2-a
++
+ MACHINE_FLAGS_ARM64_SHENG = -DARM64_BOARD_CONFIG_SHENG -march=armv8-a
+ 
+ MACHINE_FLAGS_ARM64_VMAPPLE = -DARM64_BOARD_CONFIG_VMAPPLE              -march=armv8.5a+sme2
+diff --git a/pexpert/pexpert/arm64/NABU.h b/pexpert/pexpert/arm64/NABU.h
+new file mode 100644
+index 0000000..19db90a
+--- /dev/null
++++ b/pexpert/pexpert/arm64/NABU.h
+@@ -0,0 +1,21 @@
++/* SPDX-License-Identifier: MIT */
++/* Native EL1 platform for SM8150 (nabu), derived from the UniXNU sm8150 machine layer. */
++#ifndef _PEXPERT_ARM64_NABU_H
++#define _PEXPERT_ARM64_NABU_H
++
++#define NABU                             1
++#define NO_MONITOR                       1
++#define NO_ECORE                         1
++#define ARM_ARCH_TIMER
++#define __ARM_ARCH__                     8
++#define __ARM_VMSA__                     8
++#define __ARM_VFP__                      4
++#define __ARM_COHERENT_CACHE__           1
++#define __ARM_DEBUG__                    7
++#define __ARM_PAN_AVAILABLE__            1
++#if !ARM_LARGE_MEMORY
++#define __ARM64_PMAP_SUBPAGE_L1__        1
++#define __ARM64_PMAP_KERN_SUBPAGE_L1__   1
++#endif
++
++#endif /* _PEXPERT_ARM64_NABU_H */
+diff --git a/pexpert/pexpert/arm64/board_config.h b/pexpert/pexpert/arm64/board_config.h
+index e00f5ea..a135347 100644
+--- a/pexpert/pexpert/arm64/board_config.h
++++ b/pexpert/pexpert/arm64/board_config.h
+@@ -312,6 +312,14 @@
+ #define CORE_NCTRS                     8
+ #endif /* ARM64_BOARD_CONFIG_SHENG */
+ 
++#ifdef ARM64_BOARD_CONFIG_NABU
++#include <pexpert/arm64/NABU.h>
++#define MAX_L2_CLINE                   6
++#define MAX_CPUS                       8
++#define MAX_CPU_CLUSTERS               3
++#define CORE_NCTRS                     8
++#endif /* ARM64_BOARD_CONFIG_NABU */
++
+ #ifdef ARM64_BOARD_CONFIG_VMAPPLE
+ #include <pexpert/arm64/VMAPPLE.h>
+ 

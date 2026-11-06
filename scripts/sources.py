@@ -14,6 +14,17 @@ def git(directory, *args, capture=False):
                           text=True, stdout=subprocess.PIPE if capture else None).stdout
 
 
+def canonical(url):
+    """Normalize a remote URL so a transport rewrite (insteadOf) does not look
+    like a different repository."""
+    url = url.removesuffix('.git')
+    for prefix in ('https://github.com/', 'ssh://git@ssh.github.com:443/',
+                   'ssh://git@github.com/', 'git@github.com:'):
+        if url.startswith(prefix):
+            return 'github.com/' + url[len(prefix):]
+    return url
+
+
 def fetch(entry):
     directory = ROOT / entry['path']
     if not directory.exists():
@@ -23,8 +34,8 @@ def fetch(entry):
     if not (directory / '.git').exists():
         raise ValueError(f'{entry["path"]}: existing directory is not a Git checkout')
     remote = git(directory, 'remote', 'get-url', 'origin', capture=True).strip()
-    if remote.removesuffix('.git') != entry['url'].removesuffix('.git'):
-        raise ValueError(f'{entry["path"]}: unexpected origin')
+    if canonical(remote) != canonical(entry['url']):
+        raise ValueError(f'{entry["path"]}: unexpected origin {remote}')
     current = subprocess.run(['git', '-C', str(directory), 'rev-parse', 'HEAD'],
                              text=True, capture_output=True)
     if current.returncode or current.stdout.strip() != entry['commit']:
@@ -59,7 +70,7 @@ def verify(entry):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('action', choices=('fetch', 'verify'))
-    parser.add_argument('--group', choices=('core', 'feeds', 'graphics', 'macos26', 'all'), default='core')
+    parser.add_argument('--group', choices=('core', 'feeds', 'graphics', 'macos26', 'nabu', 'all'), default='core')
     parser.add_argument('--lock', type=Path, default=ROOT / 'sources.lock.json')
     args = parser.parse_args()
     entries = json.loads(args.lock.read_text())['sources']

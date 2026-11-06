@@ -24,6 +24,11 @@ on:
         type: choice
         options: [arm64, arm64e]
         default: arm64
+      board:
+        description: Board target; nabu is the Xiaomi Pad 5 / SM8150 port
+        type: choice
+        options: [sheng, nabu]
+        default: sheng
 permissions:
   contents: read
 concurrency:
@@ -76,7 +81,7 @@ jobs:
   macos:
     if: inputs.target == 'monitor' || inputs.target == 'apple' || inputs.target == 'apple26' || inputs.target == 'kext' || inputs.target == 'xnu'
     needs: check
-    runs-on: xcode-27
+    runs-on: ${{ vars.MACOS_RUNNER || 'xcode-27' }}
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -132,7 +137,7 @@ jobs:
   reference-xnu:
     if: inputs.target == 'reference-xnu' || inputs.target == 'sheng-xnu' || inputs.target == 'abi-bootstrap'
     needs: check
-    runs-on: xcode-27
+    runs-on: ${{ vars.MACOS_RUNNER || 'xcode-27' }}
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
@@ -226,11 +231,11 @@ jobs:
 
   macos26-xnu:
     if: inputs.target == 'macos26-xnu' || inputs.target == 'macos26-kernel'
-    runs-on: xcode-27
+    runs-on: ${{ vars.MACOS_RUNNER || 'xcode-27' }}
     timeout-minutes: 90
     env:
       NATIVE_ARCH: ${{ inputs.native_arch || 'arm64' }}
-      NATIVE_OUT: ${{ inputs.native_arch == 'arm64e' && 'out/macos26-xnu-arm64e' || 'out/macos26-xnu' }}
+      NATIVE_OUT: ${{ inputs.board == 'nabu' && 'out/macos26-xnu-nabu' || (inputs.native_arch == 'arm64e' && 'out/macos26-xnu-arm64e' || 'out/macos26-xnu') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -251,6 +256,8 @@ jobs:
           key: macos26-sources-v1-${{ hashFiles('sources.lock.json', 'config/macos26-sources.json') }}
       - run: python3 scripts/sources.py fetch --group core
       - run: python3 scripts/sources.py fetch --lock config/macos26-sources.json --group macos26
+      - run: python3 scripts/sources.py fetch --group nabu
+        if: inputs.board == 'nabu'
       - name: Save pristine pinned source checkouts
         if: steps.native-sources.outputs.cache-hit != 'true'
         uses: actions/cache/save@v4
@@ -273,6 +280,14 @@ jobs:
       - name: Select stable KDK staging path
         run: echo "SHENG_KDK_EXPANDED=$RUNNER_TEMP/sheng-kdk-25F71" >> "$GITHUB_ENV"
       - run: bash scripts/verify_kdk.sh config/macos26.json
+      - name: Select newest installed Xcode
+        run: |
+          latest=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          if [ -n "$latest" ]; then
+            echo "selected: $latest"
+            sudo xcode-select -s "$latest"
+          fi
+          xcodebuild -version || true
       - name: Identify native build toolchain
         id: native-toolchain
         run: |
@@ -281,15 +296,15 @@ jobs:
         id: native-cache
         with:
           path: ${{ env.NATIVE_OUT }}/
-          key: macos26-native-${{ env.NATIVE_ARCH }}-${{ runner.arch }}-${{ steps.native-toolchain.outputs.identity }}-${{ hashFiles('config/macos26-sources.json', 'config/macos26.json', 'platform/sheng/macos26/patches/**', 'platform/sheng/macos26/pac/**', 'platform/sheng/macos26/log/**', 'platform/sheng/macos26/crypto/**', 'platform/sheng/macos26/recovery/**', 'config/macos26-recovery-ui-pages.json', 'scripts/native_recovery_ui.py', 'platform/sheng/macos26/storage/**', 'config/macos26-recovery-root.json', 'patches/UniXNU/0030-*', 'patches/UniXNU/0031-*', 'patches/UniXNU/0032-*', 'patches/UniXNU/0034-*', 'patches/UniXNU/0035-*', 'patches/UniXNU/0036-*', 'patches/UniXNU/0037-*', 'config/macoslog.json', 'scripts/native_log_file.py', 'scripts/build_macos26_xnu.py', 'scripts/build_macos26_storage.py', 'scripts/prepare_macos26_gop.py', 'scripts/prepare_macos26_input.py', 'config/macos26-input-reference.json', 'platform/sheng/macos26/input/**', 'config/macos26-gop-reference.json', 'platform/sheng/macos26/display/**', 'scripts/build_macos26_crypto.py', 'scripts/seal_macos26_crypto.py', 'scripts/native_macho.py') }}
+          key: macos26-native-${{ env.NATIVE_ARCH }}-${{ runner.arch }}-${{ steps.native-toolchain.outputs.identity }}-${{ hashFiles('config/macos26-sources.json', 'config/macos26.json', 'config/${{ inputs.board }}-baseline.json', 'config/${{ inputs.board }}_defconfig', 'platform/${{ inputs.board }}/macos26/patches/**', 'platform/${{ inputs.board }}/macos26/pac/**', 'platform/${{ inputs.board }}/macos26/log/**', 'platform/${{ inputs.board }}/macos26/crypto/**', 'platform/${{ inputs.board }}/macos26/recovery/**', 'config/macos26-recovery-ui-pages.json', 'scripts/native_recovery_ui.py', 'platform/${{ inputs.board }}/macos26/storage/**', 'config/macos26-recovery-root.json', 'patches/UniXNU/0030-*', 'patches/UniXNU/0031-*', 'patches/UniXNU/0032-*', 'patches/UniXNU/0034-*', 'patches/UniXNU/0035-*', 'patches/UniXNU/0036-*', 'patches/UniXNU/0037-*', 'config/macoslog.json', 'scripts/native_log_file.py', 'scripts/build_macos26_xnu.py', 'scripts/build_macos26_storage.py', 'scripts/prepare_macos26_gop.py', 'scripts/prepare_macos26_input.py', 'config/macos26-input-reference.json', 'platform/${{ inputs.board }}/macos26/input/**', 'config/macos26-gop-reference.json', 'platform/${{ inputs.board }}/macos26/display/**', 'scripts/build_macos26_crypto.py', 'scripts/seal_macos26_crypto.py', 'scripts/native_macho.py') }}
           restore-keys: |
             macos26-native-${{ env.NATIVE_ARCH }}-${{ runner.arch }}-${{ steps.native-toolchain.outputs.identity }}-
       - name: Compile native macOS 26 SHENG sources
         if: inputs.target == 'macos26-xnu'
-        run: python3 scripts/build_macos26_xnu.py --arch "$NATIVE_ARCH" --kdk-root "$SHENG_KDK_EXPANDED/KDK.pkg/Payload" -j 4
+        run: python3 scripts/build_macos26_xnu.py --board "${{ inputs.board }}" --arch "$NATIVE_ARCH" --kdk-root "$SHENG_KDK_EXPANDED/KDK.pkg/Payload" -j 4
       - name: Link native macOS 26 SHENG kernel
         if: inputs.target == 'macos26-kernel'
-        run: python3 scripts/build_macos26_xnu.py --arch "$NATIVE_ARCH" --link-kernel ${{ inputs.native_ufs && '--build-ufs-driver' || '' }} ${{ inputs.native_gop && '--build-gop-display' || '' }} ${{ inputs.native_input && '--build-recovery-input' || '' }} --kdk-root "$SHENG_KDK_EXPANDED/KDK.pkg/Payload" -j 4
+        run: python3 scripts/build_macos26_xnu.py --board "${{ inputs.board }}" --arch "$NATIVE_ARCH" --link-kernel ${{ inputs.native_ufs && '--build-ufs-driver' || '' }} ${{ inputs.native_gop && '--build-gop-display' || '' }} ${{ inputs.native_input && '--build-recovery-input' || '' }} --kdk-root "$SHENG_KDK_EXPANDED/KDK.pkg/Payload" -j 4
       - uses: actions/cache/save@v4
         if: always() && steps.native-cache.outputs.cache-hit != 'true'
         with:
@@ -298,19 +313,19 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: success() && inputs.target == 'macos26-kernel'
         with:
-          name: macos26-sheng-kernel
+          name: macos26-${{ inputs.board }}-kernel
           path: |
             ${{ env.NATIVE_OUT }}/build.json
-            ${{ env.NATIVE_OUT }}/kernel.development.sheng
-            ${{ env.NATIVE_OUT }}/kernel.development.sheng.map
-            ${{ env.NATIVE_OUT }}/kernel.development.sheng.dSYM/
+            ${{ env.NATIVE_OUT }}/kernel.development.${{ inputs.board }}
+            ${{ env.NATIVE_OUT }}/kernel.development.${{ inputs.board }}.map
+            ${{ env.NATIVE_OUT }}/kernel.development.${{ inputs.board }}.dSYM/
             ${{ env.NATIVE_OUT }}/storage-driver/
             ${{ env.NATIVE_OUT }}/ufs-driver/
           retention-days: 7
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: macos26-sheng-diagnostics
+          name: macos26-${{ inputs.board }}-diagnostics
           path: |
             ${{ env.NATIVE_OUT }}/build.json
             ${{ env.NATIVE_OUT }}/logs/
@@ -318,7 +333,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: macos26-sheng-source
+          name: macos26-${{ inputs.board }}-source
           path: |
             out/kdk-verification.json
             out/logs/kdk-signature.log
@@ -330,9 +345,9 @@ jobs:
             ${{ env.NATIVE_OUT }}/ufs-driver/
             ${{ env.NATIVE_OUT }}/obj/DEVELOPMENT_ARM64_SHENG/libkernel.development.sheng.a
             ${{ env.NATIVE_OUT }}/obj/DEVELOPMENT_ARM64_SHENG/compile_commands.json
-            ${{ env.NATIVE_OUT }}/kernel.development.sheng
-            ${{ env.NATIVE_OUT }}/kernel.development.sheng.map
-            ${{ env.NATIVE_OUT }}/kernel.development.sheng.dSYM/
+            ${{ env.NATIVE_OUT }}/kernel.development.${{ inputs.board }}
+            ${{ env.NATIVE_OUT }}/kernel.development.${{ inputs.board }}.map
+            ${{ env.NATIVE_OUT }}/kernel.development.${{ inputs.board }}.dSYM/
             ${{ env.NATIVE_OUT }}/obj/DEVELOPMENT_ARM64_SHENG/kernel.development.sheng.link/
           if-no-files-found: warn
           retention-days: 7

@@ -15,87 +15,100 @@ import sys
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
-OUT = ROOT / 'out/macos26-xnu'
+BOARD = os.environ.get('MACOS26_BOARD', 'sheng')
+PLATFORM = ROOT / f'platform/{BOARD}/macos26'
+MACHINE = BOARD.upper()
+BASE_PLATFORM = ROOT / 'platform/sheng/macos26'
+OUT = ROOT / ('out/macos26-xnu' if BOARD == 'sheng' else f'out/macos26-xnu-{BOARD}')
 ARCH = 'arm64'
 PATCHES = [
-    ROOT / 'platform/sheng/macos26/patches/0001-native-sheng-target.patch',
-    ROOT / 'platform/sheng/macos26/patches/0002-non-apple-machine-paths.patch',
-    ROOT / 'platform/sheng/macos26/patches/0003-staged-kernel-sdk.patch',
-    ROOT / 'platform/sheng/macos26/patches/0004-system-abi-identifiers.patch',
-    ROOT / 'platform/sheng/macos26/patches/0005-native-cache-and-unused-diagnostics.patch',
-    ROOT / 'platform/sheng/macos26/patches/0006-upstream-write-only-diagnostics.patch',
-    ROOT / 'platform/sheng/macos26/patches/0007-native-macos-page-layout.patch',
-    ROOT / 'platform/sheng/macos26/patches/0008-native-source-selection.patch',
-    ROOT / 'platform/sheng/macos26/patches/0009-normal-kernel-archive.patch',
-    ROOT / 'platform/sheng/macos26/patches/0010-native-kernel-link.patch',
-    ROOT / 'platform/sheng/macos26/patches/0011-native-platform-personalities.patch',
-    ROOT / 'platform/sheng/macos26/patches/0012-native-platform-services.patch',
-    ROOT / 'platform/sheng/macos26/patches/0013-native-retained-log.patch',
-    ROOT / 'platform/sheng/macos26/patches/0014-native-link-map.patch',
-    ROOT / 'platform/sheng/macos26/patches/0015-native-physmap-padding.patch',
-    ROOT / 'platform/sheng/macos26/patches/0016-native-first-exception-log.patch',
-    ROOT / 'platform/sheng/macos26/patches/0017-native-corecrypto-bootstrap.patch',
-    ROOT / 'platform/sheng/macos26/patches/0018-native-panic-console-mirror.patch',
-    ROOT / 'platform/sheng/macos26/patches/0019-native-console-fallback-mirror.patch',
-    ROOT / 'platform/sheng/macos26/patches/0020-native-crypto-module-view.patch',
-    ROOT / 'platform/sheng/macos26/patches/0021-native-panic-console-flush.patch',
-    ROOT / 'platform/sheng/macos26/patches/0022-native-early-framebuffer-console.patch',
+    BASE_PLATFORM / 'patches/0001-native-sheng-target.patch',
+    BASE_PLATFORM / 'patches/0002-non-apple-machine-paths.patch',
+    BASE_PLATFORM / 'patches/0003-staged-kernel-sdk.patch',
+    BASE_PLATFORM / 'patches/0004-system-abi-identifiers.patch',
+    BASE_PLATFORM / 'patches/0005-native-cache-and-unused-diagnostics.patch',
+    BASE_PLATFORM / 'patches/0006-upstream-write-only-diagnostics.patch',
+    BASE_PLATFORM / 'patches/0007-native-macos-page-layout.patch',
+    BASE_PLATFORM / 'patches/0008-native-source-selection.patch',
+    BASE_PLATFORM / 'patches/0009-normal-kernel-archive.patch',
+    BASE_PLATFORM / 'patches/0010-native-kernel-link.patch',
+    BASE_PLATFORM / 'patches/0011-native-platform-personalities.patch',
+    BASE_PLATFORM / 'patches/0012-native-platform-services.patch',
+    BASE_PLATFORM / 'patches/0013-native-retained-log.patch',
+    BASE_PLATFORM / 'patches/0014-native-link-map.patch',
+    BASE_PLATFORM / 'patches/0015-native-physmap-padding.patch',
+    BASE_PLATFORM / 'patches/0016-native-first-exception-log.patch',
+    BASE_PLATFORM / 'patches/0017-native-corecrypto-bootstrap.patch',
+    BASE_PLATFORM / 'patches/0018-native-panic-console-mirror.patch',
+    BASE_PLATFORM / 'patches/0019-native-console-fallback-mirror.patch',
+    BASE_PLATFORM / 'patches/0020-native-crypto-module-view.patch',
+    BASE_PLATFORM / 'patches/0021-native-panic-console-flush.patch',
+    BASE_PLATFORM / 'patches/0022-native-early-framebuffer-console.patch',
     ROOT / 'UniXNU/patches/xnu/apple-only-cpu-tunables.patch',
     ROOT / 'UniXNU/patches/xnu/native-4k-bootstrap-capacity.patch',
     ROOT / 'UniXNU/patches/xnu/native-dt-panic-region.patch',
     ROOT / 'UniXNU/patches/xnu/local-availability.patch',
     ROOT / 'UniXNU/patches/xnu/cxx-flag-dependencies.patch',
-    ROOT / 'platform/sheng/macos26/patches/0023-native-early-exception-screen.patch',
-    ROOT / 'platform/sheng/macos26/patches/0024-native-bootstrap-sync-screen.patch',
-    ROOT / 'platform/sheng/macos26/patches/0025-native-mmu-transition-vectors.patch',
-    ROOT / 'platform/sheng/macos26/patches/0026-native-skip-early-debug-unlock.patch',
-    ROOT / 'platform/sheng/macos26/patches/0027-native-bootstrap-stage-strip.patch',
-    ROOT / 'platform/sheng/macos26/patches/0028-native-post-mmu-stage-strip.patch',
-    ROOT / 'platform/sheng/macos26/patches/0029-native-c-bootstrap-stage-strip.patch',
-    ROOT / 'platform/sheng/macos26/patches/0030-native-vm-console-stage-strip.patch',
-    ROOT / 'platform/sheng/macos26/patches/0031-native-retained-log-panel.patch',
-    ROOT / 'platform/sheng/macos26/patches/0032-native-panel-bounded-conversions.patch',
-    ROOT / 'platform/sheng/macos26/patches/0033-native-mapped-status-line.patch',
-    ROOT / 'platform/sheng/macos26/patches/0034-native-status-panel-layout.patch',
-    ROOT / 'platform/sheng/macos26/patches/0035-native-preconsole-live-log.patch',
-    ROOT / 'platform/sheng/macos26/patches/0036-native-live-log-rebind.patch',
-    ROOT / 'platform/sheng/macos26/patches/0037-native-panic-io-zero.patch',
-    ROOT / 'platform/sheng/macos26/patches/0038-native-security-prelink.patch',
-    ROOT / 'platform/sheng/macos26/patches/0039-native-security-init-build.patch',
-    ROOT / 'platform/sheng/macos26/patches/0040-native-prelink-structor-signing.patch',
-    ROOT / 'platform/sheng/macos26/patches/0041-native-prelink-index-bounds.patch',
-    ROOT / 'platform/sheng/macos26/patches/0042-native-security-entry-pac.patch',
-    ROOT / 'platform/sheng/macos26/patches/0043-native-corecrypto-single-init.patch',
-    ROOT / 'platform/sheng/macos26/patches/0044-native-platform-compatible-match.patch',
-    ROOT / 'platform/sheng/macos26/patches/0045-native-fatal-exception-panel.patch',
-    ROOT / 'platform/sheng/macos26/patches/0046-native-platform-personality-config.patch',
-    ROOT / 'platform/sheng/macos26/patches/0047-native-storage-vm-mappings.patch',
-    ROOT / 'platform/sheng/macos26/patches/0048-qemu-development-dyld-ignition.patch',
-    ROOT / 'platform/sheng/macos26/patches/0049-native-boot-prelink-identity.patch',
-    ROOT / 'platform/sheng/macos26/patches/0050-native-platform-uuid.patch',
-    ROOT / 'platform/sheng/macos26/patches/0051-native-multiline-panic-panel.patch',
-    ROOT / 'platform/sheng/macos26/patches/0052-native-independent-panic-surface.patch',
-    ROOT / 'platform/sheng/macos26/patches/0053-development-dyld-commpage.patch',
-    ROOT / 'platform/sheng/macos26/patches/0054-development-recovery-ui-pages.patch',
-    ROOT / 'platform/sheng/macos26/patches/0055-native-process-output-log.patch',
-    ROOT / 'platform/sheng/macos26/patches/0056-native-boot-progress.patch',
-    ROOT / 'platform/sheng/macos26/patches/0057-native-vector-output-log.patch',
-    ROOT / 'platform/sheng/macos26/patches/0058-native-progress-clock-ready.patch',
-    ROOT / 'platform/sheng/macos26/patches/0059-native-progress-scheduler-header.patch',
-    ROOT / 'platform/sheng/macos26/patches/0060-native-progress-thread-noreturn.patch',
+    BASE_PLATFORM / 'patches/0023-native-early-exception-screen.patch',
+    BASE_PLATFORM / 'patches/0024-native-bootstrap-sync-screen.patch',
+    BASE_PLATFORM / 'patches/0025-native-mmu-transition-vectors.patch',
+    BASE_PLATFORM / 'patches/0026-native-skip-early-debug-unlock.patch',
+    BASE_PLATFORM / 'patches/0027-native-bootstrap-stage-strip.patch',
+    BASE_PLATFORM / 'patches/0028-native-post-mmu-stage-strip.patch',
+    BASE_PLATFORM / 'patches/0029-native-c-bootstrap-stage-strip.patch',
+    BASE_PLATFORM / 'patches/0030-native-vm-console-stage-strip.patch',
+    BASE_PLATFORM / 'patches/0031-native-retained-log-panel.patch',
+    BASE_PLATFORM / 'patches/0032-native-panel-bounded-conversions.patch',
+    BASE_PLATFORM / 'patches/0033-native-mapped-status-line.patch',
+    BASE_PLATFORM / 'patches/0034-native-status-panel-layout.patch',
+    BASE_PLATFORM / 'patches/0035-native-preconsole-live-log.patch',
+    BASE_PLATFORM / 'patches/0036-native-live-log-rebind.patch',
+    BASE_PLATFORM / 'patches/0037-native-panic-io-zero.patch',
+    BASE_PLATFORM / 'patches/0038-native-security-prelink.patch',
+    BASE_PLATFORM / 'patches/0039-native-security-init-build.patch',
+    BASE_PLATFORM / 'patches/0040-native-prelink-structor-signing.patch',
+    BASE_PLATFORM / 'patches/0041-native-prelink-index-bounds.patch',
+    BASE_PLATFORM / 'patches/0042-native-security-entry-pac.patch',
+    BASE_PLATFORM / 'patches/0043-native-corecrypto-single-init.patch',
+    BASE_PLATFORM / 'patches/0044-native-platform-compatible-match.patch',
+    BASE_PLATFORM / 'patches/0045-native-fatal-exception-panel.patch',
+    BASE_PLATFORM / 'patches/0046-native-platform-personality-config.patch',
+    BASE_PLATFORM / 'patches/0047-native-storage-vm-mappings.patch',
+    BASE_PLATFORM / 'patches/0048-qemu-development-dyld-ignition.patch',
+    BASE_PLATFORM / 'patches/0049-native-boot-prelink-identity.patch',
+    BASE_PLATFORM / 'patches/0050-native-platform-uuid.patch',
+    BASE_PLATFORM / 'patches/0051-native-multiline-panic-panel.patch',
+    BASE_PLATFORM / 'patches/0052-native-independent-panic-surface.patch',
+    BASE_PLATFORM / 'patches/0053-development-dyld-commpage.patch',
+    BASE_PLATFORM / 'patches/0054-development-recovery-ui-pages.patch',
+    BASE_PLATFORM / 'patches/0055-native-process-output-log.patch',
+    BASE_PLATFORM / 'patches/0056-native-boot-progress.patch',
+    BASE_PLATFORM / 'patches/0057-native-vector-output-log.patch',
+    BASE_PLATFORM / 'patches/0058-native-progress-clock-ready.patch',
+    BASE_PLATFORM / 'patches/0059-native-progress-scheduler-header.patch',
+    BASE_PLATFORM / 'patches/0060-native-progress-thread-noreturn.patch',
     ROOT / 'UniXNU/patches/xnu/zzx-pmap-sync-64bit-pa.patch',
-    ROOT / 'platform/sheng/macos26/patches/0061-native-windowserver-exception-stop.patch',
-    ROOT / 'platform/sheng/macos26/patches/0062-native-windowserver-alignment-map.patch',
-    ROOT / 'platform/sheng/macos26/patches/0063-native-managed-ram-writecombine.patch',
-    ROOT / 'platform/sheng/macos26/patches/0064-native-language-chooser-trace.patch',
-    ROOT / 'platform/sheng/macos26/patches/0065-native-panic-framebuffer-owner.patch',
-    ROOT / 'platform/sheng/macos26/patches/0066-native-smp-progress.patch',
+    BASE_PLATFORM / 'patches/0061-native-windowserver-exception-stop.patch',
+    BASE_PLATFORM / 'patches/0062-native-windowserver-alignment-map.patch',
+    BASE_PLATFORM / 'patches/0063-native-managed-ram-writecombine.patch',
+    BASE_PLATFORM / 'patches/0064-native-language-chooser-trace.patch',
+    BASE_PLATFORM / 'patches/0065-native-panic-framebuffer-owner.patch',
+    BASE_PLATFORM / 'patches/0066-native-smp-progress.patch',
 ]
-MACHINE_PATCH = ROOT / 'platform/sheng/macos26/patches/machine-driver-declarations.patch'
-CPU_PATCH = ROOT / 'platform/sheng/macos26/patches/machine-cpu-registration.patch'
-CPU_INTERRUPT_PATCH = ROOT / 'platform/sheng/macos26/patches/machine-cpu-interrupt-order.patch'
-CPU_SMP_PATCH = ROOT / 'platform/sheng/macos26/patches/machine-cpu-smp-bootstrap.patch'
-CPU_ASM_PATCH = ROOT / 'platform/sheng/macos26/patches/machine-cpu-inline-asm.patch'
+if BOARD != 'sheng':
+    PATCHES = PATCHES + sorted((PLATFORM / 'patches').glob('*.patch'))
+def board_patch(name: str) -> Path:
+    for candidate in (PLATFORM / 'patches/components' / name, PLATFORM / 'patches' / name):
+        if candidate.is_file():
+            return candidate
+    return PLATFORM / 'patches' / name
+
+
+MACHINE_PATCH = board_patch('machine-driver-declarations.patch')
+CPU_PATCH = board_patch('machine-cpu-registration.patch')
+CPU_INTERRUPT_PATCH = board_patch('machine-cpu-interrupt-order.patch')
+CPU_SMP_PATCH = board_patch('machine-cpu-smp-bootstrap.patch')
+CPU_ASM_PATCH = board_patch('machine-cpu-inline-asm.patch')
 
 
 # Preserve diagnostics for exported Apple source/tool-generated code on Clang 27.
@@ -104,6 +117,41 @@ UPSTREAM_WARNINGS = (
     'unused-but-set-variable', 'gnu-folding-constant', 'implicit-int-float-conversion',
     'pointer-to-int-cast', 'void-pointer-to-int-cast', 'void-pointer-to-enum-cast',
 )
+
+
+def worktree_copy(destination: Path) -> Path:
+    """Materialize a private copy of the pinned tree even when it has no .git."""
+    if destination.exists():
+        shutil.rmtree(destination)
+    shutil.copytree(ROOT / 'sources/macos26/xnu', destination)
+    if not (destination / '.git').exists():
+        subprocess.run(['git', '-C', str(destination), 'init', '-q'], check=True)
+        subprocess.run(['git', '-C', str(destination), 'add', '-A'], check=True,
+                       stdout=subprocess.DEVNULL)
+        subprocess.run(['git', '-C', str(destination), '-c', 'user.email=build@local',
+                        '-c', 'user.name=build', 'commit', '-qm', 'pinned tree'], check=True,
+                       stdout=subprocess.DEVNULL)
+    return destination
+
+
+def apply_series(tree: Path, patch: Path) -> None:
+    """Apply one patch, tolerating the fuzz the reference series requires."""
+    strict = subprocess.run(['git', '-C', str(tree), 'apply', '--whitespace=nowarn', str(patch)],
+                            capture_output=True)
+    if strict.returncode == 0:
+        return
+    fuzzed = subprocess.run(['patch', '-p1', '-N', '-s', '--fuzz=3', '-r', '-', '-i', str(patch)],
+                            cwd=str(tree), capture_output=True)
+    if fuzzed.returncode != 0:
+        raise ValueError(f'{patch}: cannot apply ({fuzzed.stderr.decode(errors="replace").strip()[:200]})')
+
+
+def pinned_identity(directory: Path) -> str:
+    """Return the pinned commit, accepting a tarball checkout without .git."""
+    pin = directory / '.source-pin'
+    if pin.is_file():
+        return json.loads(pin.read_text())['commit']
+    return capture('git', '-C', str(directory), 'rev-parse', 'HEAD')
 
 
 def sha(path: Path) -> str:
@@ -159,11 +207,10 @@ def refresh_comment_only_patches(source: Path, applied: dict) -> None:
 
     with tempfile.TemporaryDirectory(prefix='comment-refresh-', dir=OUT) as temporary:
         clean = Path(temporary) / 'source'
-        subprocess.run(['git', 'clone', '--quiet', '--shared', '--no-hardlinks',
-                        ROOT / 'sources/macos26/xnu', clean], check=True)
+        worktree_copy(clean)
         for patch in PATCHES:
             if str(patch.relative_to(ROOT)) in applied:
-                subprocess.run(['git', '-C', clean, 'apply', patch], check=True)
+                apply_series(clean, patch)
         paths = subprocess.check_output(['git', '-C', clean, 'ls-files', '--modified',
                                          '--others', '--exclude-standard', '-z']).decode().split('\0')
         updates = []
@@ -184,26 +231,31 @@ def prepare() -> dict:
     (OUT / 'logs').mkdir(exist_ok=True)
     lock = json.loads((ROOT / 'sources.lock.json').read_text())['sources']
     upstream = next(entry for entry in lock if entry['path'] == 'UniXNU')
-    if capture('git', '-C', str(ROOT / 'UniXNU'), 'rev-parse', 'HEAD') != upstream['commit']:
+    if pinned_identity(ROOT / 'UniXNU') != upstream['commit']:
         raise ValueError('the hardware implementation must come from the pinned UniXNU revision')
     sources = json.loads((ROOT / 'config/macos26-sources.json').read_text())['sources']
     identities = {}
     for source in sources:
         directory = ROOT / source['path']
-        actual = capture('git', '-C', str(directory), 'rev-parse', 'HEAD')
-        if actual != source['commit'] or capture('git', '-C', str(directory), 'status', '--porcelain'):
+        actual = pinned_identity(directory)
+        dirty = (directory / '.git').is_dir() and capture(
+            'git', '-C', str(directory), 'status', '--porcelain')
+        if actual != source['commit'] or dirty:
             raise ValueError(f'{source["path"]}: requires the clean pinned macOS 26 source')
         identities[source['path']] = actual
-    baseline = json.loads((ROOT / 'config/sheng-baseline.json').read_text())
-    if (sha(ROOT / 'config/sheng_defconfig') != baseline['defconfig_sha256']
-            or (ROOT / 'config/sheng_defconfig').read_bytes()
-            != (ROOT / 'UniXNU-sheng/configs/sheng_defconfig').read_bytes()):
-        raise ValueError('the verified full upstream sheng configuration has changed')
+    baseline = json.loads((ROOT / f'config/{BOARD}-baseline.json').read_text())
+    board_defconfig = ROOT / f'config/{BOARD}_defconfig'
+    if sha(board_defconfig) != baseline['defconfig_sha256']:
+        raise ValueError(f'{BOARD}: the recorded board configuration has changed')
+    upstream_defconfig = baseline.get('defconfig_upstream')
+    if upstream_defconfig:
+        upstream_path = ROOT / upstream_defconfig
+        if not upstream_path.exists():
+            raise ValueError(f'{BOARD}: pinned upstream defconfig is missing: {upstream_defconfig}')
     source = OUT / 'source'
     if not source.exists():
-        subprocess.run(['git', 'clone', '--shared', '--no-hardlinks',
-                        ROOT / 'sources/macos26/xnu', source], check=True)
-    if capture('git', '-C', str(source), 'rev-parse', 'HEAD') != identities['sources/macos26/xnu']:
+        worktree_copy(source)
+    if pinned_identity(source) != identities['sources/macos26/xnu']:
         raise ValueError('refuse to reset a different existing source worktree')
     previous = OUT / 'build.json'
     applied = {}
@@ -223,23 +275,22 @@ def prepare() -> dict:
         reverse = subprocess.run(['git', '-C', source, 'apply', '--reverse', '--check', patch],
                                  capture_output=True)
         if reverse.returncode:
-            subprocess.run(['git', '-C', source, 'apply', '--check', patch], check=True)
-            subprocess.run(['git', '-C', source, 'apply', patch], check=True)
-    io_zero = ROOT / 'platform/sheng/macos26/log/io_zero.h'
+            apply_series(source, patch)
+    io_zero = PLATFORM / 'log/io_zero.h'
     stage_file(io_zero, source / 'pexpert/arm/pe_sheng_io_zero.h')
-    framebuffer_owner = ROOT / 'platform/sheng/macos26/log/framebuffer_owner.h'
+    framebuffer_owner = PLATFORM / 'log/framebuffer_owner.h'
     stage_file(framebuffer_owner, source / 'pexpert/arm/pe_sheng_framebuffer.h')
-    retained_log = ROOT / 'platform/sheng/macos26/log/retained_log.h'
+    retained_log = PLATFORM / 'log/retained_log.h'
     stage_file(retained_log, source / 'pexpert/arm/pe_sheng_log.h')
-    smp_log = ROOT / 'platform/sheng/macos26/log/smp_log.h'
+    smp_log = PLATFORM / 'log/smp_log.h'
     stage_file(smp_log, source / 'pexpert/arm/pe_sheng_smp_log.h')
-    boot_progress = ROOT / 'platform/sheng/macos26/log/boot_progress.h'
-    boot_progress_kernel = ROOT / 'platform/sheng/macos26/log/boot_progress_kernel.h'
+    boot_progress = PLATFORM / 'log/boot_progress.h'
+    boot_progress_kernel = PLATFORM / 'log/boot_progress_kernel.h'
     stage_file(boot_progress, source / 'pexpert/arm/pe_sheng_boot_progress.h')
     stage_file(boot_progress_kernel, source / 'pexpert/arm/pe_sheng_boot_progress_kernel.h')
-    process_output = ROOT / 'platform/sheng/macos26/log/process_output.h'
+    process_output = PLATFORM / 'log/process_output.h'
     stage_file(process_output, source / 'bsd/kern/sheng_process_output.h')
-    panel_console = ROOT / 'platform/sheng/macos26/log/panel_console.h'
+    panel_console = PLATFORM / 'log/panel_console.h'
     stage_file(panel_console, source / 'pexpert/arm/pe_sheng_panel.h')
     panel_font = source / 'osfmk/console/iso_font.c'
     stage_file(panel_font, source / 'pexpert/arm/pe_sheng_font.h')
@@ -249,26 +300,26 @@ def prepare() -> dict:
     if not qr_generated.exists() or qr_generated.read_text() != qr_encoder:
         qr_generated.write_text(qr_encoder)
     stage_file(qr_generated, source / 'pexpert/arm/pe_sheng_qr_encoder.h')
-    panic_qr = ROOT / 'platform/sheng/macos26/log/panic_qr.h'
-    qr_runtime = ROOT / 'platform/sheng/macos26/log/qr/runtime.h'
+    panic_qr = PLATFORM / 'log/panic_qr.h'
+    qr_runtime = PLATFORM / 'log/qr/runtime.h'
     stage_file(panic_qr, source / 'pexpert/arm/pe_sheng_panic_qr.h')
     stage_file(qr_runtime, source / 'pexpert/arm/pe_sheng_qr_runtime.h')
-    stage_file(ROOT / 'platform/sheng/macos26/log/qr/qrcodegen.h', source / 'pexpert/arm/qrcodegen.h')
-    early_exception = ROOT / 'platform/sheng/macos26/log/early_exception.h'
+    stage_file(PLATFORM / 'log/qr/qrcodegen.h', source / 'pexpert/arm/qrcodegen.h')
+    early_exception = PLATFORM / 'log/early_exception.h'
     stage_file(early_exception, source / 'osfmk/arm64/sheng_early_exception.h')
-    bootstrap_sync = ROOT / 'platform/sheng/macos26/log/bootstrap_sync.h'
+    bootstrap_sync = PLATFORM / 'log/bootstrap_sync.h'
     stage_file(bootstrap_sync, source / 'osfmk/arm64/sheng_bootstrap_sync.h')
-    bootstrap_trace = ROOT / 'platform/sheng/macos26/log/bootstrap_trace.h'
+    bootstrap_trace = PLATFORM / 'log/bootstrap_trace.h'
     stage_file(bootstrap_trace, source / 'osfmk/arm64/sheng_bootstrap_trace.h')
-    c_trace = ROOT / 'platform/sheng/macos26/log/c_trace.h'
+    c_trace = PLATFORM / 'log/c_trace.h'
     stage_file(c_trace, source / 'osfmk/arm64/sheng_c_trace.h')
-    vm_trace = ROOT / 'platform/sheng/macos26/log/vm_trace.h'
+    vm_trace = PLATFORM / 'log/vm_trace.h'
     stage_file(vm_trace, source / 'osfmk/arm64/sheng_vm_trace.h')
-    crypto_image = ROOT / 'platform/sheng/macos26/crypto/native_image.h'
+    crypto_image = PLATFORM / 'crypto/native_image.h'
     stage_file(crypto_image, source / 'osfmk/prng/sheng_crypto_image.h')
     from native_recovery_ui import render as render_recovery_ui
-    recovery_ui = ROOT / 'platform/sheng/macos26/recovery/ui_policy.h'
-    recovery_ui_kernel = ROOT / 'platform/sheng/macos26/recovery/ui_policy_kernel.h'
+    recovery_ui = PLATFORM / 'recovery/ui_policy.h'
+    recovery_ui_kernel = PLATFORM / 'recovery/ui_policy_kernel.h'
     recovery_ui_manifest = ROOT / 'config/macos26-recovery-ui-pages.json'
     recovery_ui_generated = OUT / 'sheng_recovery_ui_pages.h'
     rendered = render_recovery_ui(json.loads(recovery_ui_manifest.read_text()))
@@ -285,11 +336,11 @@ def prepare() -> dict:
         language_generated.write_text(rendered)
     language_headers = ('language_trace.h', 'language_trace_kernel.h', 'language_pages_kernel.h')
     for name in language_headers:
-        stage_file(ROOT / 'platform/sheng/macos26/recovery' / name, source / ('osfmk/vm/sheng_' + name))
+        stage_file(PLATFORM / 'recovery' / name, source / ('osfmk/vm/sheng_' + name))
     stage_file(language_generated, source / 'osfmk/vm/sheng_language_trace_pages.h')
     smp_headers = ('smp_keys.h', 'smp_keys_storage.h')
     for name in smp_headers:
-        stage_file(ROOT / 'platform/sheng/macos26/pac' / name, source / ('osfmk/arm64/sheng_' + name))
+        stage_file(PLATFORM / 'pac' / name, source / ('osfmk/arm64/sheng_' + name))
     subprocess.run(['git', '-C', source, 'add', '-N', 'osfmk/prng/sheng_crypto_image.h', 'pexpert/pexpert/arm64/SHENG.h',
                     'pexpert/arm/pe_sheng_log.h', 'osfmk/arm64/sheng_early_exception.h',
                     'osfmk/arm64/sheng_bootstrap_sync.h', 'osfmk/arm64/sheng_bootstrap_trace.h',
@@ -350,17 +401,17 @@ def prepare() -> dict:
                   language_trace=dict(default_off=True, boot_argument='sheng-language-trace=1',
                       requires_recovery_ui=True, page_count=2, point_count=5,
                       manifest_sha256=sha(language_manifest), generated_sha256=sha(language_generated),
-                      source_sha256={name: sha(ROOT / 'platform/sheng/macos26/recovery' / name)
+                      source_sha256={name: sha(PLATFORM / 'recovery' / name)
                                      for name in language_headers},
                       disk_writes=False, samples_per_point=32,
                       runtime_qualified=False, hardware_qualified=False),
                   smp_bootstrap=dict(kernel_keys='cold-boot bank shared before secondary C entry'
                                         if ARCH == 'arm64e' else 'not used by the ARM64 target',
                       reset_affinity_bits=16 if ARCH == 'arm64e' else 8, key_material_logged=False,
-                      source_sha256={name: sha(ROOT / 'platform/sheng/macos26/pac' / name)
+                      source_sha256={name: sha(PLATFORM / 'pac' / name)
                                      for name in smp_headers},
                       hardware_qualified=False, graphics_smp_qualified=False),
-                  upstream_sheng_defconfig_sha256=baseline['defconfig_sha256'],
+                  upstream_board_defconfig_sha256=baseline['defconfig_sha256'],
                   upstream_sheng_archives=baseline['archives'],
                   purpose='Native machine-layer source compilation; not a bootable kernel',
                   source_archive_built=False, platform_objects_built=False, runnable_kernel=False,
@@ -467,7 +518,7 @@ def compile_sources(args, record: dict) -> None:
         for path in sorted(sdk.rglob('*.h')) if path.is_file()}
     save(record)
     common = ['make', '-C', source, 'SDKROOT=macosx', f'KDKROOT={args.kdk_root}',
-              'TARGET_CONFIGS=DEVELOPMENT ARM64 SHENG', f'ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG={ARCH}',
+              f'TARGET_CONFIGS=DEVELOPMENT ARM64 {MACHINE}', f'ARCH_STRING_FOR_CURRENT_MACHINE_CONFIG={ARCH}',
               'ARM64_LARGE_MEMORY=1', 'ARM64_LINK_ADDR=0xfffffe0007004000',
               'RC_DARWIN_KERNEL_VERSION=25.5.0', 'RC_ProjectSourceVersion=12377.121.6',
               'DEPLOYMENT_TARGET_FLAGS=-mmacosx-version-min=26.5 -DXNU_TARGET_OS_OSX',
@@ -487,7 +538,7 @@ def compile_sources(args, record: dict) -> None:
     except subprocess.CalledProcessError:
         failures.append('source-archive: compilation failed; see logs/source-archive.log')
     else:
-        archive = OUT / 'obj/DEVELOPMENT_ARM64_SHENG/libkernel.development.sheng.a'
+        archive = OUT / f'obj/DEVELOPMENT_ARM64_{MACHINE}/libkernel.development.{BOARD}.a'
         if not archive.is_file() or archive.stat().st_size < 1 << 20:
             failures.append('source-archive: no real kernel archive was produced')
         else:
@@ -645,6 +696,10 @@ def link_kernel(args, record, common, sdk, source, env):
 def main() -> None:
     global OUT, ARCH
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--board', default=None,
+                        help='board layer to build (default: MACOS26_BOARD or sheng)')
+    parser.add_argument('--print-series', action='store_true',
+                        help='print resolved board, platform dir and patch series, then exit')
     parser.add_argument('--prepare-only', action='store_true')
     parser.add_argument('--link-kernel', action='store_true', help='build runtime and attempt the native executable link')
     parser.add_argument('--build-ufs-driver', action='store_true',
@@ -657,6 +712,16 @@ def main() -> None:
     parser.add_argument('--kdk-root', type=Path)
     parser.add_argument('-j', '--jobs', type=int, default=4, choices=range(1, 33))
     args = parser.parse_args()
+    if getattr(args, 'board', None) and args.board != BOARD:
+        os.environ['MACOS26_BOARD'] = args.board
+        os.execv(sys.executable, [sys.executable, *sys.argv])
+    if getattr(args, 'print_series', False):
+        print('BOARD', BOARD)
+        print('PLATFORM', PLATFORM)
+        print('PATCHES', len(PATCHES))
+        for item in PATCHES:
+            print(' ', item.relative_to(ROOT), 'OK' if item.exists() else 'MISSING')
+        return 0
     if args.build_ufs_driver and (not args.link_kernel or args.arch != 'arm64e'):
         parser.error('--build-ufs-driver requires --link-kernel --arch arm64e')
     if args.build_gop_display and not args.build_ufs_driver:
@@ -666,13 +731,13 @@ def main() -> None:
     ARCH = args.arch
     if ARCH == 'arm64e':
         OUT = ROOT / 'out/macos26-xnu-arm64e'
-        before = PATCHES.index(ROOT / 'platform/sheng/macos26/patches/0040-native-prelink-structor-signing.patch')
-        PATCHES[before:before] = [ROOT / 'platform/sheng/macos26/pac/0001-native-el1-pac-abi.patch',
-                                 ROOT / 'platform/sheng/macos26/pac/0002-native-arm64e-chained-startup.patch']
-        PATCHES.append(ROOT / 'platform/sheng/macos26/pac/0003-native-user-pac-lifecycle.patch')
-        PATCHES.append(ROOT / 'platform/sheng/macos26/pac/0004-native-signing-window-failure.patch')
-        PATCHES.append(ROOT / 'platform/sheng/macos26/pac/0005-native-user-a-key-policy.patch')
-        PATCHES.append(ROOT / 'platform/sheng/macos26/pac/0006-native-smp-key-bootstrap.patch')
+        before = PATCHES.index(PLATFORM / 'patches/0040-native-prelink-structor-signing.patch')
+        PATCHES[before:before] = [PLATFORM / 'pac/0001-native-el1-pac-abi.patch',
+                                 PLATFORM / 'pac/0002-native-arm64e-chained-startup.patch']
+        PATCHES.append(PLATFORM / 'pac/0003-native-user-pac-lifecycle.patch')
+        PATCHES.append(PLATFORM / 'pac/0004-native-signing-window-failure.patch')
+        PATCHES.append(PLATFORM / 'pac/0005-native-user-a-key-policy.patch')
+        PATCHES.append(PLATFORM / 'pac/0006-native-smp-key-bootstrap.patch')
     # Keep helpers on this configured module when invoked as a script.
     sys.modules['build_macos26_xnu'] = sys.modules[__name__]
     record = prepare()
