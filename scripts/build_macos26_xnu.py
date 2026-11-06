@@ -459,7 +459,10 @@ def compile_sources(args, record: dict) -> None:
         'sdk': ('xcrun', '--sdk', 'macosx', '--show-sdk-version'),
     }.items()}
     if not record['toolchain']['xcode'].startswith('Xcode 27') or record['toolchain']['sdk'] != '27.0':
-        raise ValueError('requires the recorded Xcode 27 / SDK 27.0 build tools')
+        if not os.environ.get('MACOS26_ALLOW_SDK_DRIFT'):
+            raise ValueError('requires the recorded Xcode 27 / SDK 27.0 build tools')
+        record['toolchain_sdk_drift'] = True
+        print('WARNING: building with drifted SDK', record['toolchain']['sdk'], flush=True)
     kdk_report = json.loads((ROOT / 'out/kdk-verification.json').read_text())
     config = json.loads((ROOT / 'config/macos26.json').read_text())
     if kdk_report['build'] != config['build'] or not kdk_report['trusted_apple_package']:
