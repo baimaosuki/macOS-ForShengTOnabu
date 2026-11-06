@@ -606,7 +606,7 @@ def compile_sources(args, record: dict) -> None:
         except (subprocess.CalledProcessError, ValueError) as error:
             failures.append(f'{component}: {error}')
         save(record)
-    shim = PLATFORM / 'shim/nabu_link_stubs.c'
+    shim = PLATFORM / 'shim/nabu_link_stubs.cpp'
     if shim.is_file():
         shim_object = OUT / 'nabu_link_stubs.o'
         command, index = [], 0

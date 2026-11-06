@@ -4,28 +4,30 @@
  * support library (KDKROOT/System/Library/KernelSupport/lib<T6040>.os.*.a).
  * SM8150 has no such library, so the board supplies the minimal semantics the
  * bring-up profile needs instead of borrowing another SoC's platform code.
+ *
+ * Built with the kernel C++ driver record (Apple kext mode), hence extern "C".
  */
 
-typedef unsigned int nabu_boolean_t;
+extern "C" {
 
-extern nabu_boolean_t ml_device_is_prod_fused(void);
-extern _Bool pmap_pending_preemption(void);
-extern void tb_transport_startup(void);
+typedef unsigned int nabu_boolean_t;
 
 nabu_boolean_t
 ml_device_is_prod_fused(void)
 {
-	return 0;                       /* not production fused: keep eng sampling allowed */
+	return 0;                       /* not production fused */
 }
 
-_Bool
+bool
 pmap_pending_preemption(void)
 {
-	return 0;                       /* no SPTM/PPL preemption hand-off on this board */
+	return false;                   /* no SPTM/PPL preemption hand-off */
 }
 
 void
 tb_transport_startup(void)
 {
 	/* Tightbeam/exclaves transport is not instantiated on nabu */
+}
+
 }
