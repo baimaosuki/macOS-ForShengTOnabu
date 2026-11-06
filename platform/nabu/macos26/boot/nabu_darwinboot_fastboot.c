@@ -9,7 +9,9 @@ extern void DarwinEnter(uint64_t args_pa, uint64_t entry_pa, uint64_t owned_pa,
                         uint64_t owned_size, uint64_t video_base, uint64_t video_bytes);
 
 #define NABU_OWNED_WINDOW_PA    0xc0000000ULL
-#define NABU_OWNED_WINDOW_SIZE  0x20000000ULL
+// Keep this equal to /chosen/darwinboot-memory-size; the ADT is the single
+// source of truth and the strict contract caps it at 8 GiB.
+#define NABU_OWNED_WINDOW_SIZE  0x40000000ULL
 
 static inline uint32_t read_be32(const void *p)
 {
@@ -247,7 +249,10 @@ void nabu_darwinboot_main(uint64_t fdt_pa)
     args->Video[5] = NABU_GOP_PANEL_BPP;
     args->DeviceTree = min_va + (tree_pa - NABU_OWNED_WINDOW_PA);
     args->DeviceTreeLength = adt_len;
-    const char *cmdline = "-v debug=0x14e keepsyms=1 cpus=8 armcpu-self-ipi=1 t733-managed-rt-normal=1 nabu-vc-scale=2 native-ufs-root=1";
+    // Single-core controlled boot: the generated ADT advertises exactly one
+    // cpu@0, so cpus=8 would wait forever for secondaries that are absent.
+    // Storage stays off until the UFS driver is qualified for this board.
+    const char *cmdline = "-v debug=0x14e keepsyms=1 cpus=1 armcpu-self-ipi=1 nabu-vc-scale=2";
     for (size_t i = 0; cmdline[i] && i < sizeof(args->CommandLine) - 1; i++) {
         args->CommandLine[i] = cmdline[i];
     }

@@ -147,3 +147,36 @@ cpusubtype 低字节 0（arm64，不触发 ARM64E 的 EL1 PAC 检查）
 - UniXNU 读的配置文件名确认为 `unixnu.toml`（`UniXNULib/Config.c:1511`），
   与 `out/esp-payload/EFI/UniXNU/unixnu.toml` 一致；`path/adt` 指向 `Payloads/` 下实际存在的文件。
 - 菜单里的 `type = "xnu"`、`Payloads/kernel.macho`、`Payloads/kernel.macho.adt` 三项与 ESP 目录逐一对应。
+
+---
+
+## 8. stage1 契约审计（round 7 新增，含一处会直接卡死的修复）
+
+读 `platform/nabu/macos26/boot/nabu_darwinboot_fastboot.c`（fastboot 路线真正执行的那段
+裸机加载器）后，逐项对照我们打的镜像：
+
+| 项 | stage1 原本 | 我们的镜像 | 处理 |
+|---|---|---|---|
+| NRAM 定位 | FDT initrd 或扫 Bank0 `0x81000000..0x9b000000`（4 字节 `NRAM` + 0xC 处必须是 `0xfeedfacf`） | ramdisk 由 ABL 放入 Bank0 | 一致，无需改 |
+| 窗口基址 | `NABU_OWNED_WINDOW_PA = 0xc0000000` | ADT `dram-base = 0xc0000000` | 一致 |
+| 窗口大小 | 硬编码 `0x20000000`（512 MB） | ADT `darwinboot-memory-size = 0x40000000`（1 GiB） | **已改 stage1 为 1 GiB** |
+| boot-args | 硬编码 `cpus=8 … t733-managed-rt-normal=1 native-ufs-root=1` | ADT 只有 `cpu@0` | **已改 `cpus=1`，去 UFS 根与 t733** |
+| 段搬运 | `0xc0000000 + (vmaddr - min_va)`，跳过 filesize=0 | 与 `ParseKernel` 语义一致 | 一致 |
+| 交接 | `VirtualBase=min_va`、`PhysicalBase=0xc0000000`、`DeviceTree=min_va+偏移` | ADT/内核链接基址匹配 | 一致 |
+| 显示 | `args->Video[]` 用 `NABU_GOP_*` | 与 ADT `framebuffer-*` 同源 | 一致 |
+
+不修的后果：ADT 只描述 1 个 CPU，XNU 拿 `cpus=8` 会等不存在的从核；`native-ufs-root=1`
+会让内核在没有 UFS 节点的情况下找根设备。两者都会让首启表现成“卡死”而不是给出诊断。
+
+### 8.1 重打后的镜像
+
+```
+stage1  nabu-darwinboot-fastboot.bin   7,232 B（原 7,264 B）
+容器    out/nabu/image/nabu-macos26-kernel.img   24,813,568 B
+        sha256 d9557c9e7dfbed1d7693222ae019d9eee34cd8ab6b8e70a9f4c69d17950df606
+NRAM    kernel 24,787,072 B + adt 11,424 B（14/14 通过）
+stage1 生效参数：-v debug=0x14e keepsyms=1 cpus=1 armcpu-self-ipi=1 nabu-vc-scale=2
+```
+
+> 注意：fastboot 路线用的 boot-args 来自 stage1 里的 C 字符串，**不是** NRAM 里的
+> `unixnu.toml`（后者只对 EFI/UniXNU 路线生效）。今天两者已统一为同一组参数。
