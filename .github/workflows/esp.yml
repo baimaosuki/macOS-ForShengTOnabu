@@ -1,0 +1,62 @@
+name: esp-payload
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: EDK2 build target
+        type: choice
+        options: [RELEASE, DEBUG]
+        default: RELEASE
+
+concurrency:
+  group: sheng-esp-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-efi:
+    runs-on: ${{ vars.MACOS_RUNNER || 'xcode-27' }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Fetch UniXNU sources and components
+        run: |
+          python3 scripts/sources.py fetch --group core
+          python3 scripts/sources.py fetch --group nabu
+          python3 scripts/fetch_components.py
+      - name: Fetch pinned Mu_Basecore EDK2 base
+        run: |
+          set -euo pipefail
+          pin=$(python3 -c "import tomllib;print([s['commit'] for s in tomllib.load(open('UniXNU/feeds.toml','rb'))['source'] if s['name']=='edk2'][0])")
+          echo "edk2 pin: $pin"
+          git clone --filter=blob:none --no-checkout https://github.com/microsoft/mu_basecore UniXNU/package/Mu_Basecore
+          git -C UniXNU/package/Mu_Basecore fetch --depth=1 origin "$pin"
+          git -C UniXNU/package/Mu_Basecore checkout -q FETCH_HEAD
+          git -C UniXNU/package/Mu_Basecore submodule update --init --depth 1 \
+            MdePkg/Library/BaseFdtLib/libfdt \
+            MdePkg/Library/MipiSysTLib/mipisyst \
+            BaseTools/Source/C/BrotliCompress/brotli
+          ls UniXNU/package/Mu_Basecore/MdePkg/MdePkg.dec
+      - name: Build UniXNU.efi
+        run: |
+          cd UniXNU/package
+          JOBS=4 ./build.sh -b "${{ inputs.target }}" 2>&1 | tail -40
+      - name: Build DarwinBoot.efi
+        run: |
+          cd UniXNU
+          JOBS=4 TARGET="${{ inputs.target }}" ./scripts/build-darwinboot.sh 2>&1 | tail -40
+      - name: Collect EFI payload
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/efi"
+          find UniXNU -name '*.efi' -newermt '-90 minutes' -size +32k -exec cp -v {} "$RUNNER_TEMP/efi/" \; || true
+          ls -l "$RUNNER_TEMP/efi" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: esp-efi-payload
+          path: ${{ runner.temp }}/efi/*.efi
+          if-no-files-found: warn
