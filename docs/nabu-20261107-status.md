@@ -97,3 +97,58 @@ python3 scripts/nabu_pac_strip.py --input out/macos26-assets/kc.mac13g.macho \
     --output out/macos26-assets/kc.mac13g.stripped.macho \
     --report out/macos26-assets/kc.mac13g.strip.json
 ```
+
+---
+
+## 06:15 更新：内核链接成功（CI 绿）
+
+run `42297783693` — **success**。构建链首次走完 `source-archive → 链接 → 封签`：
+
+```
+out/nabu/kernel/kernel.development.nabu   24,786,872 B
+sha256 0371fe7fb55ee409257ff439368de289e52ddebabfae08f1e1a21a1d0b2d6929
+magic 0xfeedfacf  cpu 0x100000c (arm64)  filetype 2 (MH_EXECUTE)  ncmds 25
+入口 __TEXT va 0xfffffe0007004000（与 macOS 26.5 内核缓存同基址）
+段: __TEXT 1.7 MB / __TEXT_EXEC 9.2 MB / __DATA_CONST / __DATA 1.4 MB
+    __BOOTDATA 864 KB / __LINKEDIT 9.5 MB
+    __PRELINK_TEXT、__PRELINK_INFO、__PLK_* 均已存在但长度为 0（等待 prelink 填充）
+内嵌: "xiaomi,nabu"、ArmDTPlatform、ArmCpu
+```
+
+为走到这一步新增的板级改动（共 7 个补丁 + 1 个 shim + 4 处脚本/工件修正）：
+
+| 项 | 说明 |
+| --- | --- |
+| `0007-nabu-optional-kdk-support-library.patch` | `MakeInc.def` 对 `lib$(MACHINE).os.$(CONFIG).a` 的 `-force_load` 改为仅在文件存在时生效（KDK 只带 Apple SoC 的同名库） |
+| `platform/nabu/macos26/shim/nabu_link_stubs.cpp` | 补 `ml_device_is_prod_fused` / `pmap_pending_preemption` / `tb_transport_startup`（Apple 放在每 SoC 支持库里） |
+| 脚本 | `KERNEL_NAME` 派生；crypto 提供者归档、map/dSYM、workflow 工件路径全部按 `BOARD` 生成 |
+| `seal_macos26_crypto.py` | 去掉对 `_sheng_corecrypto_bootstrap` 的断言（该符号全树无定义），改以 `__cc26_text` + 32 字节 `__fips_hmacs` 契约校验 |
+
+## 卡点：prelink 工具不支持 macOS 26 的文件集内核缓存
+
+`UniXNU/kits/NativePrelink/emit_prelink.py` 对现代内核缓存的两次硬拒绝（实测）：
+
+```
+$ emit_prelink.py --kernel kernel.development.nabu --prelinked kc.mac13g.macho ...
+ValueError: Only ordinary little-endian ARM64 is supported      # cpusubtype arm64e
+
+$ # 用 nabu_pac_strip.py --downgrade-subtype 转成 arm64 之后
+ValueError: Expected MH_EXECUTE kernel images                   # 内核缓存是 filetype 12
+```
+
+结论：该工具是 BCM2837 时代的产物，只认**旧式 `MH_EXECUTE` 预链接内核**。macOS 26.5
+的内核缓存是 fileset（`LC_FILESET_ENTRY`，346 个 kext 条目、982,911 个 chained-fixup
+指针），工具既没有 fileset 解析，也没有 chained fixup 展平逻辑。要产出 DarwinBoot 需要的
+`kernel.macho`，必须先补齐这一层。
+
+两条可选路线（需要你定）：
+
+1. **扩展 prelink 工具**（推荐）：解析 `LC_FILESET_ENTRY`，把每个 kext 的段搬进 native
+   kernel 的空 `__PRELINK_*` / `__PLK_*` 段，展平 chained fixups（用 `nabu_pac_strip.py`
+   已有的 format-8 链解析），再重绑导入表。工作量约数百行，纯 Python，可在本机跑。
+2. **放弃改写内核、改走加载原始内核缓存**：需要 EL1 侧自己解析 fileset + 应用 fixup，
+   等于重写加载器，比路线 1 更重。
+
+另：`board.toml` 的 `early_security_init` 仍是 sheng 记录的
+`com.apple.driver.AppleMobileFileIntegrity=0xfffffff005b70ae0`，macOS 26.5 的实际地址
+要从 `kc.mac13g.macho` 的符号表重新取。
