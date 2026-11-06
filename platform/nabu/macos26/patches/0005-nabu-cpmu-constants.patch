@@ -1,0 +1,20 @@
+--- a/pexpert/pexpert/arm64/NABU.h
++++ b/pexpert/pexpert/arm64/NABU.h
+@@ -18,4 +18,17 @@
+ #define __ARM64_PMAP_KERN_SUBPAGE_L1__   1
+ #endif
+ 
++/* SM8150 has an ARM PMUv3 block. The shared osfmk/arm64 CPC code addresses up
++ * to ten counters and expects these descriptors; Apple's CPMU extensions (AIC
++ * PMI, event filtering, PC capture) are absent on this SoC. */
++#define CPMU_PMC_COUNT                   10
++#define CPMU_64BIT_PMCS                  1
++#define CPMU_16BIT_EVENTS                1
++#define CPMU_AIC_PMI                     0
++#define CPMU_EVENT_FILTERING             0
++#define CPMU_S3_2_C15_C9_09_ADDRESS      0
++#define HAS_CPMU_PC_CAPTURE              0
++#define CPMU_INSTRUCTION_MATCHING        0
++#define CPMU_MEMORY_FILTERING            0
++
+ #endif /* _PEXPERT_ARM64_NABU_H */
