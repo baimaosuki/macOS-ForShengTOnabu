@@ -1,0 +1,16 @@
+diff --git a/makedefs/MakeInc.def b/makedefs/MakeInc.def
+index e4e08c4..2f6fd3c 100644
+--- a/makedefs/MakeInc.def
++++ b/makedefs/MakeInc.def
+@@ -1163,7 +1163,11 @@ LD_KERNEL_ARCHIVES = $(LDFLAGS_KERNEL_SDK) -lfirehose_kernel
+ 
+ # Link binary support library
+ ifeq ($(filter NONE SHENG,$(CURRENT_MACHINE_CONFIG)),)
++# NABU: the KDK only ships per-SoC support libraries for Apple silicon, so the
++# forced load is conditional; nabu supplies its platform code from source.
++        ifneq ($(wildcard $(KDKROOT)/System/Library/KernelSupport/lib$(CURRENT_MACHINE_CONFIG).os.$(CURRENT_KERNEL_CONFIG).a),)
+         LDFLAGS_KERNEL_ONLY += -rdynamic -Wl,-force_load,$(KDKROOT)/System/Library/KernelSupport/lib$(CURRENT_MACHINE_CONFIG).os.$(CURRENT_KERNEL_CONFIG).a
++        endif
+ endif
+ 
+ #
