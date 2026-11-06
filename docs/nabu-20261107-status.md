@@ -256,3 +256,57 @@ pointer_rewrites          916,450（其余 66,461 个槽不在被搬运的段内
 以及指向原生内核符号的引用（内核符号地址由源码重建决定，不能沿用缓存里的旧地址）。
 下一轮做两件事：①把每镜像全部 23 段按属性并入对应 coalesced 段；②对落在原生内核符号表的
 目标改用 `kernel.development.nabu` 的符号解析结果（名称 → 新地址）。
+
+## 08:05 更新：跨构建指针问题的决定性证据 + ESP 载荷树组装
+
+对全部 982,911 个链式槽做目标归属统计（把 346 个子镜像的全部 1,749 个段建索引）：
+
+```
+可归属到子镜像：982,911（100%）；无归属：0
+引用目标按被引用镜像统计 top6：
+  com.apple.kernel                     731,678  ← 74.5%
+  com.apple.iokit.IOThunderboltFamily   17,453
+  com.apple.iokit.IO80211Family         12,382
+  com.apple.driver.AppleM2ScalerCSCDriver 11,303
+  com.apple.iokit.IOHIDFamily            8,798
+  com.apple.iokit.IOUSBHostFamily        8,034
+```
+
+结论（对方案有决定性影响）：**74.5% 的指针指向内核缓存里的 Apple 版 `com.apple.kernel` 镜像**。
+我们是从源码重建的 XNU（同一基址、不同内部布局），链式槽里只有 30 位偏移、没有符号名
+（`imports_count = 0`），因此**这些指针无法靠重写搬运**：kext 与 Apple 内核是按同一份构建预链接的，
+换内核就必须重新链接 kext（按未定义符号名解析）。链式/指针层面的“通用预链接器”到此为止。
+
+可继续的两条路：
+1. 先用**裸内核**上机（无 kext），拿 `NABULOG2` 串口日志——这是明天设备的第一个可执行目标；
+2. kext 侧改为「按未定义符号名重链」或「用源码构建自有驱动」，不沿用 Apple 缓存里的绝对地址。
+
+ESP 载荷树已组装（不写分区，仅供复制到 ESP 或 `fastboot boot` 试验）：
+
+```
+EFI/UniXNU/UniXNU.efi              90,112  19e1b4fff9a7b3ce
+EFI/UniXNU/Drivers/DarwinBoot.efi  45,056  4ceb18422e446db5
+EFI/UniXNU/Drivers/UniXNUDxe.efi   16,384  ecf6729ce8bb2582
+EFI/UniXNU/HelloPayload.efi        20,480  c3b2f683440f1db7
+EFI/UniXNU/Payloads/kernel.macho   24,787,072  83ec42f2bd5d0b67（0008 版内核）
+EFI/UniXNU/Payloads/kernel.macho.adt    5,428  445f9e4b36974c89（旧 sheng 派生，见下）
+EFI/UniXNU/unixnu.toml                  454
+```
+
+**ADT 是当前硬缺口**：用 `UniXNU-nabu/device_bringup/adt/validate_adt.py` 严格校验，
+现有 `kernel.macho.adt` **14 项检查里失败 8 项**：
+
+```
+required_nodes     缺少顶层 defaults 节点
+nvram_proxy_props  缺少 /chosen/nvram-bank-size
+chrp_nvram_image   nvram-bank-size 非法
+random_seed        缺少 /chosen/random-seed
+cpu_topology       存在 cpu1..cpu7（受控首启要求单核）
+arm_io_ranges      /arm-io/ranges = [0x17000000,0x17000000,0x8000000]，应为 [0x0,0x17000000,0x8000000]
+intc_gic           缺少 /arm-io/intc 节点
+forbidden_extras   存在 /arm-io/ufs（首启禁 UFS 节点）
+```
+
+即该 ADT 仍是 sheng 常量（GIC 0x17100000/ranges 0x17000000），nabu 需要 GIC 0x17a00000/redist
+0x17a60000、timer 19.2 MHz、单核首启、无 UFS 节点的版本。下一轮按校验器的 14 条契约生成
+`make-nabu-adt.py` 直到 `passed = true`。
