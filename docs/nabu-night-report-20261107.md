@@ -100,3 +100,50 @@ python3 scripts/nabu_esp_log.py <日志文件>    # 解析 NABULOG2/NABUCFG2 结
    或以只读模式读 `os_lba 2739968` 做验证。
 3. kext 方案二选一：按未定义符号名重链 Apple kext，或源码构建最小驱动集（APFS/UFS/GPU）。
 4. 用户态：RestoreRamDisk 明文可用，可先做 dyld/launchd 的小闭环验证。
+
+---
+
+## 7. 上机前的离线验收（round 6 新增）
+
+### 7.1 镜像结构自检（`verify_android_boot_image`）
+
+```
+header_magic ANDROID!   page_size 4096
+kernel 字段 gzip → ARM64 Image "ARM\x64"，解压 7,264 B，附 FDT 3,335 B（含 qcom board-id / msm-id）
+ramdisk NRAM：kernel 24,787,072 B + adt 11,424 B，Mach-O magic 0xfeedfacf
+```
+
+### 7.2 DarwinBoot 解析器复刻验收（`scripts/verify_darwinboot_kernel.py`）
+
+把 `DarwinBoot.c:119 ParseKernel()` 的全部拒绝条件在主机侧重实现，结果是
+**accepted = True**，说明设备端加载器不会在第一步就否掉这颗内核：
+
+```
+__TEXT           0xfffffe0007004000 0x001ac000  fileoff 0x00000000  prot 1
+__DATA_CONST     0xfffffe00071b0000 0x001b8000  fileoff 0x001ac000  prot 1
+__TEXT_EXEC      0xfffffe0007368000 0x0093c000  fileoff 0x00364000  prot 5
+__KLD            0xfffffe0007ca4000 0x00004000  fileoff 0x00ca0000  prot 5
+__LASTDATA_CONST 0xfffffe0007ca8000 0x00004000  fileoff 0x00ca4000  prot 1
+__KLDDATA        0xfffffe0007cac000 0x00008000  fileoff 0x00ca8000  prot 3
+__DATA           0xfffffe0007cb4000 0x0016c000  fileoff 0x00cb0000  prot 3
+__BOOTDATA       0xfffffe0007e20000 0x000d8000  fileoff 0x00d00000  prot 3
+__LINKINFO       0xfffffe0007ef8000 0x00050000  fileoff 0x00dd8000  prot 1
+__LINKEDIT       0xfffffe0007f48000 0x0097c000  fileoff 0x00e28000  prot 1
+entry 0xfffffe000759f488 ∈ __TEXT_EXEC   base 0xfffffe0007004000   span 0x18c0000
+cpusubtype 低字节 0（arm64，不触发 ARM64E 的 EL1 PAC 检查）
+```
+
+检查项与结论：magic/cputype/filetype ✓；sizeofcmds 与命令对齐 ✓；10 个非零段全部
+`vmsize ≤ WINDOW_SIZE(256 MiB)`、`filesize ≤ vmsize`、文件内不越界、两两不重叠 ✓；
+恰好一条 `LC_UNIXTHREAD`（cmdsize 288、flavor 6、count 68）✓；入口落在可执行段内 ✓；
+整体 span 24.75 MiB ≪ 窗口 ✓。
+
+反向对照：sheng 时代的 `kernel-nabu26.macho` 在同一检查下 `accepted = False`
+（arm64e 子类型 + 入口不在可执行段），说明这套验收确实会拒绝不合格镜像，
+不是空跑通过。
+
+### 7.3 ESP/EFI 路线一致性
+
+- UniXNU 读的配置文件名确认为 `unixnu.toml`（`UniXNULib/Config.c:1511`），
+  与 `out/esp-payload/EFI/UniXNU/unixnu.toml` 一致；`path/adt` 指向 `Payloads/` 下实际存在的文件。
+- 菜单里的 `type = "xnu"`、`Payloads/kernel.macho`、`Payloads/kernel.macho.adt` 三项与 ESP 目录逐一对应。
