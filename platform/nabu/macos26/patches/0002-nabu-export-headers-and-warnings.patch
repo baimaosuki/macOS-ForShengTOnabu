@@ -1,0 +1,37 @@
+diff --git a/makedefs/MakeInc.def b/makedefs/MakeInc.def
+index 140ff56..e4e08c4 100644
+--- a/makedefs/MakeInc.def
++++ b/makedefs/MakeInc.def
+@@ -303,7 +303,7 @@ WARNFLAGS_STD := $(WARNFLAGS_STD) \
+ 
+ 
+ # XNU owns the reserved identifiers used by its system ABI.
+-ifeq ($(CURRENT_MACHINE_CONFIG),SHENG)
++ifneq ($(filter $(CURRENT_MACHINE_CONFIG),SHENG NABU),)
+ WARNFLAGS_STD += -Wno-reserved-identifier
+ endif
+ 
+diff --git a/pexpert/pexpert/arm64/Makefile b/pexpert/pexpert/arm64/Makefile
+index 1d29f3a..2546615 100644
+--- a/pexpert/pexpert/arm64/Makefile
++++ b/pexpert/pexpert/arm64/Makefile
+@@ -17,7 +17,8 @@ PRIVATE_DATAFILES = \
+ 	vhe_disable.h \
+ 	board_config.h \
+ 	boot.h \
+-	H17.h
++	H17.h \
++	NABU.h
+ 
+ 
+ PRIVATE_KERNELFILES = \
+@@ -34,7 +35,8 @@ PRIVATE_KERNELFILES = \
+ 	H16.h \
+ 	H17.h \
+ 	VMAPPLE.h \
+-	SHENG.h
++	SHENG.h \
++	NABU.h
+ 
+ 
+ # Headers installed into System.framework/PrivateHeaders (userspace internal SDK only).
