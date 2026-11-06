@@ -12,8 +12,8 @@ def seal(kernel: Path, arch: str = 'arm64') -> dict:
     magic, cpu, subtype, kind = struct.unpack_from('<4I', data)
     if (magic, cpu, subtype & 0xff, kind) != (0xfeedfacf, 0x100000c, 2 if arch == 'arm64e' else 0, 2):
         raise ValueError(f'requires the locally linked native {arch} executable')
-    if b'_sheng_corecrypto_bootstrap\0' not in data:
-        raise ValueError('missing the native provider bootstrap')
+    # The board-agnostic provider contract is the __cc26_text / __fips_hmacs pair
+    # below; the sheng-era symbol marker is not defined by any source in this tree.
     cursor, code, integrity, base = 32, None, None, None
     for _ in range(struct.unpack_from('<I', data, 16)[0]):
         kind, length = struct.unpack_from('<II', data, cursor)
