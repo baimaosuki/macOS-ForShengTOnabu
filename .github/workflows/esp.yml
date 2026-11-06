@@ -27,6 +27,21 @@ jobs:
           python3 scripts/sources.py fetch --group core
           python3 scripts/sources.py fetch --group nabu
           python3 scripts/fetch_components.py
+      - name: Select Xcode and expose the LLVM toolchain
+        run: |
+          set -euo pipefail
+          pick=$(ls -d /Applications/Xcode_27.0*.app 2>/dev/null | sort -V | tail -1)
+          [ -z "$pick" ] && pick=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+          echo "selected: $pick"
+          sudo xcode-select -s "$pick"
+          xcodebuild -version
+          sudo mkdir -p /usr/local/edk2bin
+          for t in clang clang++ lld ld.lld ld64.lld llvm-objcopy; do
+            src=$(xcrun -f "$t" 2>/dev/null || true)
+            if [ -n "$src" ]; then sudo ln -sf "$src" "/usr/local/edk2bin/$t"; echo "shim $t -> $src"; fi
+          done
+          ls -l /usr/local/edk2bin || true
+          echo "CLANG_BIN=/usr/local/edk2bin/" >> "$GITHUB_ENV"
       - name: Fetch pinned Mu_Basecore EDK2 base
         run: |
           set -euo pipefail
@@ -42,12 +57,14 @@ jobs:
           ls UniXNU/package/Mu_Basecore/MdePkg/MdePkg.dec
       - name: Build UniXNU.efi
         run: |
+          set -euo pipefail
           cd UniXNU/package
-          JOBS=4 ./build.sh -b "${{ inputs.target }}" 2>&1 | tail -40
+          JOBS=4 ./build.sh -b "${{ inputs.target }}" -t CLANGDWARF 2>&1 | tail -60
       - name: Build DarwinBoot.efi
         run: |
+          set -euo pipefail
           cd UniXNU
-          JOBS=4 TARGET="${{ inputs.target }}" ./scripts/build-darwinboot.sh 2>&1 | tail -40
+          JOBS=4 TARGET="${{ inputs.target }}" ./scripts/build-darwinboot.sh 2>&1 | tail -60
       - name: Collect EFI payload
         if: always()
         run: |
