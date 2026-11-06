@@ -45,6 +45,7 @@ jobs:
         with:
           python-version: '3.13'
       - run: python3 scripts/sources.py fetch --group core
+      - run: python3 scripts/fetch_components.py
       - run: python3 scripts/apply_patches.py
       - run: python3 scripts/sources.py verify --group core
       - run: python3 -m unittest discover -s tests -v
@@ -274,9 +275,18 @@ jobs:
       - run: python3 scripts/apply_patches.py
       - run: brew install cmake ninja unifdef
       - uses: actions/cache@v4
+        id: kdk-cache
         with:
           path: private/apple/Kernel_Debug_Kit_26.5_build_25F71.dmg
           key: macos26-kdk-${{ hashFiles('config/macos26.json') }}
+      - name: Fetch pinned KDK when the cache is cold
+        run: python3 scripts/fetch_inputs.py --kind kdk --config config/macos26.json --jobs 8
+      - name: Save pinned KDK input
+        if: steps.kdk-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: private/apple/Kernel_Debug_Kit_26.5_build_25F71.dmg
+          key: ${{ steps.kdk-cache.outputs.cache-primary-key }}
       - name: Select stable KDK staging path
         run: echo "SHENG_KDK_EXPANDED=$RUNNER_TEMP/sheng-kdk-25F71" >> "$GITHUB_ENV"
       - run: bash scripts/verify_kdk.sh config/macos26.json
