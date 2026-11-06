@@ -321,3 +321,51 @@ QEMU 里 stage1 全流程 PASS、XNU 跑到 Mach 初始化（`timer_queue_assign
 
 剩下三件事都卡在设备或外部条件上：真机首启实测、kext 重链、BaseSystem 的 `.aea`
 个性化加密（需 Apple TSS 密钥，离线无解）。
+
+---
+
+## 12. kext 重链可行性量化（round 11 新增，给 §4 的硬边界补证据）
+
+工具：`scripts/analyze_kext_symbols.py`（新增）。思路是内核缓存里每个 kext 仍是独立
+Mach-O 镜像、各自带 `LC_SYMTAB`，所以**未定义符号的名字还在**，可以拿我们源码重建的
+内核导出表去比对。
+
+```
+我方内核导出符号        87,024
+KC 里含未定义符号的 kext  342
+未定义符号合计          150,887
+我方内核能解析           123,100   → 81.6%
+```
+
+典型 kext：
+
+| kext | 未定义 | 可解析 | 比例 |
+|---|---|---|---|
+| AppleBCMWLANCore | 1,574 | 512 | 33% |
+| **apfs** | 1,278 | 1,099 | **86%** |
+| IO80211Family | 1,014 | 709 | 70% |
+| AGXG13G | 1,005 | 550 | 55% |
+| IONVMeFamily | 842 | 695 | 83% |
+| IOThunderboltFamily | 827 | 819 | **99%** |
+
+**怎么读这组数**：重建内核的 ABI 忠实度其实很高（apfs 86%、雷电 99%），说明
+`NABU` 目标编译出来的 XNU 与 Apple 那颗内核在符号层面基本对齐。但这**不能**变成
+“把 Apple kext 装到我们内核上”的办法——真正卡住的不是符号是否存在，而是
+§4.1 那个事实：链式修复表在 Apple 构建时就已全部解成绝对地址
+（`imports_count = 0`），**槽位与符号名之间的对应关系已经不存在**，没法按名字重建引用。
+换句话说：符号表能告诉我们“缺不缺”，不能告诉我们“往哪写”。
+
+### 12.1 由此修正的一条路线（原 §6 的“下一步”细化）
+
+`IOKit` 的核心（`IOService`/`IORegistry`/`IOMemoryDescriptor` 等）本来就编在 XNU 里，
+属于内核的一部分；只有 `IOStorageFamily`、`IOUSBFamily` 这类*家族*才是 kext。而我们
+仓库里**有 `IOStorageFamily` 的源码**（`sources/macos26/IOStorageFamily`），也有自己的
+`UniXNU/drivers/NativeUfs`。所以上机之后真正可推进的路线是：
+
+1. 把 `IOStorageFamily` 与 `NativeUfs` 以**内核内建组件**的方式静态链进
+   `kernel.development.nabu`（而不是打成 kext 等加载器搬运），并注册对应的
+   IOKit personality；
+2. 用 §8 的 stage1 把 UFS 控制器（`0x01d84000`）暴露给这颗内建驱动，只读挂载
+   `os_lba 2739968` 所在的卷做验证；
+3. 这一步做完，才谈得上“macOS 有自己的根设备”；在此之前，裸内核预期停在
+   `timer_queue_assign` 之后的 Mach 初始化/根设备查找。
