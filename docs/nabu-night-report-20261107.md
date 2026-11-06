@@ -405,3 +405,30 @@ tags 0x80000100  page 4096  header_version 0
 
 如果没有这一步，明天 `fastboot boot` 要么因为把内核丢到 0x8000 直接失败，要么
 加载成功但 stage1 报 “NRAM ramdisk container not found in Bank 0”。
+
+---
+
+## 14. 收尾一致性核查（round 13）
+
+```
+nabu/image/nabu-macos26-kernel.img                24813568  63ef91fed0792419
+nabu/image/kernel.macho.adt                          11424  0d262564d898aa6e
+nabu/image/unixnu.toml                                 311  a16b7de7621b9cba
+nabu/kernel/kernel.development.nabu               24787072  83ec42f2bd5d0b67
+esp-payload/EFI/UniXNU/UniXNU.efi                    90112  19e1b4fff9a7b3ce
+esp-payload/EFI/UniXNU/Drivers/DarwinBoot.efi        45056  4ceb18422e446db5
+esp-payload/EFI/UniXNU/Drivers/UniXNUDxe.efi         16384  ecf6729ce8bb2582
+esp-payload/EFI/UniXNU/Payloads/kernel.macho      24787072  83ec42f2bd5d0b67
+esp-payload/EFI/UniXNU/Payloads/kernel.macho.adt     11424  0d262564d898aa6e
+macos26-assets/userspace/dyld.arm64                1309040  585d721b84b22fa9
+macos26-assets/userspace/launchd.arm64              617024  c9bf83af3d664186
+
+内核：image 与 ESP 载荷同一颗 ✓
+ADT ：image 与 ESP 同一份          ✓
+ADT 校验：passed=True 14/14 failed=0 warnings=0
+ParseKernel 复刻：entry 0xfffffe000759f488 ∈ __TEXT_EXEC，base 0xfffffe0007004000，
+                  span 0x18c0000，accepted=True
+启动参数：image toml / ESP toml / stage1 C 字符串，cpus=1 三处一致
+```
+
+早上接设备的一张纸见 [nabu-handoff.md](nabu-handoff.md)。
