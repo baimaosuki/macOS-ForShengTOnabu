@@ -273,3 +273,51 @@ AUTIA/AUTIB (0xff23_03d5 / 0xbf23_03d5) → 0 处
 
 即内核中**没有任何指针认证指令**，与 SM8150 的 Cortex-A76/A55（armv8.2，无 PAC）匹配；
 `cpusubtype` 也是低字节 0（arm64，非 arm64e）。这条与 §7 的 DarwinBoot 检查互为印证。
+
+---
+
+## 10. 设备侧一键跑本（round 10 新增）
+
+报告里的步骤做成了可直接执行的脚本 `scripts/nabu_device_session.sh`（已 `bash -n`
+检查 + 全流程 dry-run 验证过；除 ESP 的字节备份外不写任何分区，全程没有
+`fastboot flash` 这个词的有效调用）：
+
+```bash
+cd ~/.gemini/antigravity/scratch/macOS-ForNabu/macOS-ForSheng
+
+./scripts/nabu_device_session.sh check          # 只读：镜像哈希 + 两个 slot 变量
+./scripts/nabu_device_session.sh check --dry-run # 不接设备先看会执行什么
+./scripts/nabu_device_session.sh backup         # ESP 字节备份（dd + pull + 校验）
+./scripts/nabu_device_session.sh boot           # fastboot boot，仅 RAM
+./scripts/nabu_device_session.sh collect        # 事后收 dmesg / 提示要拍哪些照片
+```
+
+- `check` 会打印镜像大小/sha256，并读 `slot-unbootable:b`、`slot-retry-count:b`、
+  `current-slot`，方便和“跑之前”的值对照。
+- `backup` 走 `adb shell su -c 'dd if=/dev/block/by-name/esp …'`，拉到
+  `private/nabu-backup/esp-<时间戳>.img` 并写 `.sha256` 旁注。
+- `boot` 打印**屏幕上应该依次出现什么**（banner → NRAM PA/KERNEL BYTES/HANDOFF →
+  XNU 详细输出 → panic 或停在 Darwin Kernel Version 之后），以及
+  “60 秒无输出就 电源+音量下 回 fastboot” 的处理方式。
+- `collect` 尝试抓 `adb shell dmesg`，并提示另外两样要带回来的东西：panic 屏幕照片、
+  `fastboot getvar all | grep slot-` 的输出。
+
+dry-run 实测（节选）：
+
+```
+image: …/out/nabu/image/nabu-macos26-kernel.img (24813568 bytes)
+sha256: d9557c9e7dfbed1d7693222ae019d9eee34cd8ab6b8e70a9f4c69d17950df606
+  [dry-run] fastboot getvar slot-unbootable:b
+  [dry-run] fastboot getvar slot-retry-count:b
+  [dry-run] fastboot boot …/nabu-macos26-kernel.img
+```
+
+## 11. 现在的状态一句话
+
+能离线做的都做完了：内核（0008 版）→ DarwinBoot 解析器复刻验收 PASS →
+ADT 严格契约 14/14 → stage1 契约审计并修掉 `cpus=8`/UFS 根/窗口不一致 →
+QEMU 里 stage1 全流程 PASS、XNU 跑到 Mach 初始化（`timer_queue_assign` 冷路径）→
+用户态 dyld/launchd 完成 PAC 降级 → 镜像 `d9557c9e…` 待上机。
+
+剩下三件事都卡在设备或外部条件上：真机首启实测、kext 重链、BaseSystem 的 `.aea`
+个性化加密（需 Apple TSS 密钥，离线无解）。

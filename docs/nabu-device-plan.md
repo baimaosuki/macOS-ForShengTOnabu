@@ -83,3 +83,17 @@ out/esp-payload/                                  ESP 安装目录树 + NABU-ESP
    阶段就停下（或拿不到 root 设备），但能看到 `NABULOG2` 沙盒日志并确认 EL1 交接/显示/串口链路。
 2. 首启单核（ADT 仅 `cpu@0`，boot-args `cpus=1`），UFS/GPU 节点全部不出现。
 3. 全程 `fastboot boot`，不写任何分区；`fastboot flash` 在本文档中是禁止项。
+
+
+## 6. 一键脚本（推荐）
+
+以上步骤已封装：
+
+```bash
+./scripts/nabu_device_session.sh check     # 只读检查 + 镜像哈希
+./scripts/nabu_device_session.sh backup    # ESP 字节备份
+./scripts/nabu_device_session.sh boot      # fastboot boot（仅 RAM）
+./scripts/nabu_device_session.sh collect   # 收日志
+```
+
+任何子命令加 `--dry-run` 可先看会执行什么。
