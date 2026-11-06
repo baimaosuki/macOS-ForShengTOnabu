@@ -193,3 +193,32 @@ fileset 条目 346 个，全部带 __TEXT，代码合计 13.3 MB
 
 内核侧 ABI 也已就位：`0008-nabu-sparse-prelink-index.patch` 打开 kalloc 的 `__macho_list`
 稀疏 prelink 解析并导出 `kalloc_sparse_prelink_index_version = 1`（`emit_prelink.py` 的准入检查）。
+
+## 07:05 更新：fileset prelink 原型（阶段一：布局）跑通
+
+新增 `scripts/prelink_fileset_kernel.py`。对 `--root com.apple.filesystems.apfs` +
+`com.apple.driver.AppleMobileFileIntegrity` 求依赖闭包后实测：
+
+```
+组件 9 个，组件正文 3,227,691 B
+__PRELINK_TEXT   va 0xfffffe0008a0c000  size 745,472  fileoff 24,788,992
+__PLK_TEXT_EXEC  va 0xfffffe0008b32000  size 2,523,136
+__PLK_DATA_CONST va 0xfffffe0008d9a000  size 331,776
+__PRELINK_DATA   va 0xfffffe0008daf000  size 86,016
+稀疏头索引 __macho_list va 0xfffffe0008b31f38，9 个条目
+输出 /tmp/nabu-prototype.macho 28,475,392 B（阶段一，loadable=false）
+```
+
+即：文件集内核缓存的 kext 段可以被搬进 native kernel 的空占位段，段命令/节命令原地
+改写、数据追加在文件尾，与 `emit_prelink.py` 的 `append_segment` 思路一致。
+
+## 阶段二待办（下一轮）
+
+1. **链式修复解析位置修正**：`LC_DYLD_CHAINED_FIXUPS` 只出现在**顶层**镜像（1 个），
+   不在每个 fileset 条目里；当前实现按条目找，所以 `pointer_slots_total` 报 0。要按
+   顶层段索引遍历 `starts_in_image`。
+2. **指针重绑**：对每个被搬运组件，遍历其数据段链式槽位，解析 rebase/bind 目标；
+   组件内目标 → `target + slide`；内核符号 → 用 native kernel 导出表按名解析；写回裸 64 位。
+3. **kmod 元数据**：组件的 `_PrelinkKmodInfo` 结构（start/stop、header 地址）也要按新
+   布局重写，否则 kext 加载链表断开。
+4. 之后才轮到 `__PRELINK_INFO` plist 重写（新 VA 下的 kext 表）。
