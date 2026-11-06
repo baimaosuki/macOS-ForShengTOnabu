@@ -128,8 +128,8 @@ def rewrite_chained_fixups(image_buf: bytearray, parsed: dict, high8: int = 0xFF
 
     off, size = struct.unpack_from('<II', image_buf, commands[0] + 8)
     blob = bytes(image_buf[off:off + size])
-    version, starts, _, _, imports, _, _ = struct.unpack_from('<7I', blob)
-    if version or imports or not 28 <= starts <= size - 4:
+    version, starts, _, _, imports, imports_format, symbols_format = struct.unpack_from('<7I', blob)
+    if version or not 28 <= starts <= size - 4:
         raise ValueError('unsupported chained fixup header for Nabu translation')
 
     count, = struct.unpack_from('<I', blob, starts)
@@ -137,6 +137,7 @@ def rewrite_chained_fixups(image_buf: bytearray, parsed: dict, high8: int = 0xFF
     auth_converted = 0
     chains_scanned = 0
     detected_format = 0
+    userland: dict[str, int] = {}
     key_counts = {'IA': 0, 'IB': 0, 'DA': 0, 'DB': 0}
 
     for index, segment in enumerate(parsed['segments'][:count]):
@@ -145,6 +146,32 @@ def rewrite_chained_fixups(image_buf: bytearray, parsed: dict, high8: int = 0xFF
             continue
         pos = starts + relative
         span, page_size, fmt, _, _, pages = struct.unpack_from('<IHHQIH', blob, pos)
+        if fmt in (9, 12):
+            # Userspace arm64e chains: bits are bind(63), auth(62), next(51..61);
+            # an auth rebase carries a 32-bit vm offset, not the kernel cache's
+            # 30-bit target, so the kernel-cache conversion below does not apply.
+            stats = {'auth_rebase': 0, 'bind': 0, 'rebase': 0}
+            for page in range(pages):
+                start, = struct.unpack_from('<H', blob, pos + 22 + 2 * page)
+                if start == 0xFFFF:
+                    continue
+                site = page * page_size + start
+                while True:
+                    raw, = struct.unpack_from('<Q', image_buf, segment['fileoff'] + site)
+                    if (raw >> 63) & 1:
+                        stats['bind'] += 1
+                    elif (raw >> 62) & 1:
+                        stats['auth_rebase'] += 1
+                    else:
+                        stats['rebase'] += 1
+                    following = (raw >> 51) & 0x7FF
+                    if not following:
+                        break
+                    site += following * 4
+            userland['pointer_format'] = fmt
+            for key, value in stats.items():
+                userland[key] = userland.get(key, 0) + value
+            continue
         if fmt not in (7, 8) or page_size not in (4096, 16384):
             raise ValueError(f'expected format-7 or format-8 chained fixups, got format={fmt}, page_size={page_size}')
         detected_format = fmt
@@ -185,6 +212,10 @@ def rewrite_chained_fixups(image_buf: bytearray, parsed: dict, high8: int = 0xFF
                 site += following * 4
 
     return {
+        'userland_chains': userland,
+        'imports_count': imports,
+        'imports_format': imports_format,
+        'symbols_format': symbols_format,
         'format': detected_format,
         'chains_scanned': chains_scanned,
         'pointers_total': pointers_total,
