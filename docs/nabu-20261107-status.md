@@ -152,3 +152,44 @@ ValueError: Expected MH_EXECUTE kernel images                   # 内核缓存�
 另：`board.toml` 的 `early_security_init` 仍是 sheng 记录的
 `com.apple.driver.AppleMobileFileIntegrity=0xfffffff005b70ae0`，macOS 26.5 的实际地址
 要从 `kc.mac13g.macho` 的符号表重新取。
+
+---
+
+## 06:00 更新：封签内核落地
+
+```
+out/nabu/kernel/kernel.development.nabu          24,786,872 B
+sha256 4554b22994cbf6be97d3c4a0d08b34f2e97f769eafcba864d236f94530d15e64
+UUID   71582AC5-DFC1-3403-8E7E-103ACE5A35DE (arm64)  dSYM UUID 一致
+build.json: executable_kernel_built = true, build_failures = []
+corecrypto_integrity: __cc26_text @ file 0xc45994，HMAC 已写入 __fips_hmacs
+```
+`kernel.development.nabu.map` 与 `.dSYM` 一并入库（后者用于后续符号解析与 panic 定位）。
+
+## 06:45 更新：文件集内核缓存的真实结构（更正前文判断）
+
+`scripts/analyze_fileset_kernelcache.py` 对 `kc.mac13g.arm64.macho` 的实测：
+
+```
+fileset 条目 346 个，全部带 __TEXT，代码合计 13.3 MB
+父级 __PRELINK_TEXT vmsize 13,369,344 (12.75 MB)、__PRELINK_INFO 4,292,608
+                              ← kext 段仍然被压进父级 coalesced 区间
+关键 root 的加载地址（非页对齐，说明是各 kext 的 Mach-O 头地址）：
+  com.apple.filesystems.apfs                      text 345.5 KB  va 0xfffffe0007c0f8b0
+  com.apple.driver.AppleMobileFileIntegrity       text 120.4 KB  va 0xfffffe00075e56d0
+  com.apple.iokit.IOGPUFamily                     text  47.3 KB  va 0xfffffe000798b490
+  com.apple.iokit.IOMobileGraphicsFamily          text  37.8 KB  va 0xfffffe00079c45b0
+```
+
+结论修正：物理布局与旧式预链接内核**同构**（kext 段在父级 coalesced 区间内），
+`emit_prelink.py` 的段拷贝 + `append_segment` 增长空 `__PRELINK_TEXT` 的逻辑可以直接用。
+真正的缺口收敛为两处：
+
+1. 组件发现：旧工具用 `_PrelinkExecutableLoadAddr` 在父镜像里定位 kext 头；文件集内核要在
+   顶层解析 `LC_FILESET_ENTRY`（本工具已实现解析，346/346 全部可枚举）。
+2. 指针重绑：旧工具读 `_PrelinkLinkKASLROffsets`（裸 64 位指针表），macOS 26.5 用链式修复
+   （`nabu_pac_strip.py` 已实测 982,911 个指针、format 8），需要把链式槽位解析成
+   “站点→目标”后再按 slide 重写。
+
+内核侧 ABI 也已就位：`0008-nabu-sparse-prelink-index.patch` 打开 kalloc 的 `__macho_list`
+稀疏 prelink 解析并导出 `kalloc_sparse_prelink_index_version = 1`（`emit_prelink.py` 的准入检查）。
