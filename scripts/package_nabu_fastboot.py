@@ -87,7 +87,13 @@ def package_nabu_fastboot(kernel_path: Path, uefi_payload: bytes, dtb: bytes, ou
     adt_bytes = adt_path.read_bytes()
     ramdisk_payload = struct.pack('<4sII', b'NRAM', len(kernel_bytes), len(adt_bytes)) + kernel_bytes + adt_bytes + menu.encode('utf-8')
     kernel_dtb = gzip.compress(uefi_payload, mtime=0) + dtb
-    image_bytes = build_v0_bootimg(kernel_dtb, ramdisk_payload)
+    # SM8150/ABL load addresses: the stage-1 loader and the NRAM container must
+    # land inside DRAM bank 0, otherwise the Bank-0 NRAM scan cannot see the
+    # ramdisk and the header points the loader below 0x80000000 (no RAM).
+    image_bytes = build_v0_bootimg(kernel_dtb, ramdisk_payload, base=0,
+                                   kernel_offset=0x80008000,
+                                   ramdisk_offset=0x81000000,
+                                   tags_offset=0x80000100)
     image_path = out_dir / 'nabu-macos26-kernel.img'
     image_path.write_bytes(image_bytes)
     container_sha = hashlib.sha256(image_bytes).hexdigest()

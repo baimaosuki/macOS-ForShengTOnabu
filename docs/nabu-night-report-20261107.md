@@ -173,7 +173,7 @@ cpusubtype 低字节 0（arm64，不触发 ARM64E 的 EL1 PAC 检查）
 ```
 stage1  nabu-darwinboot-fastboot.bin   7,232 B（原 7,264 B）
 容器    out/nabu/image/nabu-macos26-kernel.img   24,813,568 B
-        sha256 d9557c9e7dfbed1d7693222ae019d9eee34cd8ab6b8e70a9f4c69d17950df606
+        sha256 63ef91fed07924190cc7b0fd93badf904448082ed9f59b017b5b5f2b110cbda3
 NRAM    kernel 24,787,072 B + adt 11,424 B（14/14 通过）
 stage1 生效参数：-v debug=0x14e keepsyms=1 cpus=1 armcpu-self-ipi=1 nabu-vc-scale=2
 ```
@@ -306,7 +306,7 @@ dry-run 实测（节选）：
 
 ```
 image: …/out/nabu/image/nabu-macos26-kernel.img (24813568 bytes)
-sha256: d9557c9e7dfbed1d7693222ae019d9eee34cd8ab6b8e70a9f4c69d17950df606
+sha256: 63ef91fed07924190cc7b0fd93badf904448082ed9f59b017b5b5f2b110cbda3
   [dry-run] fastboot getvar slot-unbootable:b
   [dry-run] fastboot getvar slot-retry-count:b
   [dry-run] fastboot boot …/nabu-macos26-kernel.img
@@ -369,3 +369,39 @@ KC 里含未定义符号的 kext  342
    `os_lba 2739968` 所在的卷做验证；
 3. 这一步做完，才谈得上“macOS 有自己的根设备”；在此之前，裸内核预期停在
    `timer_queue_assign` 之后的 Mach 初始化/根设备查找。
+
+---
+
+## 13. 修掉一个明天会致命的问题：boot 头地址（round 12 新增）
+
+`package_nabu_fastboot` 一直用的是**ARM32 风格的默认地址**做 Android Boot Image v0 头：
+
+```
+kernel_addr = 0x00008000      ← SM8150 上不是 RAM（低端地址），ABL 把 stage1 放过去必炸
+ramdisk_addr = 0x01000000     ← 同样不是 RAM，且低于 stage1 的 Bank-0 扫描下界 0x81000000
+tags_addr   = 0x00000100
+```
+
+改成了 SM8150/ABL 该有的取值：
+
+```
+kernel_addr  = 0x80008000     ← DRAM bank0，Image 头里 text_offset=0x8000 与 RAM 基址 0x80000000 自洽
+ramdisk_addr = 0x81000000     ← 正好是 stage1 的 Bank-0 扫描起点，NRAM 容器一定被找到
+tags_addr    = 0x80000100
+```
+
+重打后的镜像：
+
+```
+ANDROID! kernel 7527 @ 0x80008000  ramdisk 24798819 @ 0x81000000
+tags 0x80000100  page 4096  header_version 0
+文件 24,813,568 B  sha256 63ef91fe…
+```
+
+**为什么改地址不会把 stage1 弄坏**：两个 stage1 的 ELF 都**没有任何重定位表**
+（`readelf -r` → “该文件中没有重定位信息”），全部是 `adrp/add` 相对寻址，整段平移
+自洽；改完重新跑 QEMU 预检依旧 PASS（NRAM PA `0x81000000`、KERNEL BYTES
+`0x17a3880`、ENTRY PA `0xc059b488`、ARGS PA `0xc18c0000`）。
+
+如果没有这一步，明天 `fastboot boot` 要么因为把内核丢到 0x8000 直接失败，要么
+加载成功但 stage1 报 “NRAM ramdisk container not found in Bank 0”。
