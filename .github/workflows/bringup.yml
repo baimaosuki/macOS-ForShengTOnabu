@@ -333,6 +333,7 @@ jobs:
           path: |
             ${{ env.NATIVE_OUT }}/build.json
             ${{ env.NATIVE_OUT }}/kernel.development.${{ inputs.board }}
+            ${{ env.NATIVE_OUT }}/kernel.development.${{ inputs.board }}.unstripped.noctf
             ${{ env.NATIVE_OUT }}/kernel.development.${{ inputs.board }}.map
             ${{ env.NATIVE_OUT }}/kernel.development.${{ inputs.board }}.dSYM/
             ${{ env.NATIVE_OUT }}/storage-driver/
@@ -359,11 +360,12 @@ jobs:
             ${{ env.NATIVE_OUT }}/ArmDTPlatform.o
             ${{ env.NATIVE_OUT }}/storage-driver/
             ${{ env.NATIVE_OUT }}/ufs-driver/
-            ${{ env.NATIVE_OUT }}/obj/DEVELOPMENT_ARM64_SHENG/libkernel.development.sheng.a
-            ${{ env.NATIVE_OUT }}/obj/DEVELOPMENT_ARM64_SHENG/compile_commands.json
+            ${{ env.NATIVE_OUT }}/obj/DEVELOPMENT_ARM64_*/libkernel.development.*.a
+            ${{ env.NATIVE_OUT }}/obj/DEVELOPMENT_ARM64_*/compile_commands.json
             ${{ env.NATIVE_OUT }}/kernel.development.${{ inputs.board }}
+            ${{ env.NATIVE_OUT }}/kernel.development.${{ inputs.board }}.unstripped.noctf
             ${{ env.NATIVE_OUT }}/kernel.development.${{ inputs.board }}.map
             ${{ env.NATIVE_OUT }}/kernel.development.${{ inputs.board }}.dSYM/
-            ${{ env.NATIVE_OUT }}/obj/DEVELOPMENT_ARM64_SHENG/kernel.development.sheng.link/
+            ${{ env.NATIVE_OUT }}/obj/DEVELOPMENT_ARM64_*/kernel.development.*.link/
           if-no-files-found: warn
           retention-days: 7

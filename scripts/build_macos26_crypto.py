@@ -8,7 +8,7 @@ from pathlib import Path
 import re
 import subprocess
 
-from build_macos26_xnu import ROOT, OUT, ARCH, audit_object, capture, run, save, sha
+from build_macos26_xnu import ROOT, OUT, ARCH, KERNEL_NAME, MACHINE, BOARD, audit_object, capture, run, save, sha
 
 
 def names(path: Path, mode: str) -> set[str]:
@@ -62,7 +62,7 @@ def build_provider(args, record: dict, sdk: Path, xnu: Path, env: dict) -> Path:
     for folder in sorted({h.parent for h in source.rglob('*.h')
                           if 'test' not in str(h.relative_to(source)).lower()}):
         command += ['-I', str(folder)]
-    kernel_archive = OUT / 'obj/DEVELOPMENT_ARM64_SHENG/libkernel.development.sheng.a'
+    kernel_archive = OUT / f'obj/DEVELOPMENT_ARM64_{MACHINE}/libkernel.development.{BOARD}.a'
     kernel_names = names(kernel_archive, '-U')
     report = dict(source_revision=record['sources']['sources/macos26/corecrypto'], module='26.0',
                   deployment='macOS 26.5', assembly_enabled=False, default_post_required=True,

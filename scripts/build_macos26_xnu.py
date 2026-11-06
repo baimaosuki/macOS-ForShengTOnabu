@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BOARD = os.environ.get('MACOS26_BOARD', 'sheng')
 PLATFORM = ROOT / f'platform/{BOARD}/macos26'
 MACHINE = BOARD.upper()
+KERNEL_NAME = f'kernel.development.{BOARD}'
 BASE_PLATFORM = ROOT / 'platform/sheng/macos26'
 OUT = ROOT / ('out/macos26-xnu' if BOARD == 'sheng' else f'out/macos26-xnu-{BOARD}')
 ARCH = 'arm64'
@@ -659,7 +660,7 @@ def link_kernel(args, record, common, sdk, source, env):
     crypto_input = '-Wl,-force_load,' + str(crypto) if ARCH == 'arm64e' else str(crypto)
     archives = [crypto_input, str(OUT / 'ArmDTPlatform.o'), str(OUT / 'ArmCpu.o'), str(firehose)]
     native_link_flags = ('-Wl,-headerpad,0x2000 -Wl,-map,'
-                         + str(OUT / 'kernel.development.sheng.map'))
+                         + str(OUT / (KERNEL_NAME + '.map')))
     run(common + ['build', 'BUILD_STATIC_LINK=1', 'BUILD_XNU_LIBRARY=0',
                   'CFLAGS_KERNEL=-mkernel', 'CXXFLAGS_KERNEL=-fapple-kext',
                   'CFLAGS_EXTRA=-DXNU_NATIVE_ARCH_TIMER=1 -DXNU_DT_PANIC_REGION=1 ' +
@@ -681,17 +682,17 @@ def link_kernel(args, record, common, sdk, source, env):
     if ARCH == 'arm64e':
         from native_macho import native_chained_fixups
         record['native_pointer_fixups'] = native_chained_fixups(kernel_bytes)
-    destination = OUT / 'kernel.development.sheng'
+    destination = OUT / KERNEL_NAME
     shutil.copy2(binary, destination)
     from seal_macos26_crypto import seal
     record['corecrypto_integrity'] = seal(destination, ARCH)
-    run(['xcrun', 'dsymutil', binary, '-o', OUT / 'kernel.development.sheng.dSYM'],
+    run(['xcrun', 'dsymutil', binary, '-o', OUT / (KERNEL_NAME + '.dSYM')],
         'kernel-dsym', record, env=env)
     record.update(executable_kernel_built=True, executable_kernel_sha256=sha(destination),
                   kernel_uuid=capture('xcrun', 'dwarfdump', '--uuid', str(destination)),
                   dsym_uuid=capture('xcrun', 'dwarfdump', '--uuid',
-                                   str(OUT / 'kernel.development.sheng.dSYM')),
-                  link_map_sha256=sha(OUT / 'kernel.development.sheng.map'),
+                                   str(OUT / (KERNEL_NAME + '.dSYM'))),
+                  link_map_sha256=sha(OUT / (KERNEL_NAME + '.map')),
                   purpose='Native executable link; runtime and userland ABI remain unqualified')
     save(record)
 
