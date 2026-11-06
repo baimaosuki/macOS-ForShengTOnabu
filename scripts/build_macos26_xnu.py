@@ -606,6 +606,28 @@ def compile_sources(args, record: dict) -> None:
         except (subprocess.CalledProcessError, ValueError) as error:
             failures.append(f'{component}: {error}')
         save(record)
+    shim = PLATFORM / 'shim/nabu_link_stubs.c'
+    if shim.is_file():
+        shim_object = OUT / 'nabu_link_stubs.o'
+        command, index = [], 0
+        arguments = compile_record['arguments']
+        while index < len(arguments):
+            arg = arguments[index]
+            if arg == compile_record['file']:
+                command.append(str(shim))
+            elif arg in ('-o', '-MF', '-MT', '-MQ', '-MJ'):
+                if arg == '-o':
+                    command += ['-o', str(shim_object)]
+                index += 1
+            elif arg not in ('-MMD', '-MD', '-MP'):
+                command.append(arg)
+            index += 1
+        try:
+            run(command, 'nabu-link-shim', record, cwd=Path(compile_record['directory']), env=env)
+            record['link_shim_object'] = dict(source_sha256=sha(shim), **audit_object(shim_object))
+        except (subprocess.CalledProcessError, ValueError) as error:
+            failures.append(f'nabu-link-shim: {error}')
+        save(record)
     record['platform_objects_built'] = len(record['platform_objects']) == 2
     record['build_failures'] = failures
     save(record)
@@ -659,6 +681,8 @@ def link_kernel(args, record, common, sdk, source, env):
     crypto = build_provider(args, record, sdk, source, env)
     crypto_input = '-Wl,-force_load,' + str(crypto) if ARCH == 'arm64e' else str(crypto)
     archives = [crypto_input, str(OUT / 'ArmDTPlatform.o'), str(OUT / 'ArmCpu.o'), str(firehose)]
+    if (OUT / 'nabu_link_stubs.o').is_file():
+        archives.append(str(OUT / 'nabu_link_stubs.o'))
     native_link_flags = ('-Wl,-headerpad,0x2000 -Wl,-map,'
                          + str(OUT / (KERNEL_NAME + '.map')))
     run(common + ['build', 'BUILD_STATIC_LINK=1', 'BUILD_XNU_LIBRARY=0',
