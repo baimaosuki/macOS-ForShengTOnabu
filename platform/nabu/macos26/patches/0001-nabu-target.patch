@@ -28,7 +28,7 @@ index d229106..140ff56 100644
  MACHINE_FLAGS_ARM64_T8132 = -DARM64_BOARD_CONFIG_T8132			-mcpu=apple-m4
  MACHINE_FLAGS_ARM64_T8142 = -DARM64_BOARD_CONFIG_T8142 			-mcpu=apple-m4+memtag+predres2
  
-+MACHINE_FLAGS_ARM64_NABU = -DARM64_BOARD_CONFIG_NABU -march=armv8.2-a
++MACHINE_FLAGS_ARM64_NABU = -DARM64_BOARD_CONFIG_NABU -DSHENG=1 -march=armv8.2-a
 +
  MACHINE_FLAGS_ARM64_SHENG = -DARM64_BOARD_CONFIG_SHENG -march=armv8-a
  
@@ -38,13 +38,14 @@ new file mode 100644
 index 0000000..19db90a
 --- /dev/null
 +++ b/pexpert/pexpert/arm64/NABU.h
-@@ -0,0 +1,21 @@
+@@ -0,0 +1,22 @@
 +/* SPDX-License-Identifier: MIT */
 +/* Native EL1 platform for SM8150 (nabu), derived from the UniXNU sm8150 machine layer. */
 +#ifndef _PEXPERT_ARM64_NABU_H
 +#define _PEXPERT_ARM64_NABU_H
 +
 +#define NABU                             1
++#define SHENG                            1
 +#define NO_MONITOR                       1
 +#define NO_ECORE                         1
 +#define ARM_ARCH_TIMER

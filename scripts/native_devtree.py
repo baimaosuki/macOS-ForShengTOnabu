@@ -296,6 +296,10 @@ def make_nabu_adt(path: Path, *, dram_base: int = 0xc0000000,
         # state string leaves the cpu unusable and a zero rate divides by zero.
         ('state', b'running\0'),
         ('timebase-frequency', struct.pack('<I', 19200000)),
+        # Without bus-frequency the kernel keeps bus_frequency_hz at 0 (bzero)
+        # and copies it into bus_clock_rate_hz; L154 then divides by zero.
+        ('bus-frequency', struct.pack('<Q', 100000000)),
+        ('clock-frequency', struct.pack('<Q', 2840000000)),
     ))]
     # XNU ArmDTPlatform requires interrupt-controller = "master\0" and name = "interrupt-controller\0"
     intc = _adt_node('intc', (

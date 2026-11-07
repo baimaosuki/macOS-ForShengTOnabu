@@ -254,7 +254,7 @@ jobs:
             Snapintosh/
             q1n1/
             sources/macos26/
-          key: macos26-sources-v1-${{ hashFiles('sources.lock.json', 'config/macos26-sources.json') }}
+          key: macos26-sources-v2-${{ hashFiles('sources.lock.json', 'config/macos26-sources.json') }}
       - run: python3 scripts/sources.py fetch --group core
       - run: python3 scripts/sources.py fetch --lock config/macos26-sources.json --group macos26
       - run: python3 scripts/sources.py fetch --group nabu
