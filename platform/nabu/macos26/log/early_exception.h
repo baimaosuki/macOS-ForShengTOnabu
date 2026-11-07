@@ -73,6 +73,13 @@ Lsheng_early_capture:
 	/* Low vectors run only with the MMU off; never treat the physical framebuffer as a mapped VA. */
 	ldr x0, [x19, #40]
 	tbnz x0, #0, Lsheng_early_finish
+/* Late repaint entry: paints the text rows from the record and returns
+ * without restoring lr/x20/x21, so a caller inside start.s keeps its state. */
+Lsheng_early_repaint:
+	adr	x19, EXT(sheng_early_exception_record)
+	mov	x0, #1
+	str	x0, [x19, #240]
+	b	Lsheng_early_draw
 Lsheng_early_draw:
 	ldr x0, [x19, #96]
 	cbz x0, Lsheng_early_finish
@@ -223,6 +230,12 @@ Lsheng_early_pixel_rows:
 	b.lo Lsheng_early_row
 	dsb sy
 Lsheng_early_finish:
+	ldr x0, [x19, #240]
+	cbz x0, 4f
+	mov x0, #0
+	str x0, [x19, #240]
+	ret
+4:
 	ldr x0, [x19]
 	cmp x0, #1
 	b.ne Lsheng_early_halt
@@ -299,7 +312,7 @@ Lsheng_mmu_off_fault:
 	b Lsheng_early_draw
 
 Lsheng_early_labels:
-	.ascii "XNU     X14     X15     NENT    L1TB    SCTLR   L2TB    PTBL    X9      X10     STAGES  "
+	.ascii "XNU     X14     X15     NENT    L1TB    SCTLR   L2B     ROOT    XVB     XPB     STAGES  "
 Lsheng_early_font:
 	/* Glyphs cover 0-9, A-Z, and space, with seven rows and five columns each. */
 	.byte 14,17,19,21,25,17,14
@@ -342,42 +355,7 @@ Lsheng_early_font:
 	.p2align 3
 	.globl EXT(sheng_early_exception_record)
 LEXT(sheng_early_exception_record)
-	.space 192, 0
+	.space 256, 0
 
-/* Probe channel: store scratch registers into the text rows and repaint.
- * The row values are read from the record at draw time, so calling this again
- * updates the screen. Everything the repaint clobbers is preserved, including
- * lr, because callers still need their arm_init return address. */
-.macro SHENG_EARLY_PROBE
-#if SHENG
-	sub	sp, sp, #144
-	stp	x2, x3, [sp, #0]
-	stp	x5, x9, [sp, #16]
-	stp	x10, x14, [sp, #32]
-	stp	x15, x19, [sp, #48]
-	stp	x21, x22, [sp, #64]
-	stp	x23, x24, [sp, #80]
-	stp	x26, x27, [sp, #96]
-	stp	lr, x28, [sp, #112]
-	adr	x19, EXT(sheng_early_exception_record)
-	str	x14, [x19, #8]
-	str	x15, [x19, #16]
-	str	x5,  [x19, #24]
-	str	x3,  [x19, #32]
-	str	x2,  [x19, #48]
-	str	x25, [x19, #56]
-	str	x9,  [x19, #64]
-	str	x10, [x19, #72]
-	bl	Lsheng_early_draw
-	ldp	x2, x3, [sp, #0]
-	ldp	x5, x9, [sp, #16]
-	ldp	x10, x14, [sp, #32]
-	ldp	x15, x19, [sp, #48]
-	ldp	x21, x22, [sp, #64]
-	ldp	x23, x24, [sp, #80]
-	ldp	x26, x27, [sp, #96]
-	ldp	lr, x28, [sp, #112]
-	add	sp, sp, #144
-#endif
-.endmacro
+
 
