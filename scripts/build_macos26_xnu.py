@@ -536,7 +536,7 @@ def compile_sources(args, record: dict) -> None:
     try:
         run(common + ['-k', 'build', 'BUILD_STATIC_LINK=1', 'BUILD_XNU_LIBRARY=1',
                       'CFLAGS_KERNEL=-mkernel', 'CXXFLAGS_KERNEL=-fapple-kext',
-                      'CFLAGS_EXTRA=-DXNU_NATIVE_ARCH_TIMER=1 -DXNU_DT_PANIC_REGION=1 ' +
+                      'CFLAGS_EXTRA=-DXNU_NATIVE_ARCH_TIMER=1 -DXNU_DT_PANIC_REGION=1 -DSHENG=1 ' +
                       ' '.join('-Wno-error=' + warning for warning in UPSTREAM_WARNINGS)],
             'source-archive', record, env=env)
     except subprocess.CalledProcessError:
@@ -687,7 +687,7 @@ def link_kernel(args, record, common, sdk, source, env):
                          + str(OUT / (KERNEL_NAME + '.map')))
     run(common + ['build', 'BUILD_STATIC_LINK=1', 'BUILD_XNU_LIBRARY=0',
                   'CFLAGS_KERNEL=-mkernel', 'CXXFLAGS_KERNEL=-fapple-kext',
-                  'CFLAGS_EXTRA=-DXNU_NATIVE_ARCH_TIMER=1 -DXNU_DT_PANIC_REGION=1 ' +
+                  'CFLAGS_EXTRA=-DXNU_NATIVE_ARCH_TIMER=1 -DXNU_DT_PANIC_REGION=1 -DSHENG=1 ' +
                   ' '.join('-Wno-error=' + w for w in UPSTREAM_WARNINGS),
                   'LD_KERNEL_LIBS=' + str(runtimes[0]),
                   'LD_KERNEL_ARCHIVES=' + ' '.join(archives),
