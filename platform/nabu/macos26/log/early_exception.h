@@ -234,6 +234,10 @@ Lsheng_early_finish:
 	cbz x0, 4f
 	mov x0, #0
 	str x0, [x19, #240]
+	/* The painters borrow x21 for the framebuffer base, but start.s keys
+	 * every bootstrap guard off "x21 == 0 means the first boot", so the
+	 * register has to look untouched when control returns to the caller. */
+	mov x21, #0
 	ret
 4:
 	ldr x0, [x19]
