@@ -44,12 +44,11 @@
  
  	/*
  	 * In order to reclaim memory on targets where TZ0 (or some other entity)
-@@ -641,10 +652,15 @@
+@@ -641,10 +652,14 @@
  	lsr		x5,  x24, #(ARM_TT_L2_SHIFT)
  	/* create_bootstrap_mapping(vbase, pbase, num_ents, L1 table, freeptr) */
  	create_bootstrap_mapping x0,  x4,  x5, x1, x2, x6, x10, x11, x12, x13
 +	SHENG_BOOTSTRAP_TRACE 4
-+	SHENG_EARLY_PROBE
 +
  
  	/* Setup the KVA bootstrap mapping */
