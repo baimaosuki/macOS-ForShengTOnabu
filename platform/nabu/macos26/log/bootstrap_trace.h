@@ -1,5 +1,10 @@
 /* SPDX-License-Identifier: MIT */
 /* Cold boot only: post-MMU markers require a temporary Device mapping and clobber x16-x18 and NZCV. */
+/* The assembler never sees the C-only -DSHENG flag, so default it here. */
+#ifndef SHENG
+#define SHENG 1
+#endif
+
 #ifndef SHENG_EARLY_ADDRESS_DEFINED
 #define SHENG_EARLY_ADDRESS_DEFINED
 /* Darwin assembly treats semicolons as comments; place each instruction on its own line. */
