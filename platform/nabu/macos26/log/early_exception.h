@@ -299,7 +299,7 @@ Lsheng_mmu_off_fault:
 	b Lsheng_early_draw
 
 Lsheng_early_labels:
-	.ascii "XNU     ELR     ESR     FAR     SPSR    SCTLR   TCR     TTBR0   TTBR1   MAIR    STAGES  "
+	.ascii "XNU     X14     X15     NENT    L1TB    SCTLR   L2TB    PTBL    X9      X10     STAGES  "
 Lsheng_early_font:
 	/* Glyphs cover 0-9, A-Z, and space, with seven rows and five columns each. */
 	.byte 14,17,19,21,25,17,14
@@ -343,3 +343,41 @@ Lsheng_early_font:
 	.globl EXT(sheng_early_exception_record)
 LEXT(sheng_early_exception_record)
 	.space 192, 0
+
+/* Probe channel: store scratch registers into the text rows and repaint.
+ * The row values are read from the record at draw time, so calling this again
+ * updates the screen. Everything the repaint clobbers is preserved, including
+ * lr, because callers still need their arm_init return address. */
+.macro SHENG_EARLY_PROBE
+#if SHENG
+	sub	sp, sp, #144
+	stp	x2, x3, [sp, #0]
+	stp	x5, x9, [sp, #16]
+	stp	x10, x14, [sp, #32]
+	stp	x15, x19, [sp, #48]
+	stp	x21, x22, [sp, #64]
+	stp	x23, x24, [sp, #80]
+	stp	x26, x27, [sp, #96]
+	stp	lr, x28, [sp, #112]
+	adr	x19, EXT(sheng_early_exception_record)
+	str	x14, [x19, #8]
+	str	x15, [x19, #16]
+	str	x5,  [x19, #24]
+	str	x3,  [x19, #32]
+	str	x2,  [x19, #48]
+	str	x25, [x19, #56]
+	str	x9,  [x19, #64]
+	str	x10, [x19, #72]
+	bl	Lsheng_early_draw
+	ldp	x2, x3, [sp, #0]
+	ldp	x5, x9, [sp, #16]
+	ldp	x10, x14, [sp, #32]
+	ldp	x15, x19, [sp, #48]
+	ldp	x21, x22, [sp, #64]
+	ldp	x23, x24, [sp, #80]
+	ldp	x26, x27, [sp, #96]
+	ldp	lr, x28, [sp, #112]
+	add	sp, sp, #144
+#endif
+.endmacro
+
