@@ -1,0 +1,828 @@
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -37,6 +37,7 @@
+ #include <arm64/machine_machdep.h>
+ #include <kern/cpc.h>
+ #include <arm64/instructions.h>
++#include <arm64/nabu_v82_emul.h>
+ 
+ #include <kern/debug.h>
+ #include <kern/exc_guard.h>
+@@ -1010,6 +1011,17 @@
+ 			break;
+ 		}
+ #endif /* CONFIG_XNUPOST */
++		/*
++		 * nabu: Kryo 485 implements ARMv8.2-A without
++		 * FEAT_SHA3/FEAT_SHA512/FEAT_SM3/FEAT_SM4/FEAT_PAuth, while the Apple
++		 * kernel collection is built for a machine that has them.  Emulate the
++		 * register-only subset here instead of treating the first such
++		 * instruction as fatal; encodings this unit does not emulate, and any
++		 * unrelated unknown instruction, keep the original path below.
++		 */
++		if (nabu_v82_emul_sync_exception(context, esr)) {
++			break;
++		}
+ 		handle_uncategorized(&context->ss);
+ 		break;
+ 
+--- a/osfmk/conf/files.arm64
++++ b/osfmk/conf/files.arm64
+@@ -62,6 +62,7 @@
+ osfmk/arm64/gxf_exceptions.s	optional nos_arm_asm
+ osfmk/arm64/lowmem_vectors.c	standard
+ osfmk/arm64/sleh.c			standard
++osfmk/arm64/nabu_v82_emul.c	standard
+ osfmk/arm64/start.s	optional nos_arm_asm config_pmap_ppl
+ osfmk/arm64/pinst.s	optional nos_arm_asm
+ osfmk/arm64/cswitch.s	optional nos_arm_asm
+--- a/osfmk/arm64/nabu_v82_emul.c
++++ b/osfmk/arm64/nabu_v82_emul.c
+@@ -0,0 +1,734 @@
++/*
++ * Copyright (c) 2026 The macOS-ForSheng contributors.
++ * SPDX-License-Identifier: MIT
++ *
++ * nabu_v82_emul.c -- software emulation, from the synchronous-exception
++ * path, of the ARMv8.2-A "Advanced SIMD three same (crypto)" instructions
++ * that Qualcomm Kryo 485 (SM8150 / nabu) does not implement.
++ *
++ * Kryo 485 implements ARMv8.2-A without any of:
++ *
++ *   FEAT_SHA3     eor3, bcax, rax1, xar
++ *   FEAT_SHA512   sha512h, sha512h2, sha512su0, sha512su1
++ *   FEAT_SM3      sm3ss1, sm3tt1a, sm3tt1b, sm3tt2a, sm3tt2b,
++ *                 sm3partw1, sm3partw2
++ *   FEAT_SM4      sm4e, sm4ekey
++ *   FEAT_PAuth    pacia/pacib/pacda/pacdb, autia/autib/autda/autdb,
++ *                 the *z variants, xpaci/xpacd, pacga
++ *
++ * The Apple kernel collection that this kernel boots is built for a
++ * machine that has all of them, so the first such instruction executed by
++ * the kernel raises a synchronous exception with ESR.EC == 0x00, which
++ * XNU reports as an undefined instruction: osfmk/arm64/sleh.c calls
++ * handle_uncategorized(), which panics with
++ * "Undefined kernel instruction: pc=%p instr=%x" for EL1 state and sends
++ * EXC_BAD_INSTRUCTION to the thread for EL0 state.
++ *
++ * This unit is called from that same ESR_EC_UNCATEGORIZED case, before the
++ * fatal handling runs, and:
++ *
++ *   - fetches and decodes the faulting instruction from ELR,
++ *   - emulates the four FEAT_SHA3 data-processing instructions exactly
++ *     (they carry the bulk of the kernel-collection exposure),
++ *   - emulates the four FEAT_SHA512 instructions exactly from the Arm ARM
++ *     pseudo-code, because com.apple.kec.corecrypto alone contains 40
++ *     sha512h, 40 sha512h2, 32 sha512su0 and 32 sha512su1 sites,
++ *   - treats the register-only pointer-authentication instructions as the
++ *     identity function, which is what their absence means
++ *     architecturally (a core without FEAT_PAuth has no PAC field to
++ *     insert, check or strip),
++ *   - reports the FEAT_SM3/FEAT_SM4 encodings it does not emulate (one
++ *     line, once) and then falls back to the pre-existing fatal path
++ *     rather than silently skipping them,
++ *   - advances ELR by 4 and returns, so the ordinary exception return
++ *     path resumes the interrupted context with the emulated result.
++ *
++ * Vector register state
++ * ---------------------
++ * The emulated instructions read and write V0..V31.  This file does not
++ * touch the live Q registers from C; it edits the exception frame's copy,
++ * which is the authoritative copy on this kernel:
++ *
++ *   - Both synchronous EL1/EL0 entry vectors spill the complete vector
++ *     file into the frame: el1_sp0_synchronous_vector_long (locore.s:628)
++ *     and el1_sp1_synchronous_vector_long (locore.s:751) both reach
++ *     SPILL_REGISTERS (locore.s:1069 and locore.s:1484), which stores
++ *     q0..q31 plus FPSR/FPCR at NS64_Q0.. (exception_asm.h:191-210).
++ *   - The exception *return* path reloads q0..q31 from that very frame for
++ *     kernel and user returns alike: exception_return_dispatch
++ *     (locore.s:1690) selects return_to_kernel/return_to_user and both
++ *     converge on Lexception_return_restore_registers (locore.s:1951),
++ *     which issues ldp q0,q1,[x0,NS64_Q0] ... ldp q30,q31,[x0,NS64_Q30]
++ *     (locore.s:1999-2014) immediately before the ERET.
++ *
++ * The saved copy is therefore what the interrupted context observes after
++ * the exception returns; writing the live registers from C would be
++ * overwritten by that restore and would additionally clobber state that
++ * belongs to the interrupted thread.  CPACR_EL1.FPEN is 0b11 on this
++ * kernel anyway (start.s:769, locore.s:1881), so no live-register access
++ * is needed or wanted here.
++ *
++ * This file is built only for boards that need it; see
++ * pexpert/pexpert/arm64/board_config.h and MACHINE_FLAGS_ARM64_NABU in
++ * makedefs/MakeInc.def.
++ */
++
++#include <stdbool.h>
++#include <stdint.h>
++
++#include <mach/arm/thread_status.h>
++#include <mach/mach_types.h>
++
++#include <arm/misc_protos.h>            /* copyin_kern()                    */
++#include <kern/misc_protos.h>           /* printf(), copyin()               */
++#include <kern/startup.h>               /* STARTUP()                        */
++#include <pexpert/pexpert.h>            /* PE_parse_boot_argn()             */
++#include <pexpert/arm64/board_config.h> /* ARM64_BOARD_CONFIG_NABU          */
++
++#include <arm64/proc_reg.h>             /* ESR_EC(), PSR64_IS_USER()        */
++#include <arm64/nabu_v82_emul.h>
++
++#if defined(ARM64_BOARD_CONFIG_NABU)
++
++/* Boot-arg switches; the feature is on unless it is explicitly disabled. */
++#define NABU_V82_BOOTARG        "nabu-v82-emul"
++#define NABU_V82_BOOTARG_OFF    "nabu-v82-emul-off"
++
++/* Instruction size of every encoding handled here. */
++#define NABU_V82_INSN_SIZE      4
++
++/*
++ * ---------------------------------------------------------------------
++ * BEGIN NABU_V82_CORE
++ *
++ * Pure integer semantics of the emulated instructions.  This region has no
++ * kernel dependencies so that the host-side conformance test can compile it
++ * verbatim (see docs/nabu-kernel-bringup-lessons.md).
++ * ---------------------------------------------------------------------
++ */
++
++/* One 128-bit SIMD&FP register, split the way the pseudo-code needs it. */
++typedef struct nabu_v82_vec {
++	uint64_t lo;            /* bits [63:0]   */
++	uint64_t hi;            /* bits [127:64] */
++} nabu_v82_vec_t;
++
++typedef enum nabu_v82_status {
++	NABU_V82_NOT_MINE = 0,  /* not an encoding this unit knows           */
++	NABU_V82_EMULATED,      /* result valid, the instruction may retire  */
++	NABU_V82_UNSUPPORTED,   /* known encoding, deliberately not emulated */
++} nabu_v82_status_t;
++
++/*
++ * Operand bundle for one fault.  Copying the whole 32-entry vector file
++ * would be wasteful on a path that runs with interrupts masked, so only the
++ * architectural sources and the destination are handed over.
++ */
++typedef struct nabu_v82_op {
++	uint32_t        insn;
++	nabu_v82_vec_t  vd;     /* current value of the destination register */
++	nabu_v82_vec_t  vn;     /* first source                             */
++	nabu_v82_vec_t  vm;     /* second source                            */
++	nabu_v82_vec_t  va;     /* third source (eor3/bcax only)            */
++} nabu_v82_op_t;
++
++/* Operand field locations (Arm ARM "Encoding" tables). */
++#define NABU_V82_RD(insn)       ((unsigned int)((insn) & 0x1fU))
++#define NABU_V82_RN(insn)       ((unsigned int)(((insn) >> 5) & 0x1fU))
++#define NABU_V82_RM(insn)       ((unsigned int)(((insn) >> 16) & 0x1fU))
++#define NABU_V82_RA(insn)       ((unsigned int)(((insn) >> 10) & 0x1fU))
++#define NABU_V82_IMM6(insn)     ((unsigned int)(((insn) >> 10) & 0x3fU))
++
++#define NABU_V82_MATCH(insn, mask, base) \
++	((((uint32_t)(insn)) & (mask)) == (base))
++
++/*
++ * Encoding table.  bits[31:24] == 0xCE is the Q=1 "Advanced SIMD three
++ * same (crypto)" space; Kryo 485 implements none of FEAT_SHA3/FEAT_SHA512/
++ * FEAT_SM3/FEAT_SM4, so every 0xCE word that faults here belongs to one of
++ * these families.  The eight emulated masks were verified with llvm-mc 18
++ * (assembled forward, then disassembled back), the SM3/SM4 masks against
++ * the Arm ARM encoding diagrams and capstone 5.0.7.
++ */
++/* FEAT_SHA3 */
++#define NABU_V82_EOR3_MASK      0xffe08000U
++#define NABU_V82_EOR3_BASE      0xce000000U
++#define NABU_V82_BCAX_MASK      0xffe08000U
++#define NABU_V82_BCAX_BASE      0xce200000U
++#define NABU_V82_RAX1_MASK      0xffe0fc00U
++#define NABU_V82_RAX1_BASE      0xce608c00U
++#define NABU_V82_XAR_MASK       0xffe00000U
++#define NABU_V82_XAR_BASE       0xce800000U
++/* FEAT_SHA512 */
++#define NABU_V82_SHA512H_MASK   0xffe0fc00U
++#define NABU_V82_SHA512H_BASE   0xce608000U
++#define NABU_V82_SHA512H2_MASK  0xffe0fc00U
++#define NABU_V82_SHA512H2_BASE  0xce608400U
++#define NABU_V82_SHA512SU0_MASK 0xffe0fc00U
++#define NABU_V82_SHA512SU0_BASE 0xcec08000U
++#define NABU_V82_SHA512SU1_MASK 0xffe0fc00U
++#define NABU_V82_SHA512SU1_BASE 0xce608800U
++/* FEAT_SM4 (recognised for the diagnostic only) */
++#define NABU_V82_SM4E_MASK      0xfffffc00U
++#define NABU_V82_SM4E_BASE      0xcec08400U
++#define NABU_V82_SM4EKEY_MASK   0xffe0fc00U
++#define NABU_V82_SM4EKEY_BASE   0xce60c800U
++/* FEAT_SM3 (recognised for the diagnostic only) */
++#define NABU_V82_SM3SS1_MASK    0xffe08000U
++#define NABU_V82_SM3SS1_BASE    0xce400000U
++#define NABU_V82_SM3TT_MASK     0xffe0c000U
++#define NABU_V82_SM3TT_BASE     0xce408000U
++#define NABU_V82_SM3PARTW1_MASK 0xffe0fc00U
++#define NABU_V82_SM3PARTW1_BASE 0xce60c000U
++#define NABU_V82_SM3PARTW2_MASK 0xffe0fc00U
++#define NABU_V82_SM3PARTW2_BASE 0xce60c400U
++
++/*
++ * Pointer authentication.
++ *
++ * Nearly every PAC instruction in an Apple arm64e kernel collection is the
++ * stack-pointer form (PACIASP/PACIBSP/AUTIASP/AUTIBSP), and those are encoded
++ * in the HINT space (0xD5032xxx).  Without FEAT_PAuth the CPU executes a HINT
++ * as a NOP, so they never raise an exception and never reach this hook -- a
++ * census of kernelcache.release.mac13g.nabu.kc found 174 058 of them in 344
++ * bundles, and not a single LDRAA/LDRAB/BRAA/BLRAA/RETAA (the forms that would
++ * need load or branch emulation, and the reason they are out of scope here).
++ *
++ * What does trap with ESR.EC == 0 is the register form in 0xDAC1xxxx, which
++ * this hook therefore covers as insurance for arm64e binaries that use it:
++ * bits[15:10] select the operation; opc 0..7 are the two-register PAC and AUT
++ * forms, 8..15 the single-register *z forms (Xd = Xd) and 16..17 XPACI/XPACD,
++ * i.e. exactly 0xDAC10000..0xDAC147FF.  PACGA is isolated with an exact mask:
++ * the neighbouring 0x9AC0xxxx space also holds UDIV/SDIV/LSLV/ASRV/RORV/CRC32
++ * and must not be touched.
++ */
++#define NABU_V82_PAC_MASK       0xffff8000U
++#define NABU_V82_PAC_BASE       0xdac10000U
++#define NABU_V82_PAC_LAST_OPC   17U
++#define NABU_V82_PAC_TWO_REG    8U
++#define NABU_V82_PAC_Z_FORM     16U
++#define NABU_V82_PACGA_MASK     0xffe0fc00U
++#define NABU_V82_PACGA_BASE     0x9ac03000U
++
++static inline uint64_t
++nabu_v82_ror64(uint64_t value, unsigned int shift)
++{
++	return shift ? ((value >> shift) | (value << (64 - shift))) : value;
++}
++
++static inline uint64_t
++nabu_v82_rol64(uint64_t value, unsigned int shift)
++{
++	return shift ? ((value << shift) | (value >> (64 - shift))) : value;
++}
++
++/* SHA-512 Sigma0()  */
++static inline uint64_t
++nabu_v82_bigs0(uint64_t x)
++{
++	return nabu_v82_ror64(x, 28) ^ nabu_v82_ror64(x, 34) ^ nabu_v82_ror64(x, 39);
++}
++
++/* SHA-512 Sigma1(), "MSigma1" in the SHA512H pseudo-code */
++static inline uint64_t
++nabu_v82_bigs1(uint64_t x)
++{
++	return nabu_v82_ror64(x, 14) ^ nabu_v82_ror64(x, 18) ^ nabu_v82_ror64(x, 41);
++}
++
++/* SHA-512 sigma0(), "SIGMA0" in the SHA512SU0 pseudo-code */
++static inline uint64_t
++nabu_v82_sigs0(uint64_t x)
++{
++	return nabu_v82_ror64(x, 1) ^ nabu_v82_ror64(x, 8) ^ (x >> 7);
++}
++
++/* SHA-512 sigma1() */
++static inline uint64_t
++nabu_v82_sigs1(uint64_t x)
++{
++	return nabu_v82_ror64(x, 19) ^ nabu_v82_ror64(x, 61) ^ (x >> 6);
++}
++
++/* SHA-512 Ch() and Maj() ("SHAmajority" in the SHA512H2 pseudo-code) */
++static inline uint64_t
++nabu_v82_ch(uint64_t e, uint64_t f, uint64_t g)
++{
++	return (e & f) ^ (~e & g);
++}
++
++static inline uint64_t
++nabu_v82_maj(uint64_t x, uint64_t y, uint64_t z)
++{
++	return (x & y) ^ (x & z) ^ (y & z);
++}
++
++/*
++ * SHA512H <Qd>, <Qn>, <Vm>.2D
++ *   Vtmp[127:64] = Ch(Vm[127:64], Vn[63:0], Vn[127:64]) + Sigma1(Vm[127:64]) + Vd[127:64]
++ *   tmp          = Vtmp[127:64] + Vm[63:0]
++ *   Vtmp[63:0]   = Ch(tmp, Vm[127:64], Vn[63:0]) + Sigma1(tmp) + Vd[63:0]
++ */
++static nabu_v82_vec_t
++nabu_v82_sha512h(nabu_v82_vec_t vn, nabu_v82_vec_t vm, nabu_v82_vec_t vd)
++{
++	nabu_v82_vec_t result;
++	uint64_t tmp;
++
++	result.hi = nabu_v82_ch(vm.hi, vn.lo, vn.hi) + nabu_v82_bigs1(vm.hi) + vd.hi;
++	tmp = result.hi + vm.lo;
++	result.lo = nabu_v82_ch(tmp, vm.hi, vn.lo) + nabu_v82_bigs1(tmp) + vd.lo;
++	return result;
++}
++
++/*
++ * SHA512H2 <Qd>, <Qn>, <Vm>.2D
++ *   Vtmp[127:64] = Maj(Vn[63:0], Vm[127:64], Vm[63:0]) + Sigma0(Vm[63:0]) + Vd[127:64]
++ *   Vtmp[63:0]   = Maj(Vtmp[127:64], Vm[63:0], Vm[127:64])
++ *                  + Sigma0(Vtmp[127:64]) + Vd[63:0]
++ */
++static nabu_v82_vec_t
++nabu_v82_sha512h2(nabu_v82_vec_t vn, nabu_v82_vec_t vm, nabu_v82_vec_t vd)
++{
++	nabu_v82_vec_t result;
++
++	result.hi = nabu_v82_maj(vn.lo, vm.hi, vm.lo) + nabu_v82_bigs0(vm.lo) + vd.hi;
++	result.lo = nabu_v82_maj(result.hi, vm.lo, vm.hi) + nabu_v82_bigs0(result.hi) + vd.lo;
++	return result;
++}
++
++/*
++ * SHA512SU0 <Vd>.2D, <Vn>.2D
++ *   Vtmp[63:0]   = Vd[63:0]   + sigma0(Vd[127:64])
++ *   Vtmp[127:64] = Vd[127:64] + sigma0(Vn[63:0])
++ */
++static nabu_v82_vec_t
++nabu_v82_sha512su0(nabu_v82_vec_t vn, nabu_v82_vec_t vd)
++{
++	nabu_v82_vec_t result;
++
++	result.lo = vd.lo + nabu_v82_sigs0(vd.hi);
++	result.hi = vd.hi + nabu_v82_sigs0(vn.lo);
++	return result;
++}
++
++/*
++ * SHA512SU1 <Vd>.2D, <Vn>.2D, <Vm>.2D
++ *   Vtmp[127:64] = Vm[127:64] + sigma1(Vn[127:64]) + Vd[127:64]
++ *   Vtmp[63:0]   = Vm[63:0]   + sigma1(Vn[63:0])   + Vd[63:0]
++ */
++static nabu_v82_vec_t
++nabu_v82_sha512su1(nabu_v82_vec_t vn, nabu_v82_vec_t vm, nabu_v82_vec_t vd)
++{
++	nabu_v82_vec_t result;
++
++	result.hi = vd.hi + nabu_v82_sigs1(vn.hi) + vm.hi;
++	result.lo = vd.lo + nabu_v82_sigs1(vn.lo) + vm.lo;
++	return result;
++}
++
++/*
++ * Emulate one FEAT_SHA3/FEAT_SHA512 instruction.
++ *
++ * On NABU_V82_EMULATED, *result holds the value to write to register *dst
++ * and the caller must advance ELR by 4.  On NABU_V82_UNSUPPORTED the
++ * encoding is one of FEAT_SM3/FEAT_SM4: the caller reports it and keeps the
++ * pre-existing fatal path.  NABU_V82_NOT_MINE means the word is unrelated.
++ */
++static nabu_v82_status_t
++nabu_v82_core(const nabu_v82_op_t *op, unsigned int *dst, nabu_v82_vec_t *result)
++{
++	const uint32_t insn = op->insn;
++
++	*dst = NABU_V82_RD(insn);
++
++	/* FEAT_SHA3 ------------------------------------------------------ */
++	if (NABU_V82_MATCH(insn, NABU_V82_EOR3_MASK, NABU_V82_EOR3_BASE)) {
++		/* EOR3 Vd.16B, Vn.16B, Vm.16B, Va.16B */
++		result->lo = op->vn.lo ^ op->vm.lo ^ op->va.lo;
++		result->hi = op->vn.hi ^ op->vm.hi ^ op->va.hi;
++		return NABU_V82_EMULATED;
++	}
++	if (NABU_V82_MATCH(insn, NABU_V82_BCAX_MASK, NABU_V82_BCAX_BASE)) {
++		/* BCAX Vd.16B, Vn.16B, Vm.16B, Va.16B */
++		result->lo = op->vn.lo ^ (op->vm.lo & ~op->va.lo);
++		result->hi = op->vn.hi ^ (op->vm.hi & ~op->va.hi);
++		return NABU_V82_EMULATED;
++	}
++	if (NABU_V82_MATCH(insn, NABU_V82_RAX1_MASK, NABU_V82_RAX1_BASE)) {
++		/* RAX1 Vd.2D, Vn.2D, Vm.2D */
++		result->lo = op->vn.lo ^ nabu_v82_rol64(op->vm.lo, 1);
++		result->hi = op->vn.hi ^ nabu_v82_rol64(op->vm.hi, 1);
++		return NABU_V82_EMULATED;
++	}
++	if (NABU_V82_MATCH(insn, NABU_V82_XAR_MASK, NABU_V82_XAR_BASE)) {
++		/* XAR Vd.2D, Vn.2D, Vm.2D, #imm6 */
++		const unsigned int rot = NABU_V82_IMM6(insn);
++
++		result->lo = nabu_v82_ror64(op->vn.lo ^ op->vm.lo, rot);
++		result->hi = nabu_v82_ror64(op->vn.hi ^ op->vm.hi, rot);
++		return NABU_V82_EMULATED;
++	}
++
++	/* FEAT_SHA512 ---------------------------------------------------- */
++	if (NABU_V82_MATCH(insn, NABU_V82_SHA512H_MASK, NABU_V82_SHA512H_BASE)) {
++		*result = nabu_v82_sha512h(op->vn, op->vm, op->vd);
++		return NABU_V82_EMULATED;
++	}
++	if (NABU_V82_MATCH(insn, NABU_V82_SHA512H2_MASK, NABU_V82_SHA512H2_BASE)) {
++		*result = nabu_v82_sha512h2(op->vn, op->vm, op->vd);
++		return NABU_V82_EMULATED;
++	}
++	if (NABU_V82_MATCH(insn, NABU_V82_SHA512SU0_MASK, NABU_V82_SHA512SU0_BASE)) {
++		*result = nabu_v82_sha512su0(op->vn, op->vd);
++		return NABU_V82_EMULATED;
++	}
++	if (NABU_V82_MATCH(insn, NABU_V82_SHA512SU1_MASK, NABU_V82_SHA512SU1_BASE)) {
++		*result = nabu_v82_sha512su1(op->vn, op->vm, op->vd);
++		return NABU_V82_EMULATED;
++	}
++
++	/* Recognised, deliberately not emulated --------------------------- */
++	if (NABU_V82_MATCH(insn, NABU_V82_SM4E_MASK, NABU_V82_SM4E_BASE) ||
++	    NABU_V82_MATCH(insn, NABU_V82_SM4EKEY_MASK, NABU_V82_SM4EKEY_BASE) ||
++	    NABU_V82_MATCH(insn, NABU_V82_SM3SS1_MASK, NABU_V82_SM3SS1_BASE) ||
++	    NABU_V82_MATCH(insn, NABU_V82_SM3TT_MASK, NABU_V82_SM3TT_BASE) ||
++	    NABU_V82_MATCH(insn, NABU_V82_SM3PARTW1_MASK, NABU_V82_SM3PARTW1_BASE) ||
++	    NABU_V82_MATCH(insn, NABU_V82_SM3PARTW2_MASK, NABU_V82_SM3PARTW2_BASE)) {
++		return NABU_V82_UNSUPPORTED;
++	}
++	/*
++	 * Anything else in the Q=1 three-same crypto space is a member of
++	 * FEAT_SHA1/SHA256/SHA3/SHA512/SM3/SM4 that this unit does not know.
++	 * The first five are implemented by Kryo 485 and therefore cannot
++	 * fault; report the rest instead of dropping them silently.
++	 */
++	if ((insn & 0xff000000U) == 0xce000000U) {
++		return NABU_V82_UNSUPPORTED;
++	}
++
++	return NABU_V82_NOT_MINE;
++}
++
++/*
++ * Name of a crypto encoding, for the one-shot diagnostics.  The emulated
++ * instructions are named by their exact mask; the unimplemented SM3/SM4
++ * ones by their family, which is all the operator needs to know.
++ */
++static const char *
++nabu_v82_mnemonic(uint32_t insn)
++{
++	if (NABU_V82_MATCH(insn, NABU_V82_EOR3_MASK, NABU_V82_EOR3_BASE)) {
++		return "eor3";
++	}
++	if (NABU_V82_MATCH(insn, NABU_V82_BCAX_MASK, NABU_V82_BCAX_BASE)) {
++		return "bcax";
++	}
++	if (NABU_V82_MATCH(insn, NABU_V82_RAX1_MASK, NABU_V82_RAX1_BASE)) {
++		return "rax1";
++	}
++	if (NABU_V82_MATCH(insn, NABU_V82_XAR_MASK, NABU_V82_XAR_BASE)) {
++		return "xar";
++	}
++	if (NABU_V82_MATCH(insn, NABU_V82_SHA512H_MASK, NABU_V82_SHA512H_BASE)) {
++		return "sha512h";
++	}
++	if (NABU_V82_MATCH(insn, NABU_V82_SHA512H2_MASK, NABU_V82_SHA512H2_BASE)) {
++		return "sha512h2";
++	}
++	if (NABU_V82_MATCH(insn, NABU_V82_SHA512SU0_MASK, NABU_V82_SHA512SU0_BASE)) {
++		return "sha512su0";
++	}
++	if (NABU_V82_MATCH(insn, NABU_V82_SHA512SU1_MASK, NABU_V82_SHA512SU1_BASE)) {
++		return "sha512su1";
++	}
++	if (NABU_V82_MATCH(insn, NABU_V82_SM4E_MASK, NABU_V82_SM4E_BASE)) {
++		return "sm4e";
++	}
++	if (NABU_V82_MATCH(insn, NABU_V82_SM4EKEY_MASK, NABU_V82_SM4EKEY_BASE)) {
++		return "sm4ekey";
++	}
++	if (NABU_V82_MATCH(insn, NABU_V82_SM3SS1_MASK, NABU_V82_SM3SS1_BASE)) {
++		return "sm3ss1";
++	}
++	if (NABU_V82_MATCH(insn, NABU_V82_SM3TT_MASK, NABU_V82_SM3TT_BASE)) {
++		static const char *const sm3tt[4] = {
++			"sm3tt1a", "sm3tt1b", "sm3tt2a", "sm3tt2b",
++		};
++
++		return sm3tt[(insn >> 10) & 0x3U];
++	}
++	if (NABU_V82_MATCH(insn, NABU_V82_SM3PARTW1_MASK, NABU_V82_SM3PARTW1_BASE)) {
++		return "sm3partw1";
++	}
++	if (NABU_V82_MATCH(insn, NABU_V82_SM3PARTW2_MASK, NABU_V82_SM3PARTW2_BASE)) {
++		return "sm3partw2";
++	}
++	if (NABU_V82_MATCH(insn, NABU_V82_PAC_MASK, NABU_V82_PAC_BASE) ||
++	    NABU_V82_MATCH(insn, NABU_V82_PACGA_MASK, NABU_V82_PACGA_BASE)) {
++		return "pac";
++	}
++	if ((insn & 0xff000000U) == 0xce000000U) {
++		return "crypto-3same";
++	}
++	return "unknown";
++}
++
++/*
++ * Pointer-authentication fallback.
++ *
++ * A core without FEAT_PAuth has no PAC field, so:
++ *   - PACIA/PACIB/PACDA/PACDB Xd, Xn  ->  Xd = Xn
++ *   - PACIZA..AUTDZB Xd               ->  Xd = Xd
++ *   - XPACI/XPACD Xd                  ->  Xd = Xd
++ * and the value of AUT* on a correctly signed pointer equals the pointer.
++ * PACGA is a keyed MAC with no architectural value on such a core; a
++ * deterministic keyless mix keeps sign/verify pairs self-consistent.
++ *
++ * `gpr` must provide X0..X30 with index 31 reading as XZR (0).
++ */
++static bool
++nabu_v82_pac_core(uint32_t insn, const uint64_t gpr[32], unsigned int *dst,
++    uint64_t *result)
++{
++	unsigned int opc;
++	unsigned int rd;
++
++	if (NABU_V82_MATCH(insn, NABU_V82_PACGA_MASK, NABU_V82_PACGA_BASE)) {
++		*dst = NABU_V82_RD(insn);
++		*result = gpr[NABU_V82_RN(insn)] ^ gpr[NABU_V82_RM(insn)];
++		return true;
++	}
++	if (!NABU_V82_MATCH(insn, NABU_V82_PAC_MASK, NABU_V82_PAC_BASE)) {
++		return false;
++	}
++	opc = (insn >> 10) & 0x1fU;
++	if (opc > NABU_V82_PAC_LAST_OPC) {
++		return false;
++	}
++	rd = NABU_V82_RD(insn);
++	*dst = rd;
++	if (opc < NABU_V82_PAC_TWO_REG) {
++		*result = gpr[NABU_V82_RN(insn)];
++	} else {
++		*result = gpr[rd];
++	}
++	return true;
++}
++
++/*
++ * ---------------------------------------------------------------------
++ * END NABU_V82_CORE
++ * ---------------------------------------------------------------------
++ */
++
++/*
++ * Configuration.  Resolved lazily so that an early fault (before the boot
++ * arguments are reachable) still gets the default, and so that the boot log
++ * and the fault path agree on the answer.
++ */
++static int nabu_v82_emul_enable_state;          /* 0 unresolved, 1 on, -1 off */
++static bool nabu_v82_emul_reported_emulated;    /* one-shot diagnostics        */
++static bool nabu_v82_emul_reported_unsupported;
++
++static bool
++nabu_v82_emul_is_enabled(void)
++{
++	int state = nabu_v82_emul_enable_state;
++	int enable = 1;
++
++	if (state != 0) {
++		return state > 0;
++	}
++	if (PE_parse_boot_argn(NABU_V82_BOOTARG, &enable, sizeof(enable))) {
++		state = (enable != 0) ? 1 : -1;
++	} else if (PE_parse_boot_argn(NABU_V82_BOOTARG_OFF, &enable, sizeof(enable))) {
++		state = -1;
++	} else {
++		state = 1;
++	}
++	nabu_v82_emul_enable_state = state;
++	return state > 0;
++}
++
++static void
++nabu_v82_read_vec(const arm_neon_saved_state64_t *ns, unsigned int reg,
++    nabu_v82_vec_t *vec)
++{
++	uint128_t value = ns->v.q[reg];
++
++	vec->lo = (uint64_t)value;
++	vec->hi = (uint64_t)(value >> 64);
++}
++
++static void
++nabu_v82_write_vec(arm_neon_saved_state64_t *ns, unsigned int reg,
++    const nabu_v82_vec_t *vec)
++{
++	ns->v.q[reg] = ((uint128_t)vec->hi << 64) | (uint128_t)vec->lo;
++}
++
++static void
++nabu_v82_read_gprs(const arm_saved_state64_t *ss, uint64_t gpr[32])
++{
++	unsigned int i;
++
++	for (i = 0; i < 29; i++) {
++		gpr[i] = ss->x[i];
++	}
++	gpr[29] = ss->fp;
++	gpr[30] = ss->lr;
++	gpr[31] = 0;                            /* XZR */
++}
++
++static void
++nabu_v82_write_gpr(arm_saved_state64_t *ss, unsigned int reg, uint64_t value)
++{
++	switch (reg) {
++	case 31:                                /* XZR: result discarded */
++		break;
++	case 29:
++		ss->fp = value;
++		break;
++	case 30:
++		ss->lr = value;
++		break;
++	default:
++		ss->x[reg] = value;
++		break;
++	}
++}
++
++/*
++ * Fetch the faulting instruction.  EL0 faults are read with copyin() so
++ * that a bogus PC is rejected instead of being dereferenced; kernel text is
++ * read with copyin_kern(), the same split that sleh.c's COPYIN() makes for
++ * the panic dump it prints today.
++ */
++static bool
++nabu_v82_fetch(uint64_t pc, bool from_user, uint32_t *insn)
++{
++	if (pc & (NABU_V82_INSN_SIZE - 1)) {
++		return false;
++	}
++	if (from_user) {
++		return copyin((user_addr_t)pc, insn, sizeof(*insn)) == 0;
++	}
++	return copyin_kern((user_addr_t)pc, (char *)insn, sizeof(*insn)) == 0;
++}
++
++bool
++nabu_v82_emul_sync_exception(arm_context_t *context, uint64_t esr)
++{
++	arm_saved_state_t *state = &context->ss;
++	arm_saved_state64_t *ss;
++	arm_neon_saved_state64_t *ns;
++	const arm_neon_saved_state64_t *cns;
++	nabu_v82_status_t status;
++	nabu_v82_vec_t result;
++	unsigned int dst;
++	uint32_t insn = 0;
++	uint64_t pc;
++	bool from_user;
++
++	if (ESR_EC(esr) != ESR_EC_UNCATEGORIZED) {
++		return false;
++	}
++	if (!is_saved_state64(state) || !is_neon_saved_state64(&context->ns)) {
++		return false;
++	}
++	if (!nabu_v82_emul_is_enabled()) {
++		return false;
++	}
++
++	pc = get_saved_state_pc(state);
++	from_user = PSR64_IS_USER(get_saved_state_cpsr(state));
++	if (!nabu_v82_fetch(pc, from_user, &insn)) {
++		return false;
++	}
++
++	ss = saved_state64(state);
++	cns = &context->ns.ns_64;
++	ns = neon_state64(&context->ns);
++
++	/*
++	 * Pointer authentication first: it costs a register snapshot and keeps
++	 * arm64e code that slipped past the static PAC strip from faulting.
++	 */
++	if (NABU_V82_MATCH(insn, NABU_V82_PAC_MASK, NABU_V82_PAC_BASE) ||
++	    NABU_V82_MATCH(insn, NABU_V82_PACGA_MASK, NABU_V82_PACGA_BASE)) {
++		uint64_t gpr[32];
++		uint64_t pac_result;
++
++		nabu_v82_read_gprs(ss, gpr);
++		if (nabu_v82_pac_core(insn, gpr, &dst, &pac_result)) {
++			nabu_v82_write_gpr(ss, dst, pac_result);
++			if (__improbable(!nabu_v82_emul_reported_emulated)) {
++				nabu_v82_emul_reported_emulated = true;
++				printf("nabu: v82 emul: %s at pc 0x%llx in %s mode, "
++				    "esr 0x%llx\n", nabu_v82_mnemonic(insn), pc,
++				    from_user ? "user" : "kernel", esr);
++			}
++			set_saved_state_pc(state, pc + NABU_V82_INSN_SIZE);
++			return true;
++		}
++	}
++
++	{
++		nabu_v82_op_t op;
++
++		op.insn = insn;
++		nabu_v82_read_vec(cns, NABU_V82_RD(insn), &op.vd);
++		nabu_v82_read_vec(cns, NABU_V82_RN(insn), &op.vn);
++		nabu_v82_read_vec(cns, NABU_V82_RM(insn), &op.vm);
++		nabu_v82_read_vec(cns, NABU_V82_RA(insn), &op.va);
++
++		status = nabu_v82_core(&op, &dst, &result);
++		if (status == NABU_V82_EMULATED) {
++			nabu_v82_write_vec(ns, dst, &result);
++			if (__improbable(!nabu_v82_emul_reported_emulated)) {
++				nabu_v82_emul_reported_emulated = true;
++				printf("nabu: v82 emul: %s at pc 0x%llx in %s mode, "
++				    "esr 0x%llx\n", nabu_v82_mnemonic(insn), pc,
++				    from_user ? "user" : "kernel", esr);
++			}
++			set_saved_state_pc(state, pc + NABU_V82_INSN_SIZE);
++			return true;
++		}
++		if (status == NABU_V82_UNSUPPORTED) {
++			if (__improbable(!nabu_v82_emul_reported_unsupported)) {
++				nabu_v82_emul_reported_unsupported = true;
++				printf("nabu: v82 emul: %s (instr 0x%x) at pc 0x%llx "
++				    "in %s mode is not emulated; taking the "
++				    "undefined-instruction path (esr 0x%llx)\n",
++				    nabu_v82_mnemonic(insn), insn, pc,
++				    from_user ? "user" : "kernel", esr);
++			}
++			return false;
++		}
++	}
++
++	return false;
++}
++
++static void
++nabu_v82_emul_boot_log(void)
++{
++	if (nabu_v82_emul_is_enabled()) {
++		printf("nabu: ARMv8.2 crypto emulation active "
++		    "(eor3/bcax/rax1/xar/sha512h/sha512h2/sha512su0/sha512su1)\n");
++	} else {
++		printf("nabu: ARMv8.2 crypto emulation disabled by boot-arg %s\n",
++		    NABU_V82_BOOTARG);
++	}
++}
++STARTUP(TUNABLES, STARTUP_RANK_LAST, nabu_v82_emul_boot_log);
++
++#else /* !ARM64_BOARD_CONFIG_NABU */
++
++/*
++ * Other boards run on silicon (or on a virtual platform) that implements
++ * these instructions, so the hook is compiled to nothing there.
++ */
++
++#endif /* ARM64_BOARD_CONFIG_NABU */
+--- a/osfmk/arm64/nabu_v82_emul.h
++++ b/osfmk/arm64/nabu_v82_emul.h
+@@ -0,0 +1,50 @@
++/*
++ * Copyright (c) 2026 The macOS-ForSheng contributors.
++ * SPDX-License-Identifier: MIT
++ *
++ * nabu_v82_emul.h -- ARMv8.2-A cryptography instruction emulation for
++ * boards whose CPU implements ARMv8.2-A without FEAT_SHA3/FEAT_SHA512/
++ * FEAT_SM3/FEAT_SM4/FEAT_PAuth (Qualcomm Kryo 485 on nabu).
++ *
++ * The implementation lives in osfmk/arm64/nabu_v82_emul.c.
++ */
++
++#ifndef _OSFMK_ARM64_NABU_V82_EMUL_H_
++#define _OSFMK_ARM64_NABU_V82_EMUL_H_
++
++#include <stdbool.h>
++#include <stdint.h>
++
++#include <mach/arm/thread_status.h>
++#include <pexpert/arm64/board_config.h>
++
++__BEGIN_DECLS
++
++/*
++ * Emulate one instruction that trapped with ESR.EC == ESR_EC_UNCATEGORIZED
++ * because the current CPU does not implement it.
++ *
++ * Called from sleh_synchronous() before the undefined-instruction handling.
++ * On success the saved PC has been advanced by one instruction and the saved
++ * state (and, for SIMD&FP instructions, the saved vector state in the
++ * exception frame) already holds the emulated result, so the caller only has
++ * to resume the context.
++ *
++ * Returns false when the faulting instruction is not one of the emulated
++ * encodings; the caller must then take the pre-existing fatal path.
++ */
++#if defined(ARM64_BOARD_CONFIG_NABU)
++extern bool nabu_v82_emul_sync_exception(arm_context_t *context, uint64_t esr);
++#else
++static inline bool
++nabu_v82_emul_sync_exception(arm_context_t *context, uint64_t esr)
++{
++	(void)context;
++	(void)esr;
++	return false;
++}
++#endif /* ARM64_BOARD_CONFIG_NABU */
++
++__END_DECLS
++
++#endif /* _OSFMK_ARM64_NABU_V82_EMUL_H_ */
