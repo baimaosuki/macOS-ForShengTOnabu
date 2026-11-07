@@ -714,6 +714,12 @@ def link_kernel(args, record, common, sdk, source, env):
         record['native_pointer_fixups'] = native_chained_fixups(kernel_bytes)
     destination = OUT / KERNEL_NAME
     shutil.copy2(binary, destination)
+    if BOARD != 'sheng':
+        # Kryo 485 has none of Apple's S3_*_C15_* performance-monitor registers and
+        # faults on the first access inside cpc_*/kpc_*/awl_*. Neutralise them in
+        # the linked image, before sealing, so the CI artefact is bootable as built.
+        run([sys.executable, str(ROOT / 'scripts' / 'nabu_neutralize_apple_sysregs.py'),
+             str(destination), '--quiet'], 'kernel-sysreg', record, env=env)
     from seal_macos26_crypto import seal
     record['corecrypto_integrity'] = seal(destination, ARCH)
     run(['xcrun', 'dsymutil', binary, '-o', OUT / (KERNEL_NAME + '.dSYM')],
