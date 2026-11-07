@@ -1,0 +1,30 @@
+--- a/bsd/kern/kern_trustcache.c
++++ b/bsd/kern/kern_trustcache.c
+@@ -579,6 +579,19 @@
+ 	allow_legacy_caches = true;
+ #endif
+ 
++#if defined(ARM64_BOARD_CONFIG_NABU)
++	/*
++	 * nabu boots before any prelinked kext exists, so neither AppleImage4 nor
++	 * AMFI has registered its interface yet. Without them the runtime trust
++	 * cache cannot be built; with amfi == NULL code signing is unenforced
++	 * anyway, so keep booting instead of panicking on the first userland exit.
++	 */
++	if (img4if == NULL || amfi == NULL) {
++		printf("nabu: trust cache runtime skipped (img4if=%p amfi=%p)\n",
++		    (void *)img4if, (const void *)amfi);
++		return;
++	}
++#else
+ 	/* Image4 interface needs to be available */
+ 	if (img4if == NULL) {
+ 		panic("image4 interface not available");
+@@ -590,6 +603,7 @@
+ 	} else if (amfi->TrustCache.version < 2) {
+ 		panic("amfi interface is stale: %u", amfi->TrustCache.version);
+ 	}
++#endif
+ 
+ 	trustCacheInitializeRuntime(
+ 		trust_cache_rt,
