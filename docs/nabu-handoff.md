@@ -59,3 +59,14 @@ cd ~/.gemini/antigravity/scratch/macOS-ForNabu/macOS-ForSheng
 - **BaseSystem.dmg**：`022-21678-092.dmg.aea` 是 `Personalize: true` 的个性化 AEA，
   需要 Apple TSS 返回的密钥，离线无解。
 - **完整 dyld shared cache**：同上，随 BaseSystem 一起被锁。
+
+## 上机用哪个镜像（重要）
+
+真机实测（`123/nabu-macos-ramboot/`）证明 nabu 的 ABL **只交接 v3 头**。请用：
+
+```
+fastboot boot out/nabu/image-v3/nabu-macos26-kernel-v3.img
+```
+
+v0 版本 `out/nabu/image/nabu-macos26-kernel.img` 只用于本地 QEMU 预检。
+屏上新出现的 `INITRD PA:` 行是 ABL 公布的 ramdisk 地址，用来判断 NRAM 定位走哪条路。

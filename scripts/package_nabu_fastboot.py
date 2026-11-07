@@ -42,10 +42,33 @@ def build_v0_bootimg(kernel_dtb: bytes, ramdisk: bytes, *,
     return bytes(header) + pad(kernel_dtb) + pad(ramdisk)
 
 
+def build_v3_bootimg(kernel: bytes, ramdisk: bytes, *, pagesize: int = 4096,
+                     os_version: int = 0, cmdline: str = '') -> bytes:
+    """Construct an Android Boot Image v3 (header v3, no load addresses).
+
+    nabu's ABL only hands off v3 headers: the same instruction loop under a v0
+    header never executes (USB stays alive for minutes), while the v3 variant
+    dies within seconds. v3 has no kernel/ramdisk/tags addresses, so ABL decides
+    where each piece lands and the loader must discover the container itself.
+    """
+    if pagesize != 4096 or len(cmdline.encode('ascii')) > 1535:
+        raise ValueError('invalid Android v3 boot image page size or cmdline length')
+    header_size = 1580
+    header = bytearray(header_size)
+    struct.pack_into('<8s5I', header, 0, b'ANDROID!', len(kernel), len(ramdisk),
+                     os_version, header_size, 0)
+    struct.pack_into('<I', header, 40, 3)
+    cmd_bytes = cmdline.encode('ascii')
+    header[44:44 + len(cmd_bytes)] = cmd_bytes
+    pad = lambda blob: blob + bytes((-len(blob)) % pagesize)
+    return pad(bytes(header)) + pad(kernel) + pad(ramdisk)
+
+
 def package_nabu_fastboot(kernel_path: Path, uefi_payload: bytes, dtb: bytes, out_dir: Path, *,
                           cpus: int = 8, owned_memory_size: int = 0x20000000,
                           enable_ufs_windows: bool = True,
-                          log_token: bytes | None = None) -> dict:
+                          log_token: bytes | None = None,
+                          header_version: int = 0) -> dict:
     """Create a RAM-only `nabu-macos26-kernel.img` and `build.json` for `fastboot boot`."""
     if cpus not in (1, 2, 4, 8):
         raise ValueError('nabu CPU count must be 1, 2, 4, or 8')
@@ -90,17 +113,23 @@ def package_nabu_fastboot(kernel_path: Path, uefi_payload: bytes, dtb: bytes, ou
     # SM8150/ABL load addresses: the stage-1 loader and the NRAM container must
     # land inside DRAM bank 0, otherwise the Bank-0 NRAM scan cannot see the
     # ramdisk and the header points the loader below 0x80000000 (no RAM).
-    image_bytes = build_v0_bootimg(kernel_dtb, ramdisk_payload, base=0,
-                                   kernel_offset=0x80008000,
-                                   ramdisk_offset=0x81000000,
-                                   tags_offset=0x80000100)
-    image_path = out_dir / 'nabu-macos26-kernel.img'
+    if header_version == 3:
+        image_bytes = build_v3_bootimg(kernel_dtb, ramdisk_payload)
+        image_name = 'nabu-macos26-kernel-v3.img'
+    else:
+        image_bytes = build_v0_bootimg(kernel_dtb, ramdisk_payload, base=0,
+                                       kernel_offset=0x80008000,
+                                       ramdisk_offset=0x81000000,
+                                       tags_offset=0x80000100)
+        image_name = 'nabu-macos26-kernel.img'
+    image_path = out_dir / image_name
     image_path.write_bytes(image_bytes)
     container_sha = hashlib.sha256(image_bytes).hexdigest()
     record = dict(
         board='nabu',
         soc='SM8150',
-        image_name='nabu-macos26-kernel.img',
+        image_name=image_name,
+        header_version=header_version,
         temporary_ram_boot=True,
         partition_images_written=False,
         slot_changes=False,

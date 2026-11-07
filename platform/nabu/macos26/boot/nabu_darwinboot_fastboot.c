@@ -96,26 +96,42 @@ static uint64_t find_initrd_in_fdt(uint64_t fdt_pa)
     return 0;
 }
 
+static int valid_nram(const uint8_t *p)
+{
+    if (read_le32(p) != 0x4d41524eU) {
+        return 0;
+    }
+    const uint32_t klen = read_le32(p + 4);
+    const uint32_t alen = read_le32(p + 8);
+    if (klen < 4096U || klen > (128U << 20) || alen < 64U || alen > (16U << 20)) {
+        return 0;
+    }
+    return read_le32(p + 12) == 0xfeedfacfU;
+}
+
+// v3 boot headers carry no load address, so ABL picks where the ramdisk lands.
+// Try the FDT hint, then the bytes right behind this loader, then sweep Bank 0
+// at 4 KiB granularity (the container can sit anywhere in DDR).
 static const uint8_t *locate_nram_container(uint64_t fdt_pa)
 {
     const uint64_t initrd_pa = find_initrd_in_fdt(fdt_pa);
     if (initrd_pa >= 0x80000000ULL && initrd_pa < 0xb9900000ULL) {
         const uint8_t *p = (const uint8_t *)(uintptr_t)initrd_pa;
-        if (read_le32(p) == 0x4d41524eU) { // "NRAM"
+        if (valid_nram(p)) {
             return p;
         }
     }
-    // Fallback scan at 64 KiB granularity across Bank 0 below the GOP carveout
-    for (uint64_t addr = 0x81000000ULL; addr < 0x9b000000ULL; addr += 0x10000ULL) {
+    const uint64_t self_pa = (uint64_t)(uintptr_t)locate_nram_container;
+    for (uint64_t addr = self_pa; addr < self_pa + 0x2000000ULL; addr += 0x1000ULL) {
         const uint8_t *p = (const uint8_t *)(uintptr_t)addr;
-        if (read_le32(p) == 0x4d41524eU) {
-            const uint32_t klen = read_le32(p + 4);
-            const uint32_t alen = read_le32(p + 8);
-            if (klen >= 4096U && klen <= (128U << 20) && alen >= 64U && alen <= (16U << 20)) {
-                if (read_le32(p + 12) == 0xfeedfacfU) {
-                    return p;
-                }
-            }
+        if (valid_nram(p)) {
+            return p;
+        }
+    }
+    for (uint64_t addr = 0x80000000ULL; addr < 0xb9900000ULL; addr += 0x1000ULL) {
+        const uint8_t *p = (const uint8_t *)(uintptr_t)addr;
+        if (valid_nram(p)) {
+            return p;
         }
     }
     return NULL;
@@ -156,6 +172,11 @@ void nabu_darwinboot_main(uint64_t fdt_pa)
 
     x = nabu_fb_draw_string(32, y, "FDT PA: ", fg, bg, 3);
     nabu_fb_draw_hex64(x, y, fdt_pa, fg, bg, 3);
+    y += 44;
+
+    const uint64_t initrd_hint = find_initrd_in_fdt(fdt_pa);
+    x = nabu_fb_draw_string(32, y, "INITRD PA: ", fg, bg, 3);
+    nabu_fb_draw_hex64(x, y, initrd_hint, initrd_hint ? ok_color : err_color, bg, 3);
     y += 44;
 
     const uint8_t *nram = locate_nram_container(fdt_pa);

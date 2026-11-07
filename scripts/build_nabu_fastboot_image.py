@@ -31,13 +31,21 @@ import shutil
 def verify_android_boot_image(boot_img_path: Path) -> dict[str, Any]:
     """Parse and verify the Android Boot Image v0, gzipped ARM64 Image + FDT, and NRAM ramdisk."""
     raw = boot_img_path.read_bytes()
-    magic, kernel_sz, kernel_addr, ramdisk_sz, ramdisk_addr, second_sz, second_addr, tags_addr, page_sz = (
-        struct.unpack_from("<8s8I", raw, 0)
-    )
+    magic = raw[:8]
     if magic != b"ANDROID!":
         raise ValueError(f"Invalid Android boot image magic: {magic!r}")
-
-    k_off = page_sz
+    header_version = struct.unpack_from("<I", raw, 40)[0]
+    if header_version == 3:
+        # v3 carries no load addresses: kernel_size/ramdisk_size/os_version/header_size
+        # followed by the version field at 40 and a 1536-byte cmdline.
+        kernel_sz, ramdisk_sz, _os_version, header_sz = struct.unpack_from("<4I", raw, 8)
+        page_sz = 4096
+        k_off = _align_up(header_sz, page_sz)
+    else:
+        magic, kernel_sz, kernel_addr, ramdisk_sz, ramdisk_addr, second_sz, second_addr, tags_addr, page_sz = (
+            struct.unpack_from("<8s8I", raw, 0)
+        )
+        k_off = page_sz
     k_dtb = raw[k_off : k_off + kernel_sz]
     r_off = k_off + _align_up(kernel_sz, page_sz)
     ramdisk = raw[r_off : r_off + ramdisk_sz]
@@ -61,6 +69,7 @@ def verify_android_boot_image(boot_img_path: Path) -> dict[str, Any]:
 
     return {
         "header_magic": magic.decode("ascii"),
+        "header_version": header_version,
         "page_size": page_sz,
         "kernel_dtb_bytes": kernel_sz,
         "decompressed_darwinboot_bytes": len(decompressed_loader),
