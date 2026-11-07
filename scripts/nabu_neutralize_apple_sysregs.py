@@ -3,20 +3,25 @@
 """Neutralise Apple-private system registers in a linked nabu XNU kernel.
 
 Kryo 485 (Snapdragon 860) implements none of Apple's implementation-defined
-performance-monitor registers: every MRS/MSR to the S3_*_C15_* space raises an
-undefined-instruction exception (ESR EC=0x0, FAR=0) and takes the kernel down
-inside cpc_* / kpc_* / awl_* before the first kext is even reached.
+performance-monitor registers: every MRS/MSR into the C15 system-register space
+raises an undefined-instruction exception (ESR EC=0x0, FAR=0) and takes the
+kernel down inside cpc_* / kpc_* / awl_* before the first kext is reached.
 
-Scanning the linked image is the only reliable gate here: the register accesses
-are spread over cpc_arm64.c, kpc_arm64.c and awl.c, and each carries literal
-register names, so no single source-level macro covers them all. Rewrite them
-after the link:
+Scanning the linked image is the only reliable gate: the accesses are spread over
+cpc_arm64.c, kpc_arm64.c and awl.c and each carries literal register names, so no
+single source-level macro covers them all. Rewrite them after the link:
 
-    MRS Xd, S3_x_C15_cY_Z  ->  MOV Xd, #0     (the feature simply reads as absent)
-    MSR S3_x_C15_cY_Z, Xn  ->  NOP           (nothing to program, nothing to arm)
+    MRS Xd, <C15 sysreg>  ->  MOV Xd, #0     (the feature reads as absent)
+    MSR <C15 sysreg>, Xn  ->  NOP           (nothing to program, nothing to arm)
 
-Architected system registers (S3_3_C9_* PMU, S3_0/1/2/3_C0_* cache ID space) are
-left untouched: those are ISA-defined and do exist on this core.
+AArch64 system-register moves are fixed encodings, so this needs no disassembler:
+
+    MRS Xt, <sysreg>      bits[31:20] = 1101 0101 0011   (0xD53)
+    MSR <sysreg>, Xt      bits[31:20] = 1101 0101 0001   (0xD51)
+    <sysreg>              op0 bits[20:19], op1 [18:16], CRn [15:12], CRm [11:8], op2 [7:5]
+
+CRn == 15 is the implementation-defined space; architected registers (PMU
+S3_3_C9_*, cache IDs S3_x_C0_*) are never touched because their CRn is not 15.
 """
 from __future__ import annotations
 
@@ -25,13 +30,12 @@ import struct
 import sys
 from pathlib import Path
 
-from capstone import Cs, CS_ARCH_ARM64, CS_MODE_ARM
-
 LC_SEGMENT_64 = 0x19
 MACH_HEADER_64 = 0xFEEDFACF
 SCAN_SEGMENTS = ("__TEXT_EXEC", "__TEXT_BOOT_EXEC", "__TEXT")
-APPLE_SYSREG_MARK = "c15"
 
+MRS_MASK, MRS_BASE = 0xFFF00000, 0xD5300000
+MSR_MASK, MSR_BASE = 0xFFF00000, 0xD5100000
 NOP = 0xD503201F
 
 
@@ -46,50 +50,41 @@ def load_segments(data: bytes) -> dict[str, tuple[int, int, int, int]]:
         cmd, size = struct.unpack_from("<II", data, off)
         if cmd == LC_SEGMENT_64:
             name = data[off + 8:off + 24].rstrip(b"\0").decode("ascii", "replace")
-            vmaddr, vmsize, fileoff, filesize = struct.unpack_from("<QQQQ", data, off + 24)
-            segments[name] = (vmaddr, vmsize, fileoff, filesize)
+            segments[name] = struct.unpack_from("<QQQQ", data, off + 24)
         off += size
     return segments
 
 
-def mov_imm_zero(insn) -> int:
-    """MOV Xd/Wd, #0 -> MOVZ with a zero immediate."""
-    reg = insn.operands[0].reg
-    name = insn.reg_name(reg)
-    if name.startswith("w"):
-        return 0x52800000 | reg
-    return 0xD2800000 | reg
+def sysreg_moves(word: int) -> tuple[str, int] | None:
+    """Return ('mrs'|'msr', Rt) for a C15 system-register move, else None."""
+    if word & MRS_MASK == MRS_BASE:
+        mnemonic = "mrs"
+    elif word & MSR_MASK == MSR_BASE:
+        mnemonic = "msr"
+    else:
+        return None
+    if (word >> 12) & 0xF != 15:          # CRn must be 15 (implementation defined)
+        return None
+    return mnemonic, word & 0x1F
 
 
-def patch(data: bytearray, keep_going: bool) -> list[tuple[int, str, str, int]]:
+def patch(data: bytearray) -> list[tuple[int, str, int, int]]:
     segments = load_segments(data)
-    md = Cs(CS_ARCH_ARM64, CS_MODE_ARM)
-    md.skipdata = True
-    md.detail = True   # capstone 5 needs detail for operands
-    changes: list[tuple[int, str, str, int]] = []
+    changes: list[tuple[int, str, int, int]] = []
     for seg in SCAN_SEGMENTS:
         if seg not in segments:
             continue
         vmaddr, _, fileoff, filesize = segments[seg]
-        blob = bytes(data[fileoff:fileoff + filesize])
-        for insn in md.disasm(blob, vmaddr):
-            if insn.mnemonic not in ("mrs", "msr"):
+        for pos in range(0, filesize - 3, 4):
+            word, = struct.unpack_from("<I", data, fileoff + pos)
+            decoded = sysreg_moves(word)
+            if decoded is None:
                 continue
-            if APPLE_SYSREG_MARK not in insn.op_str.lower():
-                continue
-            if not insn.operands:
-                continue
-            if insn.mnemonic == "mrs":
-                word = mov_imm_zero(insn)
-            else:
-                word = NOP
-            at = fileoff + (insn.address - vmaddr)
-            if struct.unpack_from("<I", data, at)[0] == word:
-                continue
-            struct.pack_into("<I", data, at, word)
-            changes.append((insn.address, insn.mnemonic, insn.op_str, word))
-            if not keep_going:
-                pass
+            mnemonic, rt = decoded
+            replacement = (0xD2800000 | rt) if mnemonic == "mrs" else NOP
+            address = vmaddr + pos
+            struct.pack_into("<I", data, fileoff + pos, replacement)
+            changes.append((address, mnemonic, word, replacement))
     return changes
 
 
@@ -101,13 +96,13 @@ def main() -> int:
     args = parser.parse_args()
 
     data = bytearray(args.kernel.read_bytes())
-    changes = patch(data, keep_going=True)
+    changes = patch(data)
     out = args.output or args.kernel
     out.write_bytes(bytes(data))
     if not args.quiet:
-        print(f"{args.kernel}: neutralised {len(changes)} Apple-private sysreg access(es)")
-        for addr, mnemonic, ops, word in changes:
-            print(f"  0x{addr:x}  {mnemonic:4s} {ops:24s} -> 0x{word:08x}")
+        print(f"{args.kernel}: neutralised {len(changes)} C15 sysreg access(es)")
+        for address, mnemonic, word, replacement in changes:
+            print(f"  0x{address:x}  {mnemonic}  0x{word:08x} -> 0x{replacement:08x}")
     return 0
 
 
