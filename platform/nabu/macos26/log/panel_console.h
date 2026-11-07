@@ -151,27 +151,22 @@ static void sheng_panel_newline(void)
 {
     sheng_panel.x = 0;
     if (!sheng_panel.rows) return;
-    if (sheng_panel.y >= sheng_panel.rows - 1) {
-        /* Commit a valid cursor before any try-only scanline can skip the scroll. */
-        sheng_panel.y = sheng_panel.rows - 1;
-        /* Access the I/O mapping word by word; avoid memory routines that may use SIMD or DC ZVA. */
-        const unsigned pixels = sheng_panel.columns * 8 * sheng_panel.scale;
-        for (unsigned row = sheng_panel.pinned; row + 1 < sheng_panel.rows; row++) {
-            for (unsigned y = 0; y < 16 * sheng_panel.scale; y++) {
-                uint64_t saved;
-                if (!sheng_fb_begin(SHENG_FB_BOOT, &saved)) return;
-                volatile uint32_t *dst = (volatile uint32_t *)(sheng_panel.base +
-                    (row * 16 * sheng_panel.scale + y) * sheng_panel.stride);
-                volatile uint32_t *src = (volatile uint32_t *)((uintptr_t)dst +
-                    16 * sheng_panel.scale * sheng_panel.stride);
-                for (unsigned x = 0; x < pixels; x++) dst[x] = src[x];
-                sheng_fb_end(saved);
-            }
-        }
-    } else {
+    if (sheng_panel.y + 1 < sheng_panel.rows) {
         sheng_panel.y++;
+    } else {
+        /*
+         * Ring cursor instead of scrolling. Shifting the window used to copy
+         * 23 rows x 32 scanlines x 1376 pixels out of the Device-nGnRnE scanout:
+         * over a million non-cached MMIO loads per newline, roughly a second on
+         * SM8150, which stalled PE_create_console() for minutes. Nothing here
+         * reads back from sheng_panel.base.
+         */
+        sheng_panel.y = sheng_panel.pinned;
     }
     sheng_panel_clear_row(sheng_panel.y);
+    if (sheng_panel.y + 1 < sheng_panel.rows) {
+        sheng_panel_clear_row(sheng_panel.y + 1);
+    }
 }
 
 static void sheng_panel_putc(unsigned char byte)

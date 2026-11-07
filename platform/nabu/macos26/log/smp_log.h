@@ -28,6 +28,9 @@ static void sheng_smp_emit(const char *line)
 static void sheng_smp_log_tick(void)
 {
     if (sheng_smp_log_cpus < 2 || sheng_smp_log_cpus > 8) return;
+    /* Before ArmCpu requests the secondaries the step/fail/psci arrays are still
+     * BSS zeroes; printing them inside PE_create_console() is pure noise. */
+    if (!__atomic_load_n(&armcpu_smp_requested, __ATOMIC_RELAXED)) return;
     uint32_t expected = 0;
     if (!__atomic_compare_exchange_n(&sheng_smp_log_writer, &expected, 1, 0,
         __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) return;

@@ -71,9 +71,15 @@ void sheng_boot_progress_tick(void)
     sheng_boot_format(&sheng_boot_progress_state,
         __atomic_load_n(&sheng_log_buffer.total, __ATOMIC_RELAXED),
         __atomic_load_n(&sheng_log_buffer.dropped, __ATOMIC_RELAXED), lines);
-    sheng_boot_render(lines);
     int report = sheng_boot_progress_state.mask != sheng_boot_progress_reported_mask ||
         (now >= sheng_boot_progress_reported && now - sheng_boot_progress_reported >= 30);
+    if (!report) {
+        /* Ages only move the clock text; repainting the bars every second costs
+         * full-width scanout writes and tells the reader nothing new. */
+        sheng_boot_unlock();
+        return;
+    }
+    sheng_boot_render(lines);
     if (report) {
         sheng_boot_progress_reported = now;
         sheng_boot_progress_reported_mask = sheng_boot_progress_state.mask;
