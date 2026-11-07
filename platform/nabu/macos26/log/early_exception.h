@@ -73,13 +73,6 @@ Lsheng_early_capture:
 	/* Low vectors run only with the MMU off; never treat the physical framebuffer as a mapped VA. */
 	ldr x0, [x19, #40]
 	tbnz x0, #0, Lsheng_early_finish
-/* Late repaint entry: paints the text rows from the record and returns
- * without restoring lr/x20/x21, so a caller inside start.s keeps its state. */
-Lsheng_early_repaint:
-	adr	x19, EXT(sheng_early_exception_record)
-	mov	x0, #1
-	str	x0, [x19, #240]
-	b	Lsheng_early_draw
 Lsheng_early_draw:
 	ldr x0, [x19, #96]
 	cbz x0, Lsheng_early_finish
@@ -230,16 +223,6 @@ Lsheng_early_pixel_rows:
 	b.lo Lsheng_early_row
 	dsb sy
 Lsheng_early_finish:
-	ldr x0, [x19, #240]
-	cbz x0, 4f
-	mov x0, #0
-	str x0, [x19, #240]
-	/* The painters borrow x21 for the framebuffer base, but start.s keys
-	 * every bootstrap guard off "x21 == 0 means the first boot", so the
-	 * register has to look untouched when control returns to the caller. */
-	mov x21, #0
-	ret
-4:
 	ldr x0, [x19]
 	cmp x0, #1
 	b.ne Lsheng_early_halt
@@ -316,7 +299,7 @@ Lsheng_mmu_off_fault:
 	b Lsheng_early_draw
 
 Lsheng_early_labels:
-	.ascii "XNU     X14     X15     NENT    L1TB    SCTLR   L2B     ROOT    XVB     XPB     STAGES  "
+	.ascii "XNU     ELR     ESR     FAR     SPSR    SCTLR   TCR     TTBR0   TTBR1   MAIR    STAGES  "
 Lsheng_early_font:
 	/* Glyphs cover 0-9, A-Z, and space, with seven rows and five columns each. */
 	.byte 14,17,19,21,25,17,14
@@ -359,7 +342,4 @@ Lsheng_early_font:
 	.p2align 3
 	.globl EXT(sheng_early_exception_record)
 LEXT(sheng_early_exception_record)
-	.space 256, 0
-
-
-
+	.space 192, 0
