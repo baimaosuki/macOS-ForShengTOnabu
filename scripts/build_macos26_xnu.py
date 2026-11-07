@@ -540,7 +540,7 @@ def compile_sources(args, record: dict) -> None:
                       # knob that reaches start.s/locore.s without editing a patch.
                       'OTHER_CFLAGS=-DSHENG=1',
                       'CFLAGS_EXTRA=-DXNU_NATIVE_ARCH_TIMER=1 -DXNU_DT_PANIC_REGION=1 -DSHENG=1 '
-                      '-march=armv8.2-a+nosha3+nosha512+nosm4 ' +
+                      '-Xclang -target-feature -Xclang -sha3 -Xclang -target-feature -Xclang -sm4 ' +
                       ' '.join('-Wno-error=' + warning for warning in UPSTREAM_WARNINGS)],
             'source-archive', record, env=env)
     except subprocess.CalledProcessError:
@@ -693,7 +693,7 @@ def link_kernel(args, record, common, sdk, source, env):
                   'CFLAGS_KERNEL=-mkernel', 'CXXFLAGS_KERNEL=-fapple-kext',
                   'OTHER_CFLAGS=-DSHENG=1',
                   'CFLAGS_EXTRA=-DXNU_NATIVE_ARCH_TIMER=1 -DXNU_DT_PANIC_REGION=1 -DSHENG=1 '
-                      '-march=armv8.2-a+nosha3+nosha512+nosm4 ' +
+                      '-Xclang -target-feature -Xclang -sha3 -Xclang -target-feature -Xclang -sm4 ' +
                   ' '.join('-Wno-error=' + w for w in UPSTREAM_WARNINGS),
                   'LD_KERNEL_LIBS=' + str(runtimes[0]),
                   'LD_KERNEL_ARCHIVES=' + ' '.join(archives),
