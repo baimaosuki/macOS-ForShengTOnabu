@@ -1,0 +1,132 @@
+--- a/osfmk/arm64/cpc_arm64.h
++++ b/osfmk/arm64/cpc_arm64.h
+@@ -26,6 +26,20 @@
+ 
+ #pragma once
+ 
++/* Snapdragon has no Apple PMCR0/UPMCR; those encodings are UNDEFINED on non-Apple cores
++ * and would raise an unknown-reason exception inside arm_init. */
++#ifndef CPC_READ_PMCR0
++#if defined(ARM64_BOARD_CONFIG_NABU)
++#define CPC_READ_PMCR0()  (0ULL)
++#define CPC_READ_UPMCR()  (0ULL)
++#define CPC_WRITE_PMCR0_VALUE(pmcr0, pmcr1)  do { (void)(pmcr0); (void)(pmcr1); } while (0)
++#else
++#define CPC_READ_PMCR0()  __builtin_arm_rsr64("S3_1_C15_C0_0")
++#define CPC_READ_UPMCR()  __builtin_arm_rsr64("S3_7_C15_C6_4")
++#define CPC_WRITE_PMCR0_VALUE(pmcr0, pmcr1)  do { (void)(pmcr0); (void)(pmcr1); } while (0)
++#endif
++#endif
++
+ #include <os/base.h>
+ #include <stdbool.h>
+ #include <stdint.h>
+@@ -94,14 +108,14 @@
+ cpc_pmi_pending(uint64_t * restrict pmcr0_out,
+     uint64_t * restrict upmsr_out)
+ {
+-	uint64_t pmcr0 = __builtin_arm_rsr64("S3_1_C15_C0_0");
++	uint64_t pmcr0 = CPC_READ_PMCR0();
+ 	bool pmi = PMCR0_PMI(pmcr0);
+ 	*pmcr0_out = pmcr0;
+ 
+ #if HAS_UPMU
+ 	extern bool mt_uncore_enabled;
+ 	if (mt_uncore_enabled) {
+-		uint64_t upmsr = __builtin_arm_rsr64("S3_7_C15_C6_4");
++		uint64_t upmsr = CPC_READ_UPMCR();
+ 		if (UPMSR_PMI(upmsr)) {
+ 			pmi = true;
+ 		}
+--- a/osfmk/arm64/cpc_arm64.c
++++ b/osfmk/arm64/cpc_arm64.c
+@@ -24,6 +24,20 @@
+ //
+ // @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+ 
++/* Snapdragon has no Apple PMCR0/UPMCR; those encodings are UNDEFINED on non-Apple cores
++ * and would raise an unknown-reason exception inside arm_init. */
++#ifndef CPC_READ_PMCR0
++#if defined(ARM64_BOARD_CONFIG_NABU)
++#define CPC_READ_PMCR0()  (0ULL)
++#define CPC_READ_UPMCR()  (0ULL)
++#define CPC_WRITE_PMCR0_VALUE(pmcr0, pmcr1)  do { (void)(pmcr0); (void)(pmcr1); } while (0)
++#else
++#define CPC_READ_PMCR0()  __builtin_arm_rsr64("S3_1_C15_C0_0")
++#define CPC_READ_UPMCR()  __builtin_arm_rsr64("S3_7_C15_C6_4")
++#define CPC_WRITE_PMCR0_VALUE(pmcr0, pmcr1)  do { (void)(pmcr0); (void)(pmcr1); } while (0)
++#endif
++#endif
++
+ #include <kern/assert.h>
+ #include <kern/debug.h>
+ #include <kern/cpc.h>
+@@ -67,7 +81,7 @@
+ 
+ #define PMCR0_LOG() do { \
+ 	struct cpc_percpu_diags *diags = PERCPU_GET(_cpc_percpu_diags); \
+-	diags->cpcd_prev_pmcr0 = __builtin_arm_rsr64("S3_1_C15_C0_0"); \
++	diags->cpcd_prev_pmcr0 = CPC_READ_PMCR0(); \
+ 	diags->cpcd_last_pmcr0_func = __func__; \
+ } while (false)
+ 
+@@ -132,7 +146,7 @@
+ 	unsigned int const enable_offset = slot > 7 ? 32 - 8 : 0;
+ 	uint64_t pmc_enable = 1ULL << (enable_offset + slot);
+ 	uint64_t pmi_enable = 1ULL << (enable_offset + 12 + slot);
+-	uint64_t pmcr0 = __builtin_arm_rsr64("S3_1_C15_C0_0");
++	uint64_t pmcr0 = CPC_READ_PMCR0();
+ 	if (ml_get_interrupts_enabled() && (pmcr0 & pmc_enable) &&
+ 	    (pmcr0 & pmi_enable) && (pmcr0 & PMCR0_INTGEN)) {
+ 		panic("CPC: found PMC%d enabled when it shouldn't be from 0x%llx", slot,
+@@ -442,7 +456,7 @@
+ 		panic("CPC: PMI status not cleared on exit from handler, "
+ 		    "PMSR = 0x%llx HANDLE -> 0x%llx, handled 0x%llx, "
+ 		    "PMCR0 = 0x%llx, PMC%d = 0x%llx%s", pmsr, pmsr_after_handling,
+-		    handled, __builtin_arm_rsr64("S3_1_C15_C0_0"), first_ctr_ovf, count, extra);
++		    handled, CPC_READ_PMCR0(), first_ctr_ovf, count, extra);
+ 	}
+ #endif // MACH_ASSERT
+ 
+@@ -464,6 +478,11 @@
+ static inline void
+ _cpc_cpmu_pmcr0_write(uint64_t value)
+ {
++#if defined(ARM64_BOARD_CONFIG_NABU)
++	/* No Apple PMCR0/PMCR1 on this core; writing them is UNDEFINED. */
++	return;
++#endif
++
+ 
+ 	/* BEGIN IGNORE CODESTYLE */
+ 	asm volatile(
+@@ -483,6 +502,11 @@
+ static inline void
+ _cpc_cpmu_pmcr01_write(uint64_t pmcr0, uint64_t pmcr1)
+ {
++#if defined(ARM64_BOARD_CONFIG_NABU)
++	/* No Apple PMCR0/PMCR1 on this core; writing them is UNDEFINED. */
++	return;
++#endif
++
+ 
+ 	const uint64_t pmcr1_mask = cpc_is_secure() ? PMCR1_ALLOWED_MASK : UINT64_MAX;
+ 
+@@ -953,7 +977,7 @@
+ 		panic("CPC: PMI from IOCPU %p delivered to wrong IOCPU %p", source,
+ 		    curcpu->interrupt_nub);
+ 	}
+-	_cpc_cpmu_pmi(curcpu, __builtin_arm_rsr64("S3_1_C15_C0_0"));
++	_cpc_cpmu_pmi(curcpu, CPC_READ_PMCR0());
+ }
+ #endif // CPMU_AIC_PMI
+ 
+@@ -1062,7 +1086,7 @@
+ 	assert3u(hw, ==, CPC_HW_CPMU);
+ 
+ 	regs->cmr_cpmu = (struct _cpc_arm64_cpmu_regs){
+-		.cacr_pmcr[0] = __builtin_arm_rsr64("S3_1_C15_C0_0"),
++		.cacr_pmcr[0] = CPC_READ_PMCR0(),
+ 		.cacr_pmcr[1] = __builtin_arm_rsr64("S3_1_C15_C1_0"),
+ 		.cacr_pmesr[0] = __builtin_arm_rsr64("S3_1_C15_C5_0"),
+ 		.cacr_pmesr[1] = __builtin_arm_rsr64("S3_1_C15_C6_0"),
