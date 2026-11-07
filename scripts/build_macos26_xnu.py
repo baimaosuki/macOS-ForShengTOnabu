@@ -539,7 +539,8 @@ def compile_sources(args, record: dict) -> None:
                       # SFLAGS_GEN is built from OTHER_CFLAGS, so this is the only
                       # knob that reaches start.s/locore.s without editing a patch.
                       'OTHER_CFLAGS=-DSHENG=1',
-                      'CFLAGS_EXTRA=-DXNU_NATIVE_ARCH_TIMER=1 -DXNU_DT_PANIC_REGION=1 -DSHENG=1 ' +
+                      'CFLAGS_EXTRA=-DXNU_NATIVE_ARCH_TIMER=1 -DXNU_DT_PANIC_REGION=1 -DSHENG=1 '
+                      '-march=armv8.2-a+nosha3+nosha512+nosm4 ' +
                       ' '.join('-Wno-error=' + warning for warning in UPSTREAM_WARNINGS)],
             'source-archive', record, env=env)
     except subprocess.CalledProcessError:
@@ -691,7 +692,8 @@ def link_kernel(args, record, common, sdk, source, env):
     run(common + ['build', 'BUILD_STATIC_LINK=1', 'BUILD_XNU_LIBRARY=0',
                   'CFLAGS_KERNEL=-mkernel', 'CXXFLAGS_KERNEL=-fapple-kext',
                   'OTHER_CFLAGS=-DSHENG=1',
-                  'CFLAGS_EXTRA=-DXNU_NATIVE_ARCH_TIMER=1 -DXNU_DT_PANIC_REGION=1 -DSHENG=1 ' +
+                  'CFLAGS_EXTRA=-DXNU_NATIVE_ARCH_TIMER=1 -DXNU_DT_PANIC_REGION=1 -DSHENG=1 '
+                      '-march=armv8.2-a+nosha3+nosha512+nosm4 ' +
                   ' '.join('-Wno-error=' + w for w in UPSTREAM_WARNINGS),
                   'LD_KERNEL_LIBS=' + str(runtimes[0]),
                   'LD_KERNEL_ARCHIVES=' + ' '.join(archives),
