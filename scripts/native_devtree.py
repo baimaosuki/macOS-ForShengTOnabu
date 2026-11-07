@@ -217,8 +217,19 @@ def _adt_node(name: str, properties: tuple[tuple[str, bytes], ...] = (),
 
 
 def _adt_random_seed() -> bytes:
-    """64 non-zero bytes for /chosen/random-seed (kernel panics on all-zero seed)."""
-    return hashlib.sha512(b'nabu-adt-random-seed-v1').digest()
+    """256 non-zero bytes for /chosen/random-seed.
+
+    XNU's arm64 KPRNG asks the bootloader for 4 * SHA512_DIGEST_LENGTH bytes and
+    treats a short read as fatal ("Expected 256 seed bytes from bootloader, but
+    got N" in prng_random.c), so the property has to carry a full 256 bytes.
+    Derived deterministically so the ADT stays reproducible byte for byte.
+    """
+    out = bytearray()
+    counter = 0
+    while len(out) < 256:
+        out += hashlib.sha512(b'nabu-adt-random-seed-v1' + counter.to_bytes(4, 'little')).digest()
+        counter += 1
+    return bytes(out[:256])
 
 
 def _adt_nvram_props() -> list[tuple[str, bytes]]:
