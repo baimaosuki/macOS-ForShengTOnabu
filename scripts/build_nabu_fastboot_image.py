@@ -28,6 +28,23 @@ import gzip
 import shutil
 
 
+def nram_offset_symbol(elf_path: Path) -> int:
+    """Return the link-time address of g_nram_payload_offset (image is linked at 0)."""
+    out = subprocess.check_output(['aarch64-linux-gnu-nm', str(elf_path)], text=True)
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) == 3 and parts[2] == 'g_nram_payload_offset':
+            return int(parts[0], 16)
+    raise ValueError('stage1 ELF has no g_nram_payload_offset symbol')
+
+
+def patch_nram_offset(binary: bytearray, symbol_offset: int, payload_offset: int) -> None:
+    """Write the NRAM payload offset into the loader image at its link address."""
+    if not 0 < payload_offset < 0x40000000:
+        raise ValueError('implausible NRAM payload offset')
+    struct.pack_into('<Q', binary, symbol_offset, payload_offset)
+
+
 def verify_android_boot_image(boot_img_path: Path) -> dict[str, Any]:
     """Parse and verify the Android Boot Image v0, gzipped ARM64 Image + FDT, and NRAM ramdisk."""
     raw = boot_img_path.read_bytes()

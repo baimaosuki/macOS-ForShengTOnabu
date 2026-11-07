@@ -112,26 +112,54 @@ static int valid_nram(const uint8_t *p)
 // v3 boot headers carry no load address, so ABL picks where the ramdisk lands.
 // Try the FDT hint, then the bytes right behind this loader, then sweep Bank 0
 // at 4 KiB granularity (the container can sit anywhere in DDR).
-static const uint8_t *locate_nram_container(uint64_t fdt_pa)
+// Patched by the packager to the byte offset of the NRAM container inside the
+// kernel payload. ABL copies the payload verbatim, so base + slot is exact and
+// no RAM scanning (and no ABL ramdisk semantics) is involved at all.
+volatile uint64_t g_nram_payload_offset = 0xffffffffffffffffULL;
+
+extern const uint8_t _start[];
+
+static const uint8_t *locate_nram_container(uint64_t fdt_pa, uint64_t *hint_out,
+                                           uint64_t *self_out)
 {
     const uint64_t initrd_pa = find_initrd_in_fdt(fdt_pa);
+    const uint64_t self_pa = (uint64_t)(uintptr_t)_start;
+    if (hint_out) {
+        *hint_out = initrd_pa;
+    }
+    if (self_out) {
+        *self_out = self_pa;
+    }
+    const uint64_t patched = g_nram_payload_offset;
+    if (patched != 0xffffffffffffffffULL && patched < 0x40000000ULL) {
+        const uint8_t *p = (const uint8_t *)(uintptr_t)(self_pa + patched);
+        if (valid_nram(p)) {
+            return p;
+        }
+    }
     if (initrd_pa >= 0x80000000ULL && initrd_pa < 0xb9900000ULL) {
-        const uint8_t *p = (const uint8_t *)(uintptr_t)initrd_pa;
-        if (valid_nram(p)) {
-            return p;
+        if (valid_nram((const uint8_t *)(uintptr_t)initrd_pa)) {
+            return (const uint8_t *)(uintptr_t)initrd_pa;
+        }
+        // ABL can publish a hint that does not point at the container; walk
+        // outward from it instead of sweeping the whole bank (protected holes
+        // in Bank 0 abort the CPU when MMU is off).
+        for (uint64_t d = 0x1000ULL; d <= 0x4000000ULL; d += 0x1000ULL) {
+            for (int up = 1; up >= 0; up--) {
+                const uint64_t addr = up ? initrd_pa + d : initrd_pa - d;
+                if (addr < 0x80000000ULL || addr >= 0xb9900000ULL) {
+                    continue;
+                }
+                if (valid_nram((const uint8_t *)(uintptr_t)addr)) {
+                    return (const uint8_t *)(uintptr_t)addr;
+                }
+            }
         }
     }
-    const uint64_t self_pa = (uint64_t)(uintptr_t)locate_nram_container;
+    // Self-contained images keep the container right behind this loader.
     for (uint64_t addr = self_pa; addr < self_pa + 0x2000000ULL; addr += 0x1000ULL) {
-        const uint8_t *p = (const uint8_t *)(uintptr_t)addr;
-        if (valid_nram(p)) {
-            return p;
-        }
-    }
-    for (uint64_t addr = 0x80000000ULL; addr < 0xb9900000ULL; addr += 0x1000ULL) {
-        const uint8_t *p = (const uint8_t *)(uintptr_t)addr;
-        if (valid_nram(p)) {
-            return p;
+        if (valid_nram((const uint8_t *)(uintptr_t)addr)) {
+            return (const uint8_t *)(uintptr_t)addr;
         }
     }
     return NULL;
@@ -174,12 +202,26 @@ void nabu_darwinboot_main(uint64_t fdt_pa)
     nabu_fb_draw_hex64(x, y, fdt_pa, fg, bg, 3);
     y += 44;
 
+    const uint64_t loader_pa = (uint64_t)(uintptr_t)&nabu_darwinboot_main;
+    x = nabu_fb_draw_string(32, y, "LOADER PA: ", fg, bg, 3);
+    nabu_fb_draw_hex64(x, y, loader_pa, fg, bg, 3);
     const uint64_t initrd_hint = find_initrd_in_fdt(fdt_pa);
-    x = nabu_fb_draw_string(32, y, "INITRD PA: ", fg, bg, 3);
+    x = nabu_fb_draw_string(x + 24, y, "INITRD PA: ", fg, bg, 3);
     nabu_fb_draw_hex64(x, y, initrd_hint, initrd_hint ? ok_color : err_color, bg, 3);
     y += 44;
 
-    const uint8_t *nram = locate_nram_container(fdt_pa);
+    uint64_t initrd_tag = 0;
+    if (initrd_hint >= 0x80000000ULL && initrd_hint < 0xb9900000ULL) {
+        const uint8_t *ip = (const uint8_t *)(uintptr_t)initrd_hint;
+        initrd_tag = (uint64_t)read_le32(ip) | ((uint64_t)read_le32(ip + 4) << 32);
+    }
+    x = nabu_fb_draw_string(32, y, "INITRD TAG: ", fg, bg, 3);
+    nabu_fb_draw_hex64(x, y, initrd_tag, initrd_tag == 0x4d41524eU ? ok_color : err_color, bg, 3);
+    y += 44;
+
+    uint64_t nram_hint = 0, loader_self = 0;
+    const uint8_t *nram = locate_nram_container(fdt_pa, &nram_hint, &loader_self);
+    (void)nram_hint; (void)loader_self;
     if (!nram) {
         nabu_fb_draw_string(32, y, "ERROR: NRAM ramdisk container not found in Bank 0!", err_color, bg, 3);
         return;
