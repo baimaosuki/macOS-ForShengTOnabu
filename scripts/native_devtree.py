@@ -367,7 +367,7 @@ def make_nabu_adt(path: Path, *, dram_base: int = 0xc0000000,
         ('#address-cells', struct.pack('<I', 2)),
         ('#size-cells', struct.pack('<I', 2)),
     ), (
-        _adt_node('chosen', tuple(chosen_props)),
+        _adt_node('chosen', tuple(chosen_props), (_adt_node('memory-map'),)),
         _adt_node('defaults', (('model', b'Xiaomi Pad 5\0'), ('target-type', b'Mac\0'))),
         _adt_node('options'),
         _adt_node('product', (
