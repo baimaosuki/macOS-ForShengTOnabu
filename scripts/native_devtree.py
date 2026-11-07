@@ -292,6 +292,10 @@ def make_nabu_adt(path: Path, *, dram_base: int = 0xc0000000,
         ('reg', struct.pack('<I', 0)),
         ('cpu-id', struct.pack('<I', 0)),
         ('enable-method', b'psci\0'),
+        # pe_identify_machine reads the boot state and the timebase; a missing
+        # state string leaves the cpu unusable and a zero rate divides by zero.
+        ('state', b'running\0'),
+        ('timebase-frequency', struct.pack('<I', 19200000)),
     ))]
     # XNU ArmDTPlatform requires interrupt-controller = "master\0" and name = "interrupt-controller\0"
     intc = _adt_node('intc', (
@@ -334,6 +338,9 @@ def make_nabu_adt(path: Path, *, dram_base: int = 0xc0000000,
             ('stride', struct.pack('<I', 6400)),
         )))
     arm_io = _adt_node('arm-io', (
+        # pe_arm_get_soc_base_phys reads device_type first and hands it to
+        # strlcpy without a null check, so the property must exist.
+        ('device_type', b'arm-io\0'),
         ('compatible', b'simple-bus\0'),
         ('#address-cells', struct.pack('<I', 2)),
         ('#size-cells', struct.pack('<I', 2)),

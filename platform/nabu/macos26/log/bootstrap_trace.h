@@ -62,34 +62,6 @@
 	add x16, x16, x17
 	.endr
 	dsb sy
-	/* stage 4: publish the second create_bootstrap_mapping inputs. No stack use:
-	 * sp is already a KVA while the MMU is still off, so a push here faults. */
-	.if \stage == 4
-	adr x19, EXT(sheng_early_exception_record)
-	str x2,  [x19, #192]
-	str x3,  [x19, #200]
-	str x5,  [x19, #208]
-	str x21, [x19, #216]
-	str x24, [x19, #224]
-	str lr,  [x19, #232]
-	lsr x6, x24, #(ARM_TT_L2_SHIFT)
-	str x14, [x19, #8]
-	str x15, [x19, #16]
-	str x6,  [x19, #24]
-	str x3,  [x19, #32]
-	str x2,  [x19, #48]
-	str x25, [x19, #56]
-	str x22, [x19, #64]
-	str x23, [x19, #72]
-	bl Lsheng_early_repaint
-	adr x19, EXT(sheng_early_exception_record)
-	ldr x2,  [x19, #192]
-	ldr x3,  [x19, #200]
-	ldr x5,  [x19, #208]
-	ldr x21, [x19, #216]
-	ldr x24, [x19, #224]
-	ldr lr,  [x19, #232]
-	.endif
 9:
 #endif
 .endmacro
