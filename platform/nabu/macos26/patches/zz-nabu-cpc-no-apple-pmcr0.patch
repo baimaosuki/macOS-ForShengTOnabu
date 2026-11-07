@@ -230,26 +230,41 @@
  _cpc_cpmu_pmcr0_write(uint64_t value)
  {
 +#if defined(ARM64_BOARD_CONFIG_NABU)
-+	/* No Apple PMCR0/PMCR1 on this core; writing them is UNDEFINED. */
-+	return;
-+#endif
++	/* No Apple PMCR0/PMCR1 on this core; those msr encodings are UNDEFINED. */
++	(void)value;
++#else
 +
  
  	/* BEGIN IGNORE CODESTYLE */
  	asm volatile(
-@@ -483,6 +505,11 @@
+@@ -478,11 +500,18 @@
+ 		: "x16"
+ 	);
+ 	/* END IGNORE CODESTYLE */
++#endif
+ }
+ 
  static inline void
  _cpc_cpmu_pmcr01_write(uint64_t pmcr0, uint64_t pmcr1)
  {
 +#if defined(ARM64_BOARD_CONFIG_NABU)
-+	/* No Apple PMCR0/PMCR1 on this core; writing them is UNDEFINED. */
-+	return;
-+#endif
++	/* No Apple PMCR0/PMCR1 on this core; those msr encodings are UNDEFINED. */
++	(void)pmcr0;
++	(void)pmcr1;
++#else
 +
  
  	const uint64_t pmcr1_mask = cpc_is_secure() ? PMCR1_ALLOWED_MASK : UINT64_MAX;
  
-@@ -953,7 +980,7 @@
+@@ -515,6 +544,7 @@
+ 		: "x16", "x17"
+ 	);
+ 	/* END IGNORE CODESTYLE */
++#endif
+ }
+ 
+ struct _cpc_cpmu_pmesr_bits {
+@@ -953,7 +983,7 @@
  		panic("CPC: PMI from IOCPU %p delivered to wrong IOCPU %p", source,
  		    curcpu->interrupt_nub);
  	}
@@ -258,7 +273,7 @@
  }
  #endif // CPMU_AIC_PMI
  
-@@ -1062,7 +1089,7 @@
+@@ -1062,7 +1092,7 @@
  	assert3u(hw, ==, CPC_HW_CPMU);
  
  	regs->cmr_cpmu = (struct _cpc_arm64_cpmu_regs){
@@ -267,7 +282,7 @@
  		.cacr_pmcr[1] = __builtin_arm_rsr64("S3_1_C15_C1_0"),
  		.cacr_pmesr[0] = __builtin_arm_rsr64("S3_1_C15_C5_0"),
  		.cacr_pmesr[1] = __builtin_arm_rsr64("S3_1_C15_C6_0"),
-@@ -1078,34 +1105,34 @@
+@@ -1078,34 +1108,34 @@
  		.cacr_pm_memflt_ctl45 = __builtin_arm_rsr64("PM_MEMFLT_CTL45_EL1"),
  		// Use coproc addresses for PMEFR{2,9} instead of register names due to rdar://152681387
  		.cacr_pmefr = {
