@@ -1,0 +1,34 @@
+--- a/osfmk/arm64/start.s
++++ b/osfmk/arm64/start.s
+@@ -757,8 +757,17 @@
+ 	SHENG_BOOTSTRAP_TRACE 10
+ 
+ 	isb
++	adr x17, EXT(sheng_early_exception_record)
++	mov x16, #11
++	str x16, [x17, #184]
+ 	tlbi	vmalle1
++	adr x17, EXT(sheng_early_exception_record)
++	mov x16, #12
++	str x16, [x17, #184]
+ 	dsb		ish
++	adr x17, EXT(sheng_early_exception_record)
++	mov x16, #13
++	str x16, [x17, #184]
+ 
+ 
+ #ifndef __ARM_IC_NOALIAS_ICACHE__
+@@ -766,7 +775,13 @@
+ 	 * caches are invalidated on reset.
+ 	 */
+ 	tlbi	vmalle1
++	adr x17, EXT(sheng_early_exception_record)
++	mov x16, #14
++	str x16, [x17, #184]
+ 	ic		iallu
++	adr x17, EXT(sheng_early_exception_record)
++	mov x16, #15
++	str x16, [x17, #184]
+ #endif
+ 	SHENG_BOOTSTRAP_TRACE 11
+ 
