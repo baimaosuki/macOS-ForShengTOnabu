@@ -199,6 +199,10 @@ void sheng_log_repaint_panel(void)
 }
 
 volatile uint64_t sheng_first_sync_displayed;
+/* Return address of the faulting frame: the saved-state x30, i.e. the
+ * caller of whatever the faulting function was, which is what names the
+ * code path when the fault itself is inside a shared helper. */
+uint64_t sheng_fault_lr;
 static void sheng_exception_text(const char *message)
 {
     /* Send first-fault registers to the independent display path even if the fault interrupted the log writer. */
@@ -230,6 +234,7 @@ void sheng_log_exception(uint64_t pc, uint64_t esr, uint64_t far, uint64_t sp)
     sheng_exception_hex("ELR=", pc);
     sheng_exception_hex("ESR=", esr);
     sheng_exception_hex("FAR=", far);
+    sheng_exception_hex("CALLER=", sheng_fault_lr);
     sheng_exception_hex("SP =", sp);
     sheng_panel_pin_panic();
 }

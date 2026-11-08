@@ -81,6 +81,13 @@ def audit(adt: Path) -> int:
           str(len(chosen.get("nvram-proxy-data", b""))))
     check("chosen dram-base/dram-size present",
           len(chosen.get("dram-base", b"")) == 8 and len(chosen.get("dram-size", b"")) == 8)
+    # AppleImage4, which AMFI depends on, looks both of these up during
+    # start() and panics on a bare absence, so they are boot-contract items.
+    check("node /device-tree/chosen/manifest-properties",
+          "/device-tree/chosen/manifest-properties" in tree)
+    check("chosen crypto-hash-method is sha2-384",
+          chosen.get("crypto-hash-method", b"").rstrip(b"\0") == b"sha2-384",
+          repr(chosen.get("crypto-hash-method")))
     check("root compatible names the platform",
           b"xiaomi,nabu" in tree.get("/device-tree", {}).get("compatible", b""))
 

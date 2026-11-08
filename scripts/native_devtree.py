@@ -289,6 +289,11 @@ def make_nabu_adt(path: Path, *, dram_base: int = 0xc0000000,
         ('framebuffer-depth', struct.pack('<I', 32)),
         ('framebuffer-stride', struct.pack('<I', 6400)),
         ('kernel-ctrr-to-be-enabled', struct.pack('<I', 0)),
+        # AppleImage4 reads this during start() and panics with
+        # "non-sensical crypto hash method: " when the property is absent; the
+        # board device tree of every supported target names sha2-384, and
+        # sheng ships the same value.
+        ('crypto-hash-method', b'sha2-384\0'),
     ]
     chosen_props.append(('osenvironment', (os_environment or 'main').encode('ascii') + b'\0'))
     chosen_props.append(('random-seed', _adt_random_seed()))
@@ -367,7 +372,11 @@ def make_nabu_adt(path: Path, *, dram_base: int = 0xc0000000,
         ('#address-cells', struct.pack('<I', 2)),
         ('#size-cells', struct.pack('<I', 2)),
     ), (
-        _adt_node('chosen', tuple(chosen_props), (_adt_node('memory-map'),)),
+        # The empty manifest-properties child is what the original AppleImage4
+        # looks up first; without it start() panics with "failed to get manifest
+        # properties" before it ever reaches the crypto hash method check.
+        _adt_node('chosen', tuple(chosen_props),
+                  (_adt_node('memory-map'), _adt_node('manifest-properties'))),
         _adt_node('defaults', (('model', b'Xiaomi Pad 5\0'), ('target-type', b'Mac\0'))),
         _adt_node('options'),
         _adt_node('product', (

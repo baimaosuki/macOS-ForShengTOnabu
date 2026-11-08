@@ -1,12 +1,13 @@
 --- a/osfmk/arm64/sleh.c
 +++ b/osfmk/arm64/sleh.c
-@@ -629,6 +629,12 @@
+@@ -629,6 +629,13 @@
  
  	ss_valid = is_saved_state64(ss);
  	arm_saved_state64_t *state = saved_state64(ss);
 +#if SHENG
 +	/* Do not pin recoverable page faults; preserve registers on screen only for confirmed fatal faults. */
 +	if (ss_valid && !PSR64_IS_USER(state->cpsr)) {
++		sheng_fault_lr = state->lr;
 +		sheng_log_exception(state->pc, state->esr, state->far, state->sp);
 +	}
 +#endif
