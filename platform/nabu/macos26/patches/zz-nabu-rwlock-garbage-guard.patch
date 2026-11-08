@@ -1,0 +1,142 @@
+diff --git a/osfmk/kern/lock_rw.c b/osfmk/kern/lock_rw.c
+index b051824..a8b4a92 100644
+--- a/osfmk/kern/lock_rw.c
++++ b/osfmk/kern/lock_rw.c
+@@ -34,6 +34,8 @@
+ #include <kern/machine.h>
+ #include <kern/thread.h>
+ 
++#include <kern/misc_protos.h>
++
+ #include <sys/kdebug_kernel.h>
+ 
+ #include <machine/cpu_data.h>
+@@ -569,6 +571,27 @@ __lck_rw_old_owned_panic(
+ 	    lck, LCK_RW_OLD_FMT_ARG(lck), self);
+ }
+ 
++/*
++ * NABU: a prelinked kext can hand an rwlock entry point a pointer that is not a
++ * lock at all (AMFI's sysctl name string in the kext band, odd address).  The
++ * debug path panics on it, and the fast path then faults on an unaligned
++ * atomic.  Anything that cannot hold an lck_rw_t is dropped: a lock operation on
++ * kext text is meaningless, and letting it through stops the boot.
++ */
++static inline bool
++lck_rw_nabu_plausible(void *lock)
++{
++	uintptr_t address = (uintptr_t)lock;
++
++	if (address == 0 || (address & 0x3) != 0) {
++		return false;
++	}
++	if (address < 0xfffffe0000000000ULL) {
++		return false;
++	}
++	return true;
++}
++
+ __abortlike
+ static void
+ __lck_rw_old_not_owned_panic(
+@@ -680,6 +703,11 @@ lck_rw_dbg_assert_held_slow(void *lock, lck_rw_type_t type)
+ 	thread_t        self = current_thread();
+ 	rw_lock_debug_t rw_locks_held = &self->rw_lock_held;
+ 
++	if (!lck_rw_nabu_plausible(lock)) {
++		printf("NABU: %s: %p is not a lock, dropping\n", "lck_rw_dbg_assert_held_slow", lock);
++		return;
++	}
++
+ 	struct rw_lock_debug_entry *entry = find_lock_in_savedlocks(lock, rw_locks_held);
+ 	if (__probable(entry != NULL)) {
+ 		if ((type != LCK_RW_TYPE_SHARED && entry->rwlde_mode_count == -1) ||
+@@ -816,6 +844,11 @@ lck_rw_dbg_remove_slow(void *lock, lck_rw_type_t type)
+ 	thread_t        self = current_thread();
+ 	rw_lock_debug_t rw_locks_held = &self->rw_lock_held;
+ 
++	if (!lck_rw_nabu_plausible(lock)) {
++		printf("NABU: %s: %p is not a lock, dropping\n", "lck_rw_dbg_remove_slow", lock);
++		return;
++	}
++
+ 	if (os_sub_overflow(rw_locks_held->rwld_locks_acquired, 1,
+ 	    &rw_locks_held->rwld_locks_acquired)) {
+ 		panic("RWLock too many unlocks, for thread %p", self);
+@@ -1532,6 +1565,10 @@ __lck_rw_new_func
+ void
+ lck_rw_lock_shared(lck_rw_t *lck)
+ {
++	if (!lck_rw_nabu_plausible(lck)) {
++		return;
++	}
++
+ 	__lck_rw_lock_shared(lck, LCK_RW_MODE_SLEEPABLE);
+ }
+ 
+@@ -1568,6 +1605,10 @@ __lck_rw_new_func
+ boolean_t
+ lck_rw_try_lock_shared(lck_rw_t *lck)
+ {
++	if (!lck_rw_nabu_plausible(lck)) {
++		return false;
++	}
++
+ 	return __lck_rw_try_lock_shared(lck, LCK_RW_MODE_SLEEPABLE);
+ }
+ 
+@@ -1748,6 +1789,10 @@ __lck_rw_new_func
+ void
+ lck_rw_unlock_shared(lck_rw_t *lck)
+ {
++	if (!lck_rw_nabu_plausible(lck)) {
++		return;
++	}
++
+ 	__lck_rw_unlock_shared(lck, LCK_RW_MODE_SLEEPABLE);
+ }
+ 
+@@ -1999,6 +2044,10 @@ __lck_rw_new_func
+ void
+ lck_rw_lock_exclusive(lck_rw_t *lck)
+ {
++	if (!lck_rw_nabu_plausible(lck)) {
++		return;
++	}
++
+ 	(void)__lck_rw_lock_exclusive(lck, LCK_RW_MODE_SLEEPABLE);
+ }
+ 
+@@ -2036,6 +2085,10 @@ __lck_rw_new_func
+ boolean_t
+ lck_rw_try_lock_exclusive(lck_rw_t *lck)
+ {
++	if (!lck_rw_nabu_plausible(lck)) {
++		return false;
++	}
++
+ 	return __lck_rw_try_lock_exclusive(lck, LCK_RW_MODE_SLEEPABLE);
+ }
+ 
+@@ -2084,6 +2137,10 @@ __lck_rw_new_func
+ void
+ lck_rw_unlock_exclusive(lck_rw_t *lck)
+ {
++	if (!lck_rw_nabu_plausible(lck)) {
++		return;
++	}
++
+ 	__lck_rw_unlock_exclusive(lck, LCK_RW_MODE_SLEEPABLE);
+ }
+ 
+@@ -2212,6 +2269,10 @@ __lck_rw_new_func
+ lck_rw_type_t
+ lck_rw_done(lck_rw_t *lck)
+ {
++	if (!lck_rw_nabu_plausible(lck)) {
++		return LCK_RW_TYPE_SHARED;
++	}
++
+ 	if (lck->lck_rw.x_locked) {
+ 		lck_rw_unlock_exclusive(lck);
+ 		return LCK_RW_TYPE_EXCLUSIVE;
