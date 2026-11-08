@@ -555,7 +555,28 @@ def run(args):
     if total_extent >= band_top:
         raise Refused('uniform-slide band (%d bytes) does not fit below the kernel'
                       % total_extent)
-    slide = (band_top - total_extent) - rel_low
+    # start.s start_first_cpu derives the bootstrap mapping origin from the
+    # kernel Mach-O header:
+    #     x18 = header_pa - physBase        (adrp with translation off -> PA)
+    #     x24 = memSize - x18 ; x22 = virtBase + x18 ; x23 = physBase + x18
+    # and create_l2_block_entries then masks that physical base into 2 MiB block
+    # descriptors (and $6, $1, #ARM_TTE_BLOCK_L2_MASK).  The invariant recorded
+    # in the comment above Lkernelcache_base_found is therefore
+    #     (__TEXT.vmaddr - min(segment.vmaddr)) % 2 MiB == 0
+    # i.e. the header must start on an L2 boundary relative to physBase.  With an
+    # empty __PRELINK_TEXT that held by luck (== __TEXT - 0x3000000); a filled
+    # band breaks it and the kernel maps its own text 0x7C000 bytes off, then
+    # executes zeros (0x00000000 = udf) with the MMU still in bootstrap mode.
+    # Round the band span instead of the remaining space: because band_top is
+    # __TEXT.vmaddr, band_top - align_up(span, 2 MiB) keeps the same low bits.
+    L2_GRANULE = 0x200000
+    band_span = ((total_extent + L2_GRANULE - 1) // L2_GRANULE) * L2_GRANULE
+    if band_span >= band_top:
+        raise Refused('uniform-slide band (%d bytes) does not fit below the kernel'
+                      % band_span)
+    band_base = band_top - band_span
+    assert (band_top - band_base) % L2_GRANULE == 0, 'L2 boundary invariant'
+    slide = band_base - rel_low
 
     placed_groups = {}
     table_size = 8 * len([i for i in selected if components[i]['text'] is not None])
