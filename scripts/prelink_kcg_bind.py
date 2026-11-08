@@ -1,33 +1,40 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Stage 2 of the kext prelink pipeline: bind a macOS fileset KC's kexts into a
-self-built XNU image using a *uniform slide*, so no runtime linker is needed.
+self-built XNU image by *repacking* the components, so no runtime linker is
+needed.
 
-Design (docs/nabu-kc-kext-load-contract.md, section 3):
+Design (this is the layout SHENG booted with, see
+docs/history/macos26-security-20261026.md):
 
-  * Every segment of every selected component is moved by **one** constant
-    ``slide``.  A uniform translation is an isometry, so
-    ``new_target - new_site == old_target - old_site`` holds bit-exactly for
-    every intra-closure reference.  Consequently no ``adrp``/``add``/``ldr``
-    rewriting is needed inside kexts and no veneer is needed for
-    intra-closure branches.
-  * Kext Mach-O headers stay *sparse*: the NABU kernel
-    (platform/nabu/macos26/patches/0008-nabu-sparse-prelink-index.patch) walks
-    ``__PRELINK_TEXT,__macho_list`` and follows that pointer array, so kexts do
-    not have to be packed contiguously at KEXT_ALIGN_BYTES.
-  * Only two kinds of references change:
+  * The components are packed contiguously into four groups
+    (``__PRELINK_TEXT`` / ``__PLK_TEXT_EXEC`` / ``__PLK_DATA_CONST`` /
+    ``__PRELINK_DATA``) on a 16 KiB granule.  Apple spreads the same components
+    over 107 MB of its kernelcache while their real footprint is 3.95 MB, so a
+    layout that preserves that scatter needs an 84 MB band and an 82 MB image.
+  * Only the *intra-part* byte layout is an invariant: a segment is copied
+    verbatim, so references that stay inside one part keep their distance for
+    free and are never touched.
+  * References that cross a part boundary are re-encoded explicitly:
       a/b. absolute pointer slots (decoded from the top level chained fixups)
-           get ``+ slide``;
+           are retargeted through ``mv()``;
       c.   references whose target lies in Apple's ``com.apple.kernel`` are
            redirected into *our* kernel: Apple VA -> symbol name -> our VA.
   * ``vm_kernel_slide == 0`` on this board, so every slot is rewritten as a bare
     little-endian 64-bit absolute address; no chained fixup has to survive.
+  * Kext Mach-O headers stay *sparse*: the NABU kernel
+    (platform/nabu/macos26/patches/0008-nabu-sparse-prelink-index.patch) walks
+    ``__PRELINK_TEXT,__macho_list`` and follows that pointer array, so the
+    kexts do not have to sit at KEXT_ALIGN_BYTES.
 
 Stdlib only: the branch scanner decodes the few AArch64 PC-relative forms it
 needs instead of depending on capstone.
 """
 import argparse
+import base64
 import hashlib
+import hmac
+from bisect import bisect_right
 import json
 import plistlib
 import struct
@@ -267,6 +274,58 @@ def rn_of(word):
     return (word >> 5) & 0x1F
 
 
+def prelink_xml(value, indent=0):
+    """Serialise the prelink plist exactly the way XNU consumes it.
+
+    ``OSUnserializeXML`` produces an OSNumber only for <integer>; the address
+    and size fields must therefore be ``<integer size="64">0x...``.  plistlib
+    cannot emit that: it turns a Python int into signed decimal and a packed
+    struct into <data>, and OSKext::initWithPrelinkedInfoDict (OSKext.cpp:2111)
+    rejects OSData for these keys.
+    """
+    pad = '\t' * indent
+    if isinstance(value, dict):
+        body = ''.join('%s\t<key>%s</key>\n%s' % (pad, key, prelink_xml(child, indent + 1))
+                       for key, child in value.items())
+        return '%s<dict>\n%s%s</dict>\n' % (pad, body, pad)
+    if isinstance(value, (list, tuple)):
+        return '%s<array>\n%s%s</array>\n' % (
+            pad, ''.join(prelink_xml(child, indent + 1) for child in value), pad)
+    if isinstance(value, bool):
+        return '%s<%s/>\n' % (pad, 'true' if value else 'false')
+    if isinstance(value, int):
+        if not 0 <= value < (1 << 64):
+            raise Refused('metadata integer %d outside the 64-bit range' % value)
+        return '%s<integer size="64">0x%x</integer>\n' % (pad, value)
+    if isinstance(value, (bytes, bytearray)):
+        return '%s<data>%s</data>\n' % (pad, base64.b64encode(bytes(value)).decode())
+    if isinstance(value, str):
+        escaped = (value.replace('&', '&amp;').replace('<', '&lt;')
+                   .replace('>', '&gt;'))
+        return '%s<string>%s</string>\n' % (pad, escaped)
+    raise Refused('unserialisable metadata value %r' % (value,))
+
+
+NATIVE_PRELINK = Path(__file__).resolve().parent.parent / 'UniXNU/kits/NativePrelink'
+
+
+def prelink_xml_document(value):
+    """Serialise through SHENG's own emitter, not a local lookalike.
+
+    UniXNU/kits/NativePrelink/emit_prelink.py::to_xml is the verifier of the
+    metadata contract: it emits <integer size="64">0x... for every number, so
+    OSUnserializeXML hands OSKext an OSNumber.  Reuse it verbatim.
+    """
+    if str(NATIVE_PRELINK) not in sys.path:
+        sys.path.insert(0, str(NATIVE_PRELINK))
+    import xml.etree.ElementTree as ET
+    from emit_prelink import to_xml
+    body = ET.tostring(to_xml(value), encoding='utf-8').decode()
+    return ('<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
+            '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+            '<plist version="1.0">\n' + body + '\n</plist>\n').encode()
+
 def decode_pc_relative(word, address):
     top = word >> 26
     if top == 0b100101:                                   # BL
@@ -303,6 +362,29 @@ def encode_branch(kind, delta):
             return None
         return 0x54000000 | (((delta >> 2) & 0x7FFFF) << 5)
     return None
+
+
+def encode_cbz(word, delta):
+    """Re-target CBZ/CBNZ in place: keep sf/op/Rt, replace imm19."""
+    if delta % 4 or not -(1 << 20) <= delta < (1 << 20):
+        return None
+    return (word & 0xFF00001F) | (((delta >> 2) & 0x7FFFF) << 5)
+
+
+def encode_tbz(word, delta):
+    """Re-target TBZ/TBNZ in place: keep b5/b40/op/Rt, replace imm14."""
+    if delta % 4 or not -(1 << 15) <= delta < (1 << 15):
+        return None
+    return (word & 0xFFF8001F) | (((delta >> 2) & 0x3FFF) << 5)
+
+
+def encode_pc_relative(word, kind, delta):
+    """Dispatch on the decoded form; only the in-place forms are supported."""
+    if kind == 'cbz':
+        return encode_cbz(word, delta)
+    if kind == 'tbz':
+        return encode_tbz(word, delta)
+    return encode_branch(kind, delta)
 
 
 def encode_adrp(register, page_delta):
@@ -527,76 +609,119 @@ def run(args):
           % (coverage['distinct_external_targets'], coverage['exact_percent'],
              coverage['name_present_percent']))
 
-    # ---- layout: one uniform slide ---------------------------------------
-    rel_low = align_down(min(s['vmaddr'] for parts in group_parts.values() for s in parts))
-    rel_high = align_up(max(s['vmaddr'] + s['vmsize']
-                            for parts in group_parts.values() for s in parts))
-    extent = rel_high - rel_low
-
-    placeholder = dict(metadata)
-    placeholder_entries = []
-    for identifier in selected:
-        entry = dict(declared[identifier])
-        entry['_PrelinkBundlePath'] = declared[identifier].get(
-            '_PrelinkBundlePath', '/System/Library/Extensions/%s.kext' % identifier)
-        entry['_PrelinkExecutableLoadAddr'] = struct.pack('<Q', 0)
-        entry['_PrelinkExecutableSize'] = struct.pack('<Q', 0)
-        entry['_PrelinkKmodInfo'] = struct.pack('<Q', 0)
-        placeholder_entries.append(entry)
-    for identifier in interfaces:
-        placeholder_entries.append(dict(interfaces[identifier]))
-    placeholder['_PrelinkInfoDictionary'] = placeholder_entries
-    placeholder.pop('_PrelinkLinkKASLROffsets', None)
-    info_size = align_up(len(plistlib.dumps(placeholder)))
-
-    total_extent = extent + VENEER_RESERVE + info_size
-    # Place the kext band ABOVE the kernel image, so that
-    #     min(segment.vmaddr) == __TEXT.vmaddr   =>   x18 == 0
-    # Apple's own kernelcache (kc.mac13g) has __TEXT as the lowest segment and
-    # start.s start_first_cpu therefore always runs with x18 == 0 on real
-    # hardware.  Putting the band below __TEXT makes x18 = band span, a path
-    # Apple never exercises: it rewrites virtBase/physBase/memSize and shifts
-    # the bootstrap mapping origin away from the Mach-O header.
-    kernel_text = next(s for s in kernel_segments if s['name'] == '__TEXT')
+    # ---- layout: repacked band (sheng layout, NOT a uniform slide) -------
+    # SHENG's proven bring-up never preserves Apple's *inter-module* scatter:
+    # it moves the whole component block and re-encodes every cross-module
+    # branch by symbol name (docs/history/macos26-security-20261026.md).  That
+    # is also what keeps its image small.  Here the scatter is what makes our
+    # image pathological: the 11 components really occupy 3.95 MB, but Apple
+    # spreads them over 107 MB of the KC, so a uniform slide has to reserve an
+    # 84 MB band and an 82 MB boot image for 3.95 MB of kext code.
+    #
+    # So pack the parts of each group contiguously on a 16 KiB granule.  Each
+    # part keeps its internal byte layout untouched -- that intra-part
+    # isometry is the only relative-distance invariant that must survive,
+    # because mv() below translates every other address explicitly.
+    PART_ALIGN = 0x4000
     L2_GRANULE = 0x200000
-    band_span = ((total_extent + L2_GRANULE - 1) // L2_GRANULE) * L2_GRANULE
+    # Place the band ABOVE the kernel so that min(segment.vmaddr) == __TEXT
+    # and start_first_cpu runs with x18 == 0, exactly as on real Apple
+    # hardware (kc.mac13g boots this way).
+    kernel_text = next(s for s in kernel_segments if s['name'] == '__TEXT')
     kernel_end = max(s['vmaddr'] + s['vmsize'] for s in kernel_segments)
     band_base = ((kernel_end + L2_GRANULE - 1) // L2_GRANULE) * L2_GRANULE
-    assert (band_base - rel_low) % L2_GRANULE == 0 or True
-    slide = band_base - rel_low
 
-    placed_groups = {}
+
     table_size = 8 * len([i for i in selected if components[i]['text'] is not None])
-    for group_name, _component_name, prot in GROUPS:
-        parts = group_parts[group_name]
+    placed_groups = {}
+    placed_parts = []          # (old_lo, old_hi, new_lo), sorted, backing mv()
+    cursor_va = band_base
+    for group_name, component_name, prot in GROUPS:
+        parts = [segment for identifier in selected
+                 for segment in components[identifier]['segments']
+                 if segment['name'] == component_name and segment['filesize']]
         if not parts:
             continue
-        low = align_down(min(s['vmaddr'] for s in parts))
-        text_span = align_up(max(s['vmaddr'] + s['filesize'] for s in parts)) - low
-        file_high = low + text_span
+        group_va = cursor_va
+        layout, offset = [], 0
+        for part in parts:
+            offset = align_up(offset, PART_ALIGN)
+            part['new_vmaddr'] = group_va + offset
+            part['group_offset'] = offset
+            placed_parts.append((part['vmaddr'], part['vmaddr'] + part['filesize'],
+                                 part['new_vmaddr']))
+            layout.append((offset, part))
+            offset += part['filesize']
+        text_span = offset
         table_offset = None
         if group_name == '__PRELINK_TEXT':
-            # The sparse header index lives inside this segment, after __text:
-            # reserve it now, because growing the segment after the other
-            # segments have been placed on file would overlap their bytes.
+            # The sparse header index lives inside this segment, after __text.
             table_offset = align_up(text_span, 8)
-            # arm_vm_page_granular_*() works in page granules, so the segment
-            # must end on a page boundary even though the table itself is only
-            # 8-byte aligned.
-            file_high = max(file_high, align_up(low + table_offset + table_size))
-        vm_high = max(align_up(max(s['vmaddr'] + s['vmsize'] for s in parts)), file_high)
-        blob = bytearray(vm_high - low)
-        for part in parts:
-            start = part['vmaddr'] - low
+            file_high = align_up(max(text_span, table_offset + table_size), PART_ALIGN)
+        else:
+            file_high = align_up(text_span, PART_ALIGN)
+        vm_high = file_high
+        blob = bytearray(vm_high)
+        for start, part in layout:
             blob[start:start + part['filesize']] = \
                 kc[part['fileoff']:part['fileoff'] + part['filesize']]
         placed_groups[group_name] = dict(
-            name=group_name, old_low=low, vmaddr=low + slide, vmsize=vm_high - low,
-            filesize=file_high - low, text_span=text_span, prot=prot,
+            name=group_name, old_low=min(p['vmaddr'] for p in parts), vmaddr=group_va,
+            vmsize=vm_high, filesize=file_high, text_span=text_span, prot=prot,
             blob=blob, parts=parts, fileoff=None, table_offset=table_offset)
+        cursor_va = group_va + vm_high
 
-    veneer_va = rel_high + slide
+    # ---- sixth group: the shared __LINKEDIT -------------------------------
+    # All 11 components report the *same* __LINKEDIT (one KC-wide segment at
+    # 0xfffffe000c824000, 0x17050bc bytes), so it is copied exactly once.
+    # Keeping it is what lets every LINKEDIT-backed load command offset and the
+    # symbol table stay valid instead of being zeroed away.
+    shared_linkedit = next((s for s in kc_segments
+                            if s['name'] == '__LINKEDIT' and s['filesize']), None)
+    if shared_linkedit is not None and any(s['name'] == '__PLK_LINKEDIT'
+                                          for s in kernel_segments):
+        link_va = align_up(cursor_va, PART_ALIGN)
+        link_part = dict(name='__LINKEDIT', vmaddr=shared_linkedit['vmaddr'],
+                         vmsize=shared_linkedit['vmsize'],
+                         filesize=shared_linkedit['filesize'],
+                         fileoff=shared_linkedit['fileoff'], sections=[])
+        link_part['new_vmaddr'] = link_va
+        link_part['group_offset'] = 0
+        placed_parts.append((link_part['vmaddr'],
+                             link_part['vmaddr'] + link_part['filesize'],
+                             link_part['new_vmaddr']))
+        link_size = align_up(shared_linkedit['filesize'], PART_ALIGN)
+        link_blob = bytearray(link_size)
+        link_blob[0:shared_linkedit['filesize']] = kc[
+            shared_linkedit['fileoff']:shared_linkedit['fileoff']
+            + shared_linkedit['filesize']]
+        placed_groups['__PLK_LINKEDIT'] = dict(
+            name='__PLK_LINKEDIT', old_low=shared_linkedit['vmaddr'], vmaddr=link_va,
+            vmsize=link_size, filesize=link_size,
+            text_span=shared_linkedit['filesize'], prot=1, blob=link_blob,
+            parts=[link_part], fileoff=None, table_offset=None)
+        # Later passes (publishing, placeholder replacement, pointer hosts)
+        # iterate GROUPS, so the sixth group has to be visible to them.
+        globals()['GROUPS'] = GROUPS + (('__PLK_LINKEDIT', '__LINKEDIT', 1),)
+        cursor_va = link_va + link_size
+
+    veneer_va = align_up(cursor_va, PART_ALIGN)
     info_va = veneer_va + VENEER_RESERVE
+    band_end = cursor_va
+
+    placed_parts.sort()
+    _part_lo = [entry[0] for entry in placed_parts]
+
+    def mv(va):
+        """Old kext VA -> repacked VA.  Kernel VAs pass through unchanged."""
+        if not va:
+            return va
+        index = bisect_right(_part_lo, va) - 1
+        if index >= 0:
+            old_lo, old_hi, new_lo = placed_parts[index]
+            if old_lo <= va < old_hi:
+                return va + (new_lo - old_lo)
+        return va
 
     output = bytearray(native_data)
     for group_name, _component_name, _prot in GROUPS:
@@ -628,7 +753,11 @@ def run(args):
         return (kernel_symbols.by_name[present[0]] + (apple_va - nearest),
                 present[0], False)
 
-    # ---- branch relocation (intra-closure untouched: uniform slide) -------
+    # ---- branch relocation ------------------------------------------------
+    # Intra-part references keep their distance for free (the part is copied
+    # verbatim), so only references that cross a part boundary are touched:
+    # intra-closure ones are re-encoded against the repacked addresses, kernel
+    # ones are re-encoded against the matching native symbol.
     branch_relocations, veneers, unresolved = [], [], {}
     approximate = 0
 
@@ -648,7 +777,7 @@ def run(args):
                 continue
             body = group['blob']
             base_old = segment['vmaddr']
-            offset_in_group = base_old - group['old_low']
+            offset_in_group = segment['group_offset']
             limit = segment['filesize']
             bounds = sorted(f for f in component['functions']
                             if base_old <= f < base_old + limit)
@@ -667,16 +796,33 @@ def run(args):
                         continue
                     target = decoded['target']
                     if locate_selected(target) is not None:
-                        continue                     # preserved by the uniform slide
+                        # Inside the closure: preserved only while the source and
+                        # target parts moved by the same amount.
+                        new_site = mv(address)
+                        delta_new = mv(target) - new_site
+                        if delta_new == target - address:
+                            continue
+                        encoded = encode_pc_relative(word, decoded['kind'], delta_new)
+                        if encoded is None:
+                            fail(None, dict(site=hex(new_site), old_target=hex(target),
+                                            kind='branch:%s intra-range' % decoded['kind']))
+                            continue
+                        struct.pack_into('<I', body, position, encoded)
+                        branch_relocations.append(dict(
+                            site=hex(new_site), old_word=hex(word), new_word=hex(encoded),
+                            kind=decoded['kind'], old_target=hex(target),
+                            new_target=hex(mv(target)), symbol=None, exact=True,
+                            component=identifier))
+                        continue
                     if not inside(kernel_ranges, target):
                         continue
-                    new_site = address + slide
+                    new_site = mv(address)
                     value, symbol, exact = bind(target)
                     if value is None:
                         fail(symbol, dict(site=hex(new_site), old_target=hex(target),
                                           kind='branch:%s' % decoded['kind']))
                         continue
-                    encoded = encode_branch(decoded['kind'], value - new_site)
+                    encoded = encode_pc_relative(word, decoded['kind'], value - new_site)
                     if encoded is None:
                         veneer = encode_veneer(value, veneer_va + 12 * len(veneers))
                         if veneer is None:
@@ -715,7 +861,7 @@ def run(args):
                 continue
             body = group['blob']
             base_old = segment['vmaddr']
-            offset_in_group = base_old - group['old_low']
+            offset_in_group = segment['group_offset']
             limit = segment['filesize']
             bounds = sorted(f for f in component['functions']
                             if base_old <= f < base_old + limit)
@@ -734,10 +880,29 @@ def run(args):
                     decoded = decode_pc_relative(word, address)
                     full = decoded['page_base'] + ((following >> 10) & 0xFFF)
                     if locate_selected(full) is not None:
+                        # Inside the closure: same part keeps its distance, a
+                        # cross-part pair has to be re-pointed.
+                        new_site = mv(address)
+                        if (mv(full) & ~0xFFF) == (full & ~0xFFF) and \
+                                new_site - address == mv(full) - full:
+                            continue
+                        new_adrp = encode_adrp(rd_of(word),
+                                               (mv(full) & ~0xFFF) - (new_site & ~0xFFF))
+                        if new_adrp is None:
+                            fail(None, dict(site=hex(new_site), old_target=hex(full),
+                                            kind='adrp+add intra-range'))
+                            continue
+                        new_add = (following & ~(0xFFF << 10)) | ((mv(full) & 0xFFF) << 10)
+                        struct.pack_into('<II', body, position, new_adrp, new_add)
+                        branch_relocations.append(dict(
+                            site=hex(new_site), kind='adrp+add-intra', old_word=hex(word),
+                            new_word=hex(new_adrp), old_target=hex(full),
+                            new_target=hex(mv(full)), symbol=None, exact=True,
+                            component=identifier))
                         continue
                     if not inside(kernel_ranges, full):
                         continue
-                    new_site = address + slide
+                    new_site = mv(address)
                     value, symbol, exact = bind(full)
                     if value is None:
                         fail(symbol, dict(site=hex(new_site), old_target=hex(full),
@@ -766,7 +931,7 @@ def run(args):
     # Done before the blobs are published: appending the table grows the
     # __PRELINK_TEXT blob, and publishing afterwards would undo the per-kext
     # header surgery performed below.
-    headers = sorted(components[i]['text']['vmaddr'] + slide for i in selected
+    headers = sorted(mv(components[i]['text']['vmaddr']) for i in selected
                      if components[i]['text'] is not None)
     table = struct.pack('<%dQ' % len(headers), *headers)
     text_group = placed_groups['__PRELINK_TEXT']
@@ -802,7 +967,7 @@ def run(args):
         text = component['text']
         if text is None:
             continue
-        new_header = text['vmaddr'] + slide
+        new_header = mv(text['vmaddr'])
         position = file_position(new_header)
         first_section = min((s['offset'] for s in text['sections'] if s['offset']),
                             default=component['entry']['fileoff'] + 0x4000)
@@ -818,7 +983,7 @@ def run(args):
                          LC_SEGMENT_SPLIT_INFO, 16, 0, 0)
         split_added.append(identifier)
         if component['kmod']:
-            kmod_position = file_position(component['kmod'] + slide, 256)
+            kmod_position = file_position(mv(component['kmod']), 256)
             name = cstr(output[kmod_position + 16:kmod_position + 80])
             # The shipped layout does not match osfmk/mach/kmod.h field offsets
             # (address lands at 156, not 160), so locate the address field by
@@ -843,15 +1008,146 @@ def run(args):
             struct.pack_into('<Q', output, kmod_position + address_offset + 8,
                              max(previous_size, 0))
 
+    # ---- embedded Mach-O headers describe the repacked layout ------------
+    # A kext's load commands were copied verbatim, so they still name Apple's
+    # kernelcache addresses even though the bytes now live in our band.
+    # kalloc_type_view_parse() reaches __kalloc_type through those headers, so a
+    # header that disagrees with the placement pages in the wrong address.
+    # Rewrite every address-bearing command in place: segment vmaddr/section
+    # addr and their file offsets, and drop the LINKEDIT-backed offsets we do
+    # not carry.
+    CARRIER_FIELDS = {0x2: (8, 16), 0xb: (32, 40, 48, 56, 64, 72),
+                      0x22: (8, 16, 24, 32, 40),
+                      0x80000022: (8, 16, 24, 32, 40),
+                      0x26: (8,), 0x29: (8,), 0x1d: (8,), 0x1e: (8,)}
+
+    def linkedit_file_position(old_file_offset):
+        """Old LINKEDIT file offset -> new one, through the KC's own segments."""
+        for segment in kc_segments:
+            if (segment['filesize']
+                    and segment['fileoff'] <= old_file_offset
+                    <= segment['fileoff'] + segment['filesize']):
+                return file_position(mv(segment['vmaddr']
+                                        + (old_file_offset - segment['fileoff'])))
+        return None
+
+    def relocate_carrier(cursor, cmd):
+        for field in CARRIER_FIELDS[cmd]:
+            old, = struct.unpack_from('<I', output, cursor + field)
+            if not old:
+                continue
+            new = linkedit_file_position(old)
+            struct.pack_into('<I', output, cursor + field,
+                             0 if new is None else new)
+
+    def rewrite_symbols(cursor):
+        """Component symbol addresses: n_value of every nlist in this kext."""
+        symoff, nsyms = struct.unpack_from('<II', output, cursor + 8)
+        if not symoff or not nsyms:
+            return 0
+        moved = 0
+        for index in range(nsyms):
+            at = symoff + index * 16 + 8
+            old_value, = struct.unpack_from('<Q', output, at)
+            new_value = mv(old_value)
+            if new_value != old_value:
+                struct.pack_into('<Q', output, at, new_value)
+                moved += 1
+        return moved
+    LINKEDIT_CARRIERS = {0x2, 0xb, 0x22, 0x80000022, 0x26, 0x29, 0x1d, 0x1e}
+    header_rewrite = []
+    for identifier in selected:
+        component = components[identifier]
+        text = component['text']
+        if text is None:
+            continue
+        header_old = text['vmaddr']
+        header_new = mv(header_old)
+        base = file_position(header_new)
+        ncmds, _sizeofcmds = struct.unpack_from('<II', output, base + 16)
+        cursor = base + 32
+        rewritten = 0
+        carriers = 0
+        symbols = 0
+        for _ in range(ncmds):
+            cmd, cmdsize = struct.unpack_from('<II', output, cursor)
+            if cmd == LC_SEGMENT_64:
+                old_vm, old_vsize, old_fo, old_fs = struct.unpack_from(
+                    '<QQQQ', output, cursor + 24)
+                new_vm = mv(old_vm)
+                new_fo = 0
+                if old_fs:
+                    try:
+                        new_fo = file_position(new_vm)
+                    except KeyError:
+                        new_fo = 0
+                struct.pack_into('<QQ', output, cursor + 24, new_vm, old_vsize)
+                struct.pack_into('<Q', output, cursor + 40, new_fo)
+                nsects, = struct.unpack_from('<I', output, cursor + 64)
+                for index in range(nsects):
+                    section = cursor + 72 + index * 80
+                    sec_addr, sec_size, sec_off = struct.unpack_from(
+                        '<QQI', output, section + 32)
+                    struct.pack_into('<Q', output, section + 32,
+                                     new_vm + (sec_addr - old_vm))
+                    if (sec_off and old_fs and old_fo <= sec_off
+                            and sec_off - old_fo + sec_size <= old_fs):
+                        struct.pack_into('<I', output, section + 48,
+                                         new_fo + (sec_off - old_fo))
+                    elif sec_off:
+                        struct.pack_into('<I', output, section + 48, 0)
+                rewritten += 1
+            elif cmd in LINKEDIT_CARRIERS:
+                relocate_carrier(cursor, cmd)
+                if cmd == 0x2:
+                    symbols += rewrite_symbols(cursor)
+                carriers += 1
+            cursor += cmdsize
+        header_rewrite.append(dict(component=identifier, header=hex(header_new),
+                                   segments=rewritten, carriers=carriers,
+                                   symbols=symbols))
+    def kext_symbol(identifier, names):
+        """Resolve a symbol in the *relocated* table of one kext.
+
+        The header rewrite already moved LC_SYMTAB and every nlist.n_value, so
+        this is the same lookup SHENG does at emit time
+        (emit_macos26_security.py:307): read the name from the string table,
+        return the address the kernel may call.
+        """
+        component = components[identifier]
+        text = component['text']
+        if text is None:
+            return None
+        base = file_position(mv(text['vmaddr']))
+        if base is None:
+            return None
+        ncmds, = struct.unpack_from('<I', output, base + 16)
+        cursor = base + 32
+        for _ in range(ncmds):
+            cmd, cmdsize = struct.unpack_from('<II', output, cursor)
+            if cmd == 0x2:
+                symoff, nsyms, stroff, strsize = struct.unpack_from('<IIII', output, cursor + 8)
+                for index in range(nsyms):
+                    at = symoff + index * 16
+                    strx, = struct.unpack_from('<I', output, at)
+                    if not strx or strx >= strsize:
+                        continue
+                    end = output.find(b'\0', stroff + strx)
+                    name = output[stroff + strx:end].decode('ascii', 'replace')
+                    if name in names:
+                        value, = struct.unpack_from('<Q', output, at + 8)
+                        return value
+            cursor += cmdsize
+        return None
     # ---- pointer rebinding ------------------------------------------------
     relocations = []
     for slot in slots:
         host_identifier, host_name = slot['host']
         group = placed_groups[next(g[0] for g in GROUPS if g[1] == host_name)]
-        new_site = slot['va'] + slide
+        new_site = mv(slot['va'])
         position = group['fileoff'] + (new_site - group['vmaddr'])
         if slot['category'] in ('a', 'b'):
-            value, symbol, exact = slot['old_target'] + slide, None, True
+            value, symbol, exact = mv(slot['old_target']), None, True
         elif slot['category'] == 'c':
             value, symbol, exact = bind(slot['old_target'])
             if value is None:
@@ -879,27 +1175,57 @@ def run(args):
         entry = dict(declared[identifier])
         entry['_PrelinkBundlePath'] = declared[identifier].get(
             '_PrelinkBundlePath', '/System/Library/Extensions/%s.kext' % identifier)
-        header_va = component['text']['vmaddr'] + slide
-        image_size = align_up(max(s['vmaddr'] + s['vmsize'] for s in component['segments']
+        header_va = mv(component['text']['vmaddr'])
+        # The repacked parts of one kext are no longer contiguous, so the
+        # executable span is measured on the *new* geometry: load address
+        # through the highest repacked part of this component.
+        image_size = align_up(max(mv(s['vmaddr']) + s['vmsize'] for s in component['segments']
                                   if s['name'] != '__LINKEDIT' and s['filesize'])
-                              - component['text']['vmaddr'])
-        entry['_PrelinkExecutableLoadAddr'] = struct.pack('<Q', header_va)
-        entry['_PrelinkExecutableSize'] = struct.pack('<Q', image_size)
-        entry['_PrelinkKmodInfo'] = struct.pack('<Q', (component['kmod'] or 0) + slide)
+                              - header_va)
+        entry['_PrelinkExecutableLoadAddr'] = header_va
+        entry['_PrelinkExecutableSize'] = image_size
+        entry['_PrelinkKmodInfo'] = mv(component['kmod'] or 0)
+        # SHENG moves the source address with the image; leaving Apple's value
+        # here makes the loader take a relocation path for an image that is
+        # already final (emit_macos26_security.py does the same three).
+        entry['_PrelinkExecutableSourceAddr'] = header_va
+        # 0049-native-boot-prelink-identity.patch: the outer image is not a
+        # fileset while the inner kexts keep MH_DYLIB_IN_CACHE, so the boot KC
+        # identity has to come from metadata.
+        entry['_NativePrelinkPrimary'] = True
+        # 0038/0039: for an AppleSecurityExtension kext the kernel calls a real
+        # registration entry instead of trusting the module's __start path
+        # (amfi's __realmain is zero in a flattened cache, so plain start
+        # reports success while amfi_register_mac_policy never runs).
+        if entry.get('AppleSecurityExtension') is True:
+            target = kext_symbol(identifier, {'_amfi_register_mac_policy',
+                                              'amfi_register_mac_policy'})
+            if target:
+                entry['_NativePrelinkEarlySecurityInit'] = target
         info_entries.append(entry)
     for identifier in interfaces:
         info_entries.append(dict(interfaces[identifier]))
     info_plist = dict(metadata)
     info_plist['_PrelinkInfoDictionary'] = info_entries
     info_plist.pop('_PrelinkLinkKASLROffsets', None)
-    info_blob = plistlib.dumps(info_plist)
-    if align_up(len(info_blob)) != info_size:
-        raise Refused('__PRELINK_INFO size changed between passes (%d vs %d)'
-                      % (align_up(len(info_blob)), info_size))
+    info_blob = prelink_xml_document(info_plist)
+    # __crypto_early: one pointer to the original corecrypto kmod_info, read by
+    # 0043-native-corecrypto-single-init.patch via getsectbynamefromheader().
+    crypto_early_off = None
+    crypto_early_va = None
+    corecrypto = components.get('com.apple.kec.corecrypto')
+    if corecrypto is not None and corecrypto['kmod']:
+        crypto_early_off = align_up(len(info_blob), 8)
+        crypto_early_va = info_va + crypto_early_off
+    crypto_early_kmod = mv(corecrypto['kmod']) if crypto_early_off is not None else None
+    info_size = align_up(max(len(info_blob),
+                             (crypto_early_off + 8) if crypto_early_off is not None else 0))
     info_fileoff = align_up(len(output))
     output.extend(bytes(info_fileoff - len(output)))
     output.extend(info_blob)
     output.extend(bytes(info_size - len(info_blob)))
+    if crypto_early_off is not None:
+        struct.pack_into('<Q', output, info_fileoff + crypto_early_off, crypto_early_kmod)
 
     # ---- __macho_list already emitted with the group blobs ---------------
 
@@ -934,10 +1260,15 @@ def run(args):
         replacements[group_name] = segment_command(
             group_name, group['vmaddr'], group['vmsize'], group['fileoff'],
             group['filesize'], group['prot'], sections)
+    info_sections = [section_command('__info', '__PRELINK_INFO', info_va,
+                                     len(info_blob), info_fileoff)]
+    if crypto_early_off is not None:
+        info_sections.append(section_command('__crypto_early', '__PRELINK_INFO',
+                                             crypto_early_va, 8,
+                                             info_fileoff + crypto_early_off))
     replacements['__PRELINK_INFO'] = segment_command(
         '__PRELINK_INFO', info_va, info_size, info_fileoff, info_size, 3,
-        [section_command('__info', '__PRELINK_INFO', info_va, len(info_blob),
-                         info_fileoff)])
+        info_sections)
 
     rebuilt = bytearray()
     for cmd, offset, cmdsize in kernel_image['commands']:
@@ -981,7 +1312,7 @@ def run(args):
     containment = True
     for group_name, group in placed_groups.items():
         for part in group['parts']:
-            start = part['vmaddr'] + slide
+            start = part['new_vmaddr']
             if not (group['vmaddr'] <= start and
                     start + part['filesize'] <= group['vmaddr'] + group['filesize']):
                 containment = False
@@ -990,7 +1321,7 @@ def run(args):
     split_ok = True
     for identifier in selected:
         component = components[identifier]
-        position = file_position(component['text']['vmaddr'] + slide)
+        position = file_position(mv(component['text']['vmaddr']))
         ncmds, _sizeofcmds = struct.unpack_from('<II', output, position + 16)
         cursor, found = position + 32, False
         for _ in range(ncmds):
@@ -1013,11 +1344,29 @@ def run(args):
     sample = [r for r in relocations if r['category'] in ('a', 'b')]
     step = max(1, len(sample) // 500)
     sampled = sample[::step][:500]
+    # Under the repacked layout the distance between a slot and its target is
+    # no longer an invariant; what must hold is that every rewritten slot
+    # names exactly the repacked address of the old target.
     broken = [r for r in sampled
-              if int(r['new_target'], 16) - int(r['site'], 16) !=
-              int(r['old_target'], 16) - int(r['old_site'], 16)]
-    check('uniform-slide relative distance preserved (%d samples)' % len(sampled),
-          not broken, '%d mismatches' % len(broken))
+              if int(r['new_target'], 16) != mv(int(r['old_target'], 16))]
+    check('every intra-closure pointer translates through mv() (%d samples)'
+          % len(sampled), not broken, '%d mismatches' % len(broken))
+
+    intra_branches = [r for r in branch_relocations
+                      if r['kind'].endswith('intra')]
+    branch_broken = [r for r in intra_branches
+                     if int(r['new_target'], 16) != mv(int(r['old_target'], 16))]
+    check('every repacked intra-closure branch names its new target (%d sites)'
+          % len(intra_branches), not branch_broken,
+          '%d mismatches' % len(branch_broken))
+
+    part_ok = all(group['vmaddr'] <= part['new_vmaddr'] and
+                  part['new_vmaddr'] + part['filesize'] <= group['vmaddr'] + group['filesize']
+                  for group in placed_groups.values() for part in group['parts'])
+    check('every repacked part lands inside its group', part_ok)
+    check('band starts above the kernel and on an L2 granule',
+          band_base % L2_GRANULE == 0 and band_base >= kernel_end,
+          '%#x (kernel end %#x)' % (band_base, kernel_end))
 
     bind_ok = all(r['symbol'] in kernel_symbols.by_name
                   for r in relocations if r['category'] == 'c' and r['symbol'])
@@ -1026,9 +1375,48 @@ def run(args):
     coverage['approximate'] = approximate
     loadable = (not unresolved) and all(a['ok'] for a in assertions)
 
+    # ---- corecrypto integrity contract ------------------------------------
+    # SHENG recomputes __fips_hmacs over the *relocated* __text
+    # (emit_macos26_security.py:368): HMAC-SHA256 with a 32-byte zero key.
+    # Our branch and pointer rewrites change those bytes, so the digest has to
+    # be regenerated or corecrypto fails its own POST once the security
+    # extensions load.
+    crypto_hmac = None
+    corecrypto = components.get('com.apple.kec.corecrypto')
+    if corecrypto is not None and corecrypto.get('text') is not None:
+        hbase = file_position(mv(corecrypto['text']['vmaddr']))
+        hncmds, = struct.unpack_from('<I', output, hbase + 16)
+        hcursor = hbase + 32
+        text_sec = None
+        integrity_sec = None
+        for _ in range(hncmds):
+            hcmd, hcmdsize = struct.unpack_from('<II', output, hcursor)
+            if hcmd == LC_SEGMENT_64:
+                hnsects, = struct.unpack_from('<I', output, hcursor + 64)
+                for hindex in range(hnsects):
+                    spot = hcursor + 72 + hindex * 80
+                    sname = output[spot:spot + 16].rstrip(b'\0').decode()
+                    saddr, ssize, soff = struct.unpack_from('<QQI', output, spot + 32)
+                    if sname == '__text' and text_sec is None:
+                        text_sec = (saddr, ssize)
+                    elif sname == '__fips_hmacs':
+                        integrity_sec = (saddr, ssize)
+            hcursor += hcmdsize
+        if text_sec and integrity_sec and integrity_sec[1] == 32:
+            code_at = file_position(text_sec[0])
+            digest_at = file_position(integrity_sec[0])
+            stored = bytes(output[digest_at:digest_at + 32])
+            digest = hmac.new(bytes(32), bytes(output[code_at:code_at + text_sec[1]]),
+                              hashlib.sha256).digest()
+            output[digest_at:digest_at + 32] = digest
+            crypto_hmac = dict(text=hex(text_sec[0]), text_size=text_sec[1],
+                               integrity=hex(integrity_sec[0]),
+                               stored=stored.hex(), computed=digest.hex(),
+                               changed=stored != digest)
+
     report = dict(
         tool='scripts/prelink_kcg_bind.py',
-        design='uniform-slide + sparse __macho_list (kalloc_sparse_prelink_index_version)',
+        design='repacked band + sparse __macho_list (kalloc_sparse_prelink_index_version)',
         decoder_self_test=decoder_checks,
         kernel=str(kernel_path),
         kernel_sha256=hashlib.sha256(native_data).hexdigest(),
@@ -1036,8 +1424,13 @@ def run(args):
         collection_sha256=hashlib.sha256(kc).hexdigest(),
         fileset=str(fileset_path) if fileset_path.is_file() else None,
         roots=roots,
-        slide=hex(slide),
-        slide_signed=slide,
+        layout='repacked',
+        header_rewrite=header_rewrite,
+        crypto_hmac=crypto_hmac,
+        part_align=hex(PART_ALIGN),
+        band=dict(base=hex(band_base), end=hex(band_end), span=band_end - band_base,
+                  span_mb=round((band_end - band_base) / 1048576, 2)),
+        image_bytes=len(output),
         components=sorted(selected),
         component_count=len(selected),
         component_code_bytes=code_bytes,
@@ -1050,7 +1443,7 @@ def run(args):
         chain_format=chain['version'],
         chain_imports=chain['imports_count'],
         prelink_text_layout=[
-            dict(component=i, header=hex(components[i]['text']['vmaddr'] + slide),
+            dict(component=i, header=hex(mv(components[i]['text']['vmaddr'])),
                  size=components[i]['text']['filesize'])
             for i in selected if components[i]['text'] is not None],
         segment_placement={name: dict(vmaddr=hex(g['vmaddr']), vmsize=hex(g['vmsize']),
@@ -1061,9 +1454,10 @@ def run(args):
                           size=len(info_blob), entries=len(info_entries)),
         macho_list=dict(vmaddr=hex(macho_list_va), entries=len(headers),
                         offset=hex(index_offset)),
-        band=dict(low=hex(band_base), high=hex(band_base + band_span), extent=total_extent,
-                  extent_mb=round(total_extent / 1048576, 2),
-                  gap_bytes=extent - sum(g['filesize'] for g in placed_groups.values())),
+        band_padding=dict(span_mb=round((band_end - band_base) / 1048576, 2),
+                          used_bytes=sum(g['filesize'] for g in placed_groups.values()),
+                          padding_bytes=(band_end - band_base)
+                          - sum(g['filesize'] for g in placed_groups.values())),
         symbol_coverage=coverage,
         slots_total=len(slots),
         slots_by_category=coverage['slots_by_category'],
@@ -1163,13 +1557,16 @@ def main(argv=None):
         print('prelink_kcg_bind: %s' % failure, file=sys.stderr)
         return 2
     print('\n== summary ==')
-    for key in ('slide', 'component_count', 'component_code_bytes', 'slots_by_category',
+    for key in ('layout', 'component_count', 'component_code_bytes', 'slots_by_category',
                 'pointer_relocation_count', 'branch_relocation_count', 'veneer_count',
                 'approximate', 'unresolved_sites', 'loadable', 'output_bytes'):
         print('   %-26s %s' % (key, report[key]))
     print('   %-26s %.2f%%' % ('symbol coverage', report['symbol_coverage']['exact_percent']))
-    print('   %-26s %.2f MB (%.2f MB gaps)' % (
-        'band extent', report['band']['extent_mb'], report['band']['gap_bytes'] / 1048576))
+    print('   %-26s %#x .. %#x = %.2f MB' % (
+        'band', report['band']['base'] if isinstance(report['band']['base'], int)
+        else int(report['band']['base'], 16),
+        report['band']['end'] if isinstance(report['band']['end'], int)
+        else int(report['band']['end'], 16), report['band']['span_mb']))
     for assertion in report['structural_assertions']:
         print('   [%s] %-52s %s' % ('ok' if assertion['ok'] else 'FAIL',
                                     assertion['name'], assertion['detail']))
