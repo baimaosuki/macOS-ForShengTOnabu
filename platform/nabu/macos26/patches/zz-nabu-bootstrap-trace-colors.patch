@@ -1,0 +1,27 @@
+--- a/osfmk/arm64/start.s
++++ b/osfmk/arm64/start.s
+@@ -757,8 +757,11 @@
+ 	SHENG_BOOTSTRAP_TRACE 10
+ 
+ 	isb
++	SHENG_BOOTSTRAP_TRACE 11, 0xff00ff00
+ 	tlbi	vmalle1
++	SHENG_BOOTSTRAP_TRACE 11, 0xffffff00
+ 	dsb		ish
++	SHENG_BOOTSTRAP_TRACE 11, 0xff00ffff
+ 
+ 
+ #ifndef __ARM_IC_NOALIAS_ICACHE__
+@@ -766,9 +769,11 @@
+ 	 * caches are invalidated on reset.
+ 	 */
+ 	tlbi	vmalle1
++	SHENG_BOOTSTRAP_TRACE 11, 0xffff00ff
+ 	ic		iallu
++	SHENG_BOOTSTRAP_TRACE 11, 0xffff0000
+ #endif
+-	SHENG_BOOTSTRAP_TRACE 11
++	SHENG_BOOTSTRAP_TRACE 12
+ 
+ 
+ 	/* If x21 is not 0, then this is either the start_cpu path or

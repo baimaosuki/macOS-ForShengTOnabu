@@ -1,0 +1,14 @@
+0000000000000000 T __start
+0000000000000020 t nabu_fb_draw_hex64.constprop.0
+0000000000000330 T nabu_stage1_kernel_main
+0000000000002220 t build_region
+00000000000026d0 T ArmSmmu4KBuild
+00000000000026e0 T ArmSmmu4KBuildUpper
+0000000000002960 t kNabuGlyphFont
+0000000000004000 D __data_start
+0000000000004000 D __kernel_stack_top
+0000000000004008 D __bss_start
+0000000000005000 b g_nabulog_slot_hdr
+0000000000006000 b g_smmu_tables
+0000000000016000 B __kernel_stack
+0000000000026000 B __bss_end
