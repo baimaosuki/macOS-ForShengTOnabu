@@ -1,6 +1,6 @@
 --- a/osfmk/kern/debug.c
 +++ b/osfmk/kern/debug.c
-@@ -1254,6 +1254,21 @@
+@@ -1254,6 +1254,20 @@
  #pragma clang diagnostic pop
  
  #if SHENG
@@ -12,8 +12,7 @@
 +		 * caller exactly.  A load is used rather than brk because brk leaves
 +		 * FAR UNKNOWN. */
 +		extern volatile uint32_t sheng_bootstrap_capture_enabled;
-+		if (sheng_bootstrap_capture_enabled &&
-+		    panic_caller < 0x0000FFFFFFFFFFFFULL) {
++		if (sheng_bootstrap_capture_enabled) {
 +			volatile uint64_t *probe = (volatile uint64_t *)(uintptr_t)
 +			    (panic_caller & 0x0000FFFFFFFFFFF8ULL);
 +			(void)*probe;
