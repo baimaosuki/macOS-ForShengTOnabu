@@ -1,0 +1,68 @@
+--- a/libkern/c++/OSKext.cpp
++++ b/libkern/c++/OSKext.cpp
+@@ -16560,6 +16560,65 @@
+ void
+ OSKext::updateLoadedKextSummary(OSKextLoadedKextSummary *summary)
+ {
++
++	/*
++	 * NABU: a prelinked kext whose kmod_info->address does not point into the
++	 * loaded image faults inside getsegdatafromheader at +0x10 and hides which
++	 * kext is at fault.  Report the loaded-kext table through panic instead, so
++	 * the panic QR carries every identifier with its kmod pointer and address.
++	 */
++	if (kmod_info == NULL ||
++	    (uintptr_t)kmod_info->address < 0xfffffe0006000000ULL ||
++	    (uintptr_t)kmod_info->address >= 0xfffffe0010000000ULL) {
++		static char diag[1600];
++		char *out = diag;
++		size_t left = sizeof(diag) - 1;
++		unsigned int i, total = sLoadedKexts->getCount();
++
++#define SHENG_PUT(str) do { \
++	        size_t shl = strlen(str); \
++	        if (shl > left) shl = left; \
++	        memcpy(out, (str), shl); out += shl; left -= shl; *out = 0; \
++        } while (0)
++#define SHENG_HEX(val) do { \
++	        uint64_t shv = (uint64_t)(val); \
++	        static const char shx[] = "0123456789ABCDEF"; \
++	        char sht[19]; int shi; \
++	        sht[0] = '0'; sht[1] = 'x'; \
++	        for (shi = 0; shi < 16; shi++) sht[2 + shi] = shx[(shv >> (60 - 4 * shi)) & 0xf]; \
++	        sht[18] = 0; \
++	        SHENG_PUT(sht); \
++        } while (0)
++
++		diag[0] = 0;
++		for (i = 0; i < total && i < 14; i++) {
++			OSKext *other = OSDynamicCast(OSKext, sLoadedKexts->getObject(i));
++			const char *ident;
++			char num[4];
++
++			if (!other) {
++				continue;
++			}
++			num[0] = (i < 10) ? (char)('0' + i) : 'x';
++			num[1] = ' ';
++			num[2] = 0;
++			SHENG_PUT(num);
++			ident = other->getIdentifierCString();
++			SHENG_PUT(ident ? ident : "?");
++			SHENG_PUT(" k=");
++			SHENG_HEX((uintptr_t)other->kmod_info);
++			SHENG_PUT(" a=");
++			SHENG_HEX(other->kmod_info ? (uintptr_t)other->kmod_info->address : 0);
++			SHENG_PUT(" s=");
++			SHENG_HEX(other->kmod_info ? (uintptr_t)other->kmod_info->size : 0);
++			SHENG_PUT(other->flags.builtin ? " b=1" : " b=0");
++			SHENG_PUT("\n");
++		}
++#undef SHENG_PUT
++#undef SHENG_HEX
++		panic("SHENG-KEXT-DIAG total=%u self=%s\n%s", total,
++		    getIdentifierCString(), diag);
++	}
+ 	OSSharedPtr<OSData> uuid;
+ 
+ 	strlcpy(summary->name, getIdentifierCString(),
