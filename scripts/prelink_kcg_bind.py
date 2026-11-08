@@ -37,6 +37,7 @@ import hmac
 from bisect import bisect_right
 import json
 import plistlib
+import os
 import struct
 import sys
 from pathlib import Path
@@ -306,6 +307,9 @@ def prelink_xml(value, indent=0):
     raise Refused('unserialisable metadata value %r' % (value,))
 
 
+SHA256_K_PROLOGUE = bytes.fromhex('982f8a42')   # K[0] = 0x428a2f98 little-endian
+SHA256_K_TABLE = '74ef7306e7452d6859b6463ce496b8df30925f69e1b2969e1f3f34bbc9c6af04'
+
 NATIVE_PRELINK = Path(__file__).resolve().parent.parent / 'UniXNU/kits/NativePrelink'
 
 
@@ -321,10 +325,16 @@ def prelink_xml_document(value):
     import xml.etree.ElementTree as ET
     from emit_prelink import to_xml
     body = ET.tostring(to_xml(value), encoding='utf-8').decode()
-    return ('<?xml version="1.0" encoding="UTF-8"?>\n'
-            '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
-            '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
-            '<plist version="1.0">\n' + body + '\n</plist>\n').encode()
+    document = ('<?xml version="1.0" encoding="UTF-8"?>\n'
+                '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
+                '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+                '<plist version="1.0">\n' + body + '\n</plist>\n').encode()
+    # XNU's OSUnserializeXML is not a general XML parser: it rejects the space
+    # in self-closing tags.  ElementTree writes <true />, <false /> and <dict />,
+    # so the whole dictionary fails with "syntax error near line N" as soon as
+    # one of them appears.  SHENG does the same rewrite in
+    # emit_macos26_security.py:259 before appending the NUL.
+    return document.replace(b' />', b'/>')
 
 def decode_pc_relative(word, address):
     top = word >> 26
@@ -628,6 +638,13 @@ def run(args):
     # and start_first_cpu runs with x18 == 0, exactly as on real Apple
     # hardware (kc.mac13g boots this way).
     kernel_text = next(s for s in kernel_segments if s['name'] == '__TEXT')
+    # Apple's static region satisfies fileoff == vmaddr - image_base, and the
+    # loader reports topOfKernelData as physBase + image_size.  arm_vm_init then
+    # maps [end_kern, phystokv(topOfKernelData)); if a file offset lags its VA,
+    # end_kern overtakes topOfKernelData, that subtraction underflows and the
+    # tail of the band is left without page tables.  Every offset below is
+    # therefore derived from the VA, never from the append position.
+    img_base = kernel_text['vmaddr']
     kernel_end = max(s['vmaddr'] + s['vmsize'] for s in kernel_segments)
     band_base = ((kernel_end + L2_GRANULE - 1) // L2_GRANULE) * L2_GRANULE
 
@@ -706,7 +723,10 @@ def run(args):
         cursor_va = link_va + link_size
 
     veneer_va = align_up(cursor_va, PART_ALIGN)
-    info_va = veneer_va + VENEER_RESERVE
+    # ARM_PGBYTES is 16 KiB on nabu: a segment that starts mid-page is
+    # rounded up by the granular mapper, leaving the first 12 KiB of the
+    # section without a TTE.  Apple keeps __PRELINK_INFO page aligned.
+    info_va = align_up(veneer_va + VENEER_RESERVE, 0x4000)
     band_end = cursor_va
 
     placed_parts.sort()
@@ -728,10 +748,16 @@ def run(args):
         group = placed_groups.get(group_name)
         if group is None:
             continue
-        group['fileoff'] = align_up(len(output))
+        group['fileoff'] = group['vmaddr'] - img_base
+        if group['fileoff'] < len(output):
+            raise SystemExit('band file offset %#x overlaps the kernel image (%#x)'
+                             % (group['fileoff'], len(output)))
         output.extend(bytes(group['fileoff'] - len(output)))
         output.extend(group['blob'])
-    veneer_fileoff = align_up(len(output))
+    veneer_fileoff = veneer_va - img_base
+    if veneer_fileoff < len(output):
+        raise SystemExit('veneer file offset %#x overlaps the image (%#x)'
+                         % (veneer_fileoff, len(output)))
     output.extend(bytes(veneer_fileoff - len(output) + VENEER_RESERVE))
 
     # ---- kernel-directed symbol binding ----------------------------------
@@ -758,6 +784,30 @@ def run(args):
     # verbatim), so only references that cross a part boundary are touched:
     # intra-closure ones are re-encoded against the repacked addresses, kernel
     # ones are re-encoded against the matching native symbol.
+    # ---- embedded constant tables are data, not code -------------------
+    # Some aligned data is carved into __TEXT, and the SHA-256 K tables are
+    # byte-identical to the FIPS KAT constants.  A word inside such a table can
+    # satisfy the ADRP mask, and its neighbour can look like a completing
+    # instruction, so the scan rewrites three constants and every KAT except
+    # HMAC-SHA256 still passes.  SHENG identifies the same tables by content in
+    # plan_macos26_security.py:143; do the same and keep them out of the scan.
+    literal_ranges = []
+    for identifier in selected:
+        for segment in components[identifier]['segments']:
+            if not segment['initprot'] & 4 or not segment['filesize']:
+                continue
+            blob = kc[segment['fileoff']:segment['fileoff'] + segment['filesize']]
+            position = 0
+            while (position := blob.find(SHA256_K_PROLOGUE, position)) >= 0:
+                table = blob[position:position + 256]
+                if position % 4 == 0 and hashlib.sha256(table).hexdigest() == SHA256_K_TABLE:
+                    literal_ranges.append((segment['vmaddr'] + position,
+                                           segment['vmaddr'] + position + 256))
+                position += 4
+    if args.debug:
+        print('debug: %d embedded constant tables kept out of the instruction scan'
+              % len(literal_ranges), file=sys.stderr)
+
     branch_relocations, veneers, unresolved = [], [], {}
     approximate = 0
 
@@ -786,6 +836,8 @@ def run(args):
                      for i, start in enumerate(bounds)]
             for start, end in spans:
                 for address in range(start, end - 3, 4):
+                    if any(lo <= address < hi for lo, hi in literal_ranges):
+                        continue
                     position = offset_in_group + (address - base_old)
                     word, = struct.unpack_from('<I', body, position)
                     decoded = decode_pc_relative(word, address)
@@ -847,7 +899,139 @@ def run(args):
                     if not exact:
                         approximate += 1
 
-    # ---- adrp + add pairs ------------------------------------------------
+    # ---- adrp pairs (adrp + add / adrp + ldr|str) ------------------------
+    # Page: decode_pc_relative()['target'] (where the ADRP lands), never
+    # ['page_base'] (where the ADRP itself lives).
+    #
+    # The completing instruction is reachable through branches, not only by
+    # fall-through: AccelerateCrypto's SHA-512/256 constant loads read
+    #
+    #       adrp x3, page
+    #       cbnz x1, continue
+    #       ret
+    #   continue:
+    #       add  x3, x3, #imm
+    #
+    # so one path holds a RET between the ADRP and the ADD.  Walk the paths
+    # inside a short window (the compiler keeps the pair close) and stop a
+    # path as soon as it reads or writes the ADRP register.
+    #
+    # Two ADRPs can propose the same completing instruction; the binding pass
+    # below is discovery-only and the winner is decided by site order, so a
+    # later ADRP can no longer overwrite an earlier, correct rewrite.
+    def ldst_unsigned(word):
+        """LDR/STR immediate, unsigned offset form -> (base, scale) or None.
+
+        Three encoding families share this shape and they do NOT agree on what
+        the size field means:
+
+          integer   size 31:30                       scale = 1 << size
+          SIMD&FP   size 31:30 with opc 23:22         size 0 -> 1/2/4/16 by opc
+                                                     size 1 -> 8 (D register)
+
+        LDR Qn is size 0 / opc 3 and therefore scales by 16, not by 1.  Reading
+        it as 1 byte rewrites the offset of a 128-bit load that pulls two
+        32-bit fields at once, which is exactly how ccaes_ccm_decrypt_mode()
+        reads nonce_size and block_size together.
+        """
+        size = (word >> 30) & 3
+        if ((word >> 24) & 0x3F) == 0x3D:              # SIMD&FP LDR/STR first:
+            opc = (word >> 22) & 3                     # it shares the integer
+            if size == 0 and opc == 3:                 # mask below
+                return rn_of(word), 16                 # LDR/STR Qn
+            if opc in (0, 1):                          # B/H/S (opc 0),
+                return rn_of(word), 1 << size          # D (opc 1, size 3)
+            return None
+        if (word & 0x3B000000) == 0x39000000:          # integer LDR/STR
+            return rn_of(word), 1 << size
+        return None
+
+    def touches(word, register):
+        if (word & 0x1F) == register or ((word >> 5) & 0x1F) == register:
+            return True
+        # Load/store pairs carry a second destination in Rt2 (bits 14:10).
+        # Missing it let the walk continue past "ldp x8, x9, [sp]" as if the
+        # ADRP register still held the page, and unrelated later users were
+        # then rewritten against the wrong page.
+        if ((word & 0x3A000000) == 0x28000000 or      # integer STP/LDP
+            (word & 0x3E000000) == 0x2C000000):       # SIMD&FP STP/LDP
+            return ((word >> 10) & 0x1F) == register
+        return False
+
+    def transfer_targets(word, site):
+        decoded = decode_pc_relative(word, site)
+        if decoded is not None and decoded['kind'] in ('b', 'bl', 'b.cond', 'cbz', 'tbz'):
+            return decoded['kind'], decoded['target']
+        if (word & 0xFFFFFC1F) in (0xD61F0000, 0xD63F0000, 0xD65F0000):
+            return 'end', None
+        return None, None
+
+    def pair_scan(body, position, address, word, budget=96, horizon=32):
+        """Every page-relative user of this ADRP register, first user first.
+
+        One ADRP normally feeds several instructions that share its page: a
+        read/modify/write of one variable is LDR x8,[x9,#off] / eor / STR
+        x8,[x9,#off].  Returning only the first user rewrote the load and left
+        the store at the unrelocated offset; corecrypto's ccn_mux store then
+        landed 0x40 higher, over the neighbouring _PrelinkKmodInfo, and its
+        64-bit mask overwrote reference_list's high half plus address's low
+        half (0xfffffe0000000000, FAR +0x10).  Collect all of them; the caller
+        rewrites each and refuses the image when two need different pages.
+        """
+        decoded = decode_pc_relative(word, address)
+        if decoded is None or decoded['kind'] != 'adrp':
+            return None
+        register = rd_of(word)
+        page = decoded['target']
+        queue = [(position + 4, address + 4)]
+        seen = set()
+        users = []
+        while queue and budget > 0:
+            pos, site = queue.pop(0)
+            if pos < 0 or pos + 4 > len(body) or pos in seen:
+                continue
+            if pos - position > horizon:
+                continue
+            seen.add(pos)
+            budget -= 1
+            following, = struct.unpack_from('<I', body, pos)
+            if is_add_imm12(following) and rn_of(following) == register:
+                users.append((page + ((following >> 10) & 0xFFF), 1,
+                              pos, site, following))
+                # add writes the base register: the page is gone from here on.
+                continue
+            scaled = ldst_unsigned(following)
+            if scaled is not None and scaled[0] == register:
+                users.append((page + ((following >> 10) & 0xFFF) * scaled[1],
+                              scaled[1], pos, site, following))
+                if ((following >> 22) & 1) and rd_of(following) == register:
+                    # "ldr x8, [x8, #off]" reloads the base register itself:
+                    # the page is gone from here on, do not walk past it.
+                    continue
+                # otherwise an unsigned-offset access leaves the base intact,
+                # so the walk continues and picks up the remaining users.
+                queue.append((pos + 4, site + 4))
+                continue
+            if touches(following, register):
+                continue
+            kind, target = transfer_targets(following, site)
+            if kind is None:
+                queue.append((pos + 4, site + 4))
+                continue
+            if kind == 'end':
+                continue
+            if kind in ('b.cond', 'cbz', 'tbz', 'bl'):
+                queue.append((pos + 4, site + 4))
+            # relative to this node, not to the ADRP: the depth of the
+            # branch chain must not shift the discovered instruction
+            target_pos = pos + (target - site)
+            if 0 <= target_pos <= len(body) - 4 and target_pos - position <= horizon:
+                queue.append((target_pos, target))
+        return users or None
+
+    # ---- discovery ------------------------------------------------------
+    bindings = []
+    adrp_seen = 0
     for identifier in selected:
         component = components[identifier]
         if not component['functions']:
@@ -865,63 +1049,156 @@ def run(args):
             limit = segment['filesize']
             bounds = sorted(f for f in component['functions']
                             if base_old <= f < base_old + limit)
-            spans = [(start, min(bounds[i + 1] if i + 1 < len(bounds) else base_old + limit,
-                                 base_old + limit))
-                     for i, start in enumerate(bounds)]
-            for start, end in spans:
-                for address in range(start, end - 7, 4):
+            spans = [(start_of_span,
+                      min(bounds[i + 1] if i + 1 < len(bounds) else base_old + limit,
+                          base_old + limit))
+                     for i, start_of_span in enumerate(bounds)]
+            if not bounds or bounds[0] > base_old:
+                spans.insert(0, (base_old, bounds[0] if bounds else base_old + limit))
+            for start_of_span, end_of_span in spans:
+                for address in range(start_of_span, end_of_span - 7, 4):
+                    if any(lo <= address < hi for lo, hi in literal_ranges):
+                        continue
                     position = offset_in_group + (address - base_old)
                     word, = struct.unpack_from('<I', body, position)
                     if (word & 0x9F000000) != 0x90000000 or not word >> 31:
                         continue
-                    following, = struct.unpack_from('<I', body, position + 4)
-                    if not (is_add_imm12(following) and rn_of(following) == rd_of(word)):
+                    found = pair_scan(body, position, address, word)
+                    if found is None:
                         continue
-                    decoded = decode_pc_relative(word, address)
-                    full = decoded['page_base'] + ((following >> 10) & 0xFFF)
-                    if locate_selected(full) is not None:
-                        # Inside the closure: same part keeps its distance, a
-                        # cross-part pair has to be re-pointed.
-                        new_site = mv(address)
-                        if (mv(full) & ~0xFFF) == (full & ~0xFFF) and \
-                                new_site - address == mv(full) - full:
-                            continue
-                        new_adrp = encode_adrp(rd_of(word),
-                                               (mv(full) & ~0xFFF) - (new_site & ~0xFFF))
-                        if new_adrp is None:
-                            fail(None, dict(site=hex(new_site), old_target=hex(full),
-                                            kind='adrp+add intra-range'))
-                            continue
-                        new_add = (following & ~(0xFFF << 10)) | ((mv(full) & 0xFFF) << 10)
-                        struct.pack_into('<II', body, position, new_adrp, new_add)
-                        branch_relocations.append(dict(
-                            site=hex(new_site), kind='adrp+add-intra', old_word=hex(word),
-                            new_word=hex(new_adrp), old_target=hex(full),
-                            new_target=hex(mv(full)), symbol=None, exact=True,
-                            component=identifier))
+                    found = [use for use in found
+                             if not any(lo <= use[3] < hi for lo, hi in literal_ranges)]
+                    if not found:
                         continue
-                    if not inside(kernel_ranges, full):
-                        continue
-                    new_site = mv(address)
-                    value, symbol, exact = bind(full)
-                    if value is None:
-                        fail(symbol, dict(site=hex(new_site), old_target=hex(full),
-                                          kind='adrp+add'))
-                        continue
-                    new_adrp = encode_adrp(rd_of(word), (value & ~0xFFF) - (new_site & ~0xFFF))
-                    if new_adrp is None:
-                        fail(symbol, dict(site=hex(new_site), old_target=hex(full),
-                                          kind='adrp+add-range'))
-                        continue
-                    new_add = (following & ~(0xFFF << 10)) | ((value & 0xFFF) << 10)
-                    struct.pack_into('<II', body, position, new_adrp, new_add)
-                    branch_relocations.append(dict(
-                        site=hex(new_site), kind='adrp+add', old_word=hex(word),
-                        new_word=hex(new_adrp), old_target=hex(full),
-                        new_target=hex(value), symbol=symbol, exact=exact,
-                        component=identifier))
-                    if not exact:
-                        approximate += 1
+                    adrp_seen += 1
+                    bindings.append(dict(
+                        identifier=identifier, body=body, address=address,
+                        position=position, word=word,
+                        full=found[0][0], scale=found[0][1], pair_pos=found[0][2],
+                        pair_site=found[0][3], following=found[0][4],
+                        users=found))
+
+    # ---- arbitration + rewrite -----------------------------------------
+    adrp_relocated = 0
+    adrp_unchanged = 0
+    adrp_user_rewrites = 0
+    adrp_unresolved = []
+    taken = {}
+    for binding in sorted(bindings, key=lambda b: (b['address'], b['pair_pos'])):
+        pair_pos = binding['pair_pos']
+        if pair_pos in taken:
+            adrp_unresolved.append(dict(site=hex(mv(binding['address'])),
+                                        old_target=hex(binding['full']),
+                                        reason='pair instruction already bound to %#x'
+                                        % mv(taken[pair_pos])))
+            continue
+        taken[pair_pos] = binding['address']
+        body = binding['body']
+        address, position, word = binding['address'], binding['position'], binding['word']
+        full, scale = binding['full'], binding['scale']
+        pair_pos, pair_site = binding['pair_pos'], binding['pair_site']
+        following = binding['following']
+        new_site = mv(address)
+        new_pair_site = mv(pair_site)
+        symbol, exact = None, True
+        if locate_selected(full) is not None:
+            target = mv(full)
+            if ((target & ~0xFFF) == (full & ~0xFFF)
+                    and new_site - address == target - full
+                    and new_pair_site - pair_site == target - full):
+                adrp_unchanged += 1
+                continue
+        elif inside(kernel_ranges, full):
+            target, symbol, exact = bind(full)
+            if target is None:
+                adrp_unresolved.append(dict(site=hex(new_site), old_target=hex(full),
+                                            symbol=symbol))
+                fail(symbol, dict(site=hex(new_site), old_target=hex(full),
+                                  kind='adrp-pair'))
+                continue
+        else:
+            adrp_unresolved.append(dict(site=hex(new_site), old_target=hex(full),
+                                        symbol=None, reason='outside closure and kernel'))
+            continue
+        new_adrp = encode_adrp(rd_of(word), (target & ~0xFFF) - (new_site & ~0xFFF))
+        if new_adrp is None:
+            adrp_unresolved.append(dict(site=hex(new_site), old_target=hex(full),
+                                        symbol=symbol, reason='adrp range'))
+            fail(symbol, dict(site=hex(new_site), old_target=hex(full),
+                              kind='adrp-pair-range'))
+            continue
+        residue = target & 0xFFF
+        if scale > 1:
+            if residue % scale:
+                adrp_unresolved.append(dict(site=hex(new_site), old_target=hex(full),
+                                            symbol=symbol, reason='offset alignment'))
+                fail(symbol, dict(site=hex(new_site), old_target=hex(full),
+                                  kind='adrp-pair-unaligned', scale=scale))
+                continue
+            residue //= scale
+        new_following = (following & ~(0xFFF << 10)) | (residue << 10)
+        struct.pack_into('<I', body, position, new_adrp)
+        struct.pack_into('<I', body, pair_pos, new_following)
+        for use_full, use_scale, use_pos, use_site, use_following in binding['users'][1:]:
+            if use_pos in taken:
+                continue
+            use_new_site = mv(use_site)
+            use_target = None
+            use_symbol = None
+            if locate_selected(use_full) is not None:
+                use_target = mv(use_full)
+            elif inside(kernel_ranges, use_full):
+                use_target, use_symbol, _unused_exact = bind(use_full)
+            if use_target is None:
+                if (target & ~0xFFF) != (full & ~0xFFF):
+                    raise Refused(
+                        '%s: ADRP at %#x moved to page %#x but its user at %#x '
+                        'targets %#x outside the closure and the kernel'
+                        % (binding['identifier'], new_site, target & ~0xFFF,
+                           use_new_site, use_full))
+                continue
+            if (use_target & ~0xFFF) != (target & ~0xFFF):
+                raise Refused(
+                    '%s: ADRP at %#x lands on page %#x, user at %#x needs page %#x '
+                    '(offset %#x) - one ADRP cannot serve both'
+                    % (binding['identifier'], new_site, target & ~0xFFF,
+                       use_new_site, use_target & ~0xFFF, use_target & 0xFFF))
+            use_residue = use_target & 0xFFF
+            if use_scale > 1:
+                if use_residue % use_scale:
+                    raise Refused('%s: user at %#x offset %#x is not %d-byte aligned'
+                                  % (binding['identifier'], use_new_site,
+                                     use_residue, use_scale))
+                use_residue //= use_scale
+            use_fixed = (use_following & ~(0xFFF << 10)) | (use_residue << 10)
+            taken[use_pos] = address
+            if use_fixed != use_following:
+                struct.pack_into('<I', body, use_pos, use_fixed)
+                adrp_user_rewrites += 1
+                branch_relocations.append(dict(
+                    site=hex(new_site), pair_site=hex(use_new_site),
+                    kind='adrp+user', old_following=hex(use_following),
+                    new_following=hex(use_fixed), old_target=hex(use_full),
+                    new_target=hex(use_target), symbol=use_symbol,
+                    component=binding['identifier']))
+        branch_relocations.append(dict(
+            site=hex(new_site), pair_site=hex(new_pair_site),
+            kind='adrp+add' if scale == 1 else 'adrp+ldst',
+            old_word=hex(word), new_word=hex(new_adrp),
+            old_following=hex(following), new_following=hex(new_following),
+            old_target=hex(full), new_target=hex(target),
+            symbol=symbol, exact=exact, component=binding['identifier']))
+        adrp_relocated += 1
+        if not exact:
+            approximate += 1
+
+    if args.debug or adrp_unresolved:
+        print('debug: adrp pairs seen %d, relocated %d, unchanged %d, '
+              'extra users rewritten %d, unresolved %d'
+              % (adrp_seen, adrp_relocated, adrp_unchanged, adrp_user_rewrites,
+                 len(adrp_unresolved)), file=sys.stderr)
+    for entry in adrp_unresolved[:10]:
+        print('unresolved adrp pair:', entry, file=sys.stderr)
 
     for veneer in veneers:
         position = veneer_fileoff + (int(veneer['va'], 16) - veneer_va)
@@ -959,6 +1236,43 @@ def run(args):
             if group['vmaddr'] <= va and va + length <= group['vmaddr'] + group['filesize']:
                 return group['fileoff'] + (va - group['vmaddr'])
         raise KeyError('address %#x is not backed by a prelink group' % va)
+
+    # ---- offline check of every adrp pair we rewrote ----------------------
+    # Re-decode from the published bytes: the effective address each pair now
+    # reaches must be exactly the relocated/bound target that was recorded.
+    adrp_checked, adrp_bad = 0, []
+    for entry in branch_relocations:
+        if not str(entry['kind']).startswith('adrp'):
+            continue
+        site = int(entry['site'], 16)
+        pair_site = int(entry.get('pair_site', site + 4), 16)
+        word = struct.unpack_from('<I', output, file_position(site, 4))[0]
+        following = struct.unpack_from('<I', output, file_position(pair_site, 4))[0]
+        decoded = decode_pc_relative(word, site)
+        if decoded is None or decoded.get('kind') != 'adrp':
+            adrp_bad.append(dict(entry, reason='not an adrp after rewrite'))
+            continue
+        imm = (following >> 10) & 0xFFF
+        scaled = ldst_unsigned(following)
+        if is_add_imm12(following):
+            effective = decoded['target'] + imm
+        elif scaled is not None:
+            effective = decoded['target'] + imm * scaled[1]
+        else:
+            adrp_bad.append(dict(entry, reason='pair form lost'))
+            continue
+        adrp_checked += 1
+        if effective != int(entry['new_target'], 16):
+            adrp_bad.append(dict(entry, effective=hex(effective)))
+    if adrp_bad:
+        for entry in adrp_bad[:10]:
+            print('bad adrp rewrite:', entry, file=sys.stderr)
+        if not os.environ.get('NABU_ADRP_VERIFY_SOFT'):
+            raise Refused('%d of %d rewritten adrp pairs do not reach their recorded '
+                          'target' % (len(adrp_bad), adrp_checked))
+    if args.debug:
+        print('debug: %d adrp pairs seen, %d rewritten and re-decoded'
+              % (adrp_pairs, adrp_checked), file=sys.stderr)
 
     # ---- per-kext header surgery -----------------------------------------
     split_added, header_slack, kmod_names = [], [], []
@@ -1208,7 +1522,10 @@ def run(args):
     info_plist = dict(metadata)
     info_plist['_PrelinkInfoDictionary'] = info_entries
     info_plist.pop('_PrelinkLinkKASLROffsets', None)
-    info_blob = prelink_xml_document(info_plist)
+    # The blob is a C string: OSUnserializeXML requires a terminating NUL, and
+    # everything after it in __PRELINK_INFO (__crypto_early) is reached by
+    # offset, so the sizes below must already include it.
+    info_blob = prelink_xml_document(info_plist) + b'\0'
     # __crypto_early: one pointer to the original corecrypto kmod_info, read by
     # 0043-native-corecrypto-single-init.patch via getsectbynamefromheader().
     crypto_early_off = None
@@ -1220,7 +1537,10 @@ def run(args):
     crypto_early_kmod = mv(corecrypto['kmod']) if crypto_early_off is not None else None
     info_size = align_up(max(len(info_blob),
                              (crypto_early_off + 8) if crypto_early_off is not None else 0))
-    info_fileoff = align_up(len(output))
+    info_fileoff = info_va - img_base
+    if info_fileoff < len(output):
+        raise SystemExit('info file offset %#x overlaps the image (%#x)'
+                         % (info_fileoff, len(output)))
     output.extend(bytes(info_fileoff - len(output)))
     output.extend(info_blob)
     output.extend(bytes(info_size - len(info_blob)))
@@ -1414,6 +1734,22 @@ def run(args):
                                stored=stored.hex(), computed=digest.hex(),
                                changed=stored != digest)
 
+    # ---- layout invariant ------------------------------------------------
+    # Every VA we introduced must satisfy fileoff == vmaddr - img_base, so the
+    # kernel's static-region mapping covers exactly the bytes the loader put
+    # behind it.
+    invariant = []
+    for name, group in placed_groups.items():
+        invariant.append((name, group['vmaddr'] - img_base, group['fileoff']))
+    invariant.append(('__PRELINK_INFO', info_va - img_base, info_fileoff))
+    broken = [item for item in invariant if item[1] != item[2]]
+    if broken:
+        for name, want, got in broken:
+            print('   [FAIL] %-18s va-base %#x fileoff %#x' % (name, want, got))
+        raise SystemExit('layout invariant broken: %d segments' % len(broken))
+    print('   [ok] %d band segments satisfy fileoff == vmaddr - image_base'
+          % len(invariant))
+
     report = dict(
         tool='scripts/prelink_kcg_bind.py',
         design='repacked band + sparse __macho_list (kalloc_sparse_prelink_index_version)',
@@ -1428,6 +1764,9 @@ def run(args):
         header_rewrite=header_rewrite,
         crypto_hmac=crypto_hmac,
         part_align=hex(PART_ALIGN),
+        image_base=hex(img_base),
+        layout_invariant=[dict(segment=n, fileoff=hex(fo), va_offset=hex(vo))
+                          for n, vo, fo in invariant],
         band=dict(base=hex(band_base), end=hex(band_end), span=band_end - band_base,
                   span_mb=round((band_end - band_base) / 1048576, 2)),
         image_bytes=len(output),
@@ -1465,6 +1804,7 @@ def run(args):
         pointer_relocation_count=len(relocations),
         branch_relocations=branch_relocations,
         branch_relocation_count=len(branch_relocations),
+        adrp_user_rewrite_count=adrp_user_rewrites,
         veneers=veneers,
         veneer_count=len(veneers),
         approximate=approximate,
