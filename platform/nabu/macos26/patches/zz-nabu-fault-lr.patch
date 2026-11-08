@@ -1,0 +1,25 @@
+Record the faulting frame's return address on the first-EL1-sync panel.
+
+ELR/ESR/FAR name the faulting function, and the faults this port is chasing land inside
+shared helpers such as _strlen, so ELR alone does not say which caller passed the bad
+pointer.  sleh.c already holds the full arm_saved_state64_t, so keep x30 and print it
+as CALLER=.  The declaration is block-scoped because sleh.c does not include the
+retained-log header that defines the variable.
+
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -630,12 +630,14 @@
+ 
+ 	ss_valid = is_saved_state64(ss);
+ 	arm_saved_state64_t *state = saved_state64(ss);
+ #if SHENG
+ 	/* Do not pin recoverable page faults; preserve registers on screen only for confirmed fatal faults. */
+ 	if (ss_valid && !PSR64_IS_USER(state->cpsr)) {
++		extern uint64_t sheng_fault_lr;
++		sheng_fault_lr = state->lr;
+ 		sheng_log_exception(state->pc, state->esr, state->far, state->sp);
+ 	}
+ #endif
+ 
+ 	os_atomic_cmpxchg(&original_faulting_state, NULL, state, seq_cst);
+ 
