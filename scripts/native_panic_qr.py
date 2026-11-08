@@ -10,8 +10,8 @@ def render(root: Path) -> tuple[str, dict]:
     config = json.loads((root / 'config/macos26-panic-qr.json').read_text())
     if (config['repository'] != 'nayuki/QR-Code-generator'
             or config['revision'] != '3c6d0b3cefb4e049dc337e82237c9644399716a8'
-            or config['payload_bytes_max'] != 640 or config['reason_bytes_max'] != 256
-            or config['version_max'] != 20 or config['network_url'] is not False):
+            or config['payload_bytes_max'] != 2953 or config['reason_bytes_max'] != 2740
+            or config['version_max'] != 40 or config['network_url'] is not False):
         raise ValueError('unexpected panic QR contract')
     directory = root / 'platform/sheng/macos26/log/qr'
     for name, expected in config['files'].items():

@@ -6,8 +6,8 @@
     "qrcodegen.c": "6a2b9cc65176f2345dde260c74b6d352627e8a0a6385d086ae0e9c5d0913c70c",
     "qrcodegen.h": "e82df4bff37d18b5863b9e7486fe6bda1b6cda8c3b9ecebfec473907265cb589"
   },
-  "payload_bytes_max": 640,
-  "reason_bytes_max": 256,
-  "version_max": 20,
+  "payload_bytes_max": 2953,
+  "reason_bytes_max": 2740,
+  "version_max": 40,
   "network_url": false
 }

@@ -140,7 +140,7 @@ class NativePanicPanel(unittest.TestCase):
                         self.assertEqual(number('sheng_panic_panel_bound_rows'), 16)
                         text = memory(symbols['sheng_first_panic_text'], 4096)
                         self.assertIn(b'PAYLOAD_END_AFTER_511_BYTES', text)
-                        payload = memory(symbols['sheng_qr_payload'], 640).split(b'\0', 1)[0].decode('ascii')
+                        payload = memory(symbols['sheng_qr_payload'], 2953).split(b'\0', 1)[0].decode('ascii')
                         self.assertIn('CALLER=0000000000112233\n', payload)
                         self.assertIn('REGS=panic-hook\nREASON=UFS ROOT FAILURE:', payload)
                         self.assertTrue(payload.endswith('\nTRUNCATED=1'))
@@ -164,7 +164,7 @@ class NativePanicPanel(unittest.TestCase):
                         self.assertEqual(number('writer_scope_test_checks'), 31)
                         self.assertEqual(number('scroll_bounds_test_checks'), 15)
                         self.assertEqual(before, memory(base, len(before)))
-                        self.assertEqual(memory(symbols['sheng_qr_payload'], 640).split(b'\0', 1)[0].decode('ascii'), payload)
+                        self.assertEqual(memory(symbols['sheng_qr_payload'], 2953).split(b'\0', 1)[0].decode('ascii'), payload)
                         import zxingcpp
                         panic_image = Image.frombytes('RGBX', (3048, 512), before, 'raw', 'BGRX').convert('RGB').crop(
                             (0, 0, 1408, 512))

@@ -2,9 +2,9 @@
 #ifndef SHENG_PANIC_QR_H
 #define SHENG_PANIC_QR_H
 #include "pe_sheng_qr_encoder.h"
-#define SHENG_QR_PAYLOAD_MAX 640u
-#define SHENG_QR_REASON_MAX 256u
-#define SHENG_QR_VERSION_MAX 20
+#define SHENG_QR_PAYLOAD_MAX 2953u
+#define SHENG_QR_REASON_MAX 2740u
+#define SHENG_QR_VERSION_MAX 40
 struct sheng_panic_qr_capture {
     uint64_t caller, sp, elr, esr, far;
     uint64_t physical_base, image_va, total, dropped;
@@ -61,7 +61,7 @@ static int sheng_qr_prepare(const struct sheng_panic_qr_capture *capture, const 
     sheng_qr_payload_bytes = used;
     for (unsigned i = 0; i < used; i++) sheng_qr_scratch[i] = (uint8_t)sheng_qr_payload[i];
     int success = qrcodegen_encodeBinary(sheng_qr_scratch, used, sheng_qr_modules,
-        qrcodegen_Ecc_MEDIUM, 1, SHENG_QR_VERSION_MAX, qrcodegen_Mask_AUTO, false);
+        qrcodegen_Ecc_LOW, 1, SHENG_QR_VERSION_MAX, qrcodegen_Mask_AUTO, false);
     __atomic_store_n(&sheng_qr_state, success ? 2 : 3, __ATOMIC_RELEASE);
     return success;
 }
