@@ -1,0 +1,74 @@
+diff --git a/iokit/Kernel/IOPlatformExpert.cpp b/iokit/Kernel/IOPlatformExpert.cpp
+index 76555f6..3d94f14 100644
+--- a/iokit/Kernel/IOPlatformExpert.cpp
++++ b/iokit/Kernel/IOPlatformExpert.cpp
+@@ -2102,12 +2102,16 @@ IOPlatformExpertDevice::init(void *dtRoot)
+ bool
+ IOPlatformExpertDevice::startIOServiceMatching(void)
+ {
++	IOLog("ZZ pe enter\n");
+ 	workLoop = IOWorkLoop::workLoop();
++	IOLog("ZZ pe workloop %p\n", workLoop);
+ 	if (!workLoop) {
+ 		return false;
+ 	}
+ 
++	IOLog("ZZ pe register enter\n");
+ 	registerService();
++	IOLog("ZZ pe register done\n");
+ 
+ 	return true;
+ }
+diff --git a/iokit/Kernel/IOService.cpp b/iokit/Kernel/IOService.cpp
+index 6824ed8..cd23ce0 100644
+--- a/iokit/Kernel/IOService.cpp
++++ b/iokit/Kernel/IOService.cpp
+@@ -889,6 +889,8 @@ IOService::attach( IOService * provider )
+ 	int          waitResult = THREAD_AWAKENED;
+ 	bool         wait, computeDeadline = true;
+ 
++	IOLog("ZZ at %s\n", getName() ? getName() : "(null)");
++
+ 	if (provider) {
+ 		if (gIOKitDebug & kIOLogAttach) {
+ 			LOG( "%s[0x%qx]::attach(%s[0x%qx])\n", getName(), getRegistryEntryID(),
+@@ -1047,6 +1049,8 @@ IOService::registerService( IOOptionBits options )
+ 	const char *        path;
+ 	const char *        skip;
+ 	int                 len;
++
++	IOLog("ZZ rs %s\n", getName() ? getName() : "(null)");
+ 	enum { kMaxPathLen  = 256 };
+ 	enum { kMaxChars    = 63 };
+ 
+@@ -1111,6 +1115,8 @@ IOService::startMatching( IOOptionBits options )
+ 	bool        waitAgain;
+ 	bool        releaseAssertion = false;
+ 
++	IOLog("ZZ sm %s\n", getName() ? getName() : "(null)");
++
+ 	if (options & kIOServiceDextRequirePowerForMatching) {
+ 		bool ok = gIOPMRootDomain->acquireDriverKitMatchingAssertion() == kIOReturnSuccess;
+ 		if (!ok) {
+diff --git a/iokit/Kernel/IOStartIOKit.cpp b/iokit/Kernel/IOStartIOKit.cpp
+index 95553a0..2f5b14c 100644
+--- a/iokit/Kernel/IOStartIOKit.cpp
++++ b/iokit/Kernel/IOStartIOKit.cpp
+@@ -179,7 +179,9 @@ StartIOKitMatching(void)
+ {
+ 	SOCD_TRACE_XNU(START_IOKIT, SOCD_TRACE_MODE_NONE);
+ 	assert(gRootNub != NULL);
++	IOLog("ZZ iokit match enter\n");
+ 	bool ok = gRootNub->startIOServiceMatching();
++	IOLog("ZZ iokit match returned %d\n", ok);
+ 	if (__improbable(!ok)) {
+ 		panic("Failed to start IOService matching");
+ 	}
+@@ -194,6 +196,7 @@ StartIOKitMatching(void)
+ 		IOService::getServiceRoot()->adjustBusy(1);
+ 	}
+ #endif
++	IOLog("ZZ iokit match done\n");
+ }
+ 
+ void
