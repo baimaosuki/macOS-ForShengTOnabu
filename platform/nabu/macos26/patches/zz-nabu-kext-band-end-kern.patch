@@ -1,0 +1,26 @@
+--- a/osfmk/arm64/arm_vm_init.c
++++ b/osfmk/arm64/arm_vm_init.c
+@@ -2087,6 +2087,23 @@
+ 	edata = (vm_offset_t) segDATAB + segSizeDATA;
+ 	end_kern = round_page(segHIGHESTKC ? segHIGHESTKC : getlastkerneladdr()); /* Force end to next page */
+ 
++#if SHENG
++	/*
++	 * NABU: the prelinked kext band is placed above the kernel image, so the
++	 * link-time end of the kernel (getlastkerneladdr) does not cover
++	 * __PRELINK_INFO and the __PLK_* segments.  Extend end_kern over the band
++	 * before the static kernel region is mapped, otherwise the kext VAs stay
++	 * unmapped and the first access to a bound kext faults.
++	 */
++	if (segSizePRELINKINFO != 0) {
++		vm_offset_t band_end = (vm_offset_t)(segPRELINKINFOB + segSizePRELINKINFO);
++
++		if (band_end > end_kern) {
++			end_kern = round_page(band_end);
++		}
++	}
++#endif
++
+ 	vm_set_page_size();
+ 
+ 	vm_kernel_base = segTEXTB;

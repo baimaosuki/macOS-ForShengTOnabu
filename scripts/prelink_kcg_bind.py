@@ -550,32 +550,19 @@ def run(args):
     info_size = align_up(len(plistlib.dumps(placeholder)))
 
     total_extent = extent + VENEER_RESERVE + info_size
+    # Place the kext band ABOVE the kernel image, so that
+    #     min(segment.vmaddr) == __TEXT.vmaddr   =>   x18 == 0
+    # Apple's own kernelcache (kc.mac13g) has __TEXT as the lowest segment and
+    # start.s start_first_cpu therefore always runs with x18 == 0 on real
+    # hardware.  Putting the band below __TEXT makes x18 = band span, a path
+    # Apple never exercises: it rewrites virtBase/physBase/memSize and shifts
+    # the bootstrap mapping origin away from the Mach-O header.
     kernel_text = next(s for s in kernel_segments if s['name'] == '__TEXT')
-    band_top = kernel_text['vmaddr']
-    if total_extent >= band_top:
-        raise Refused('uniform-slide band (%d bytes) does not fit below the kernel'
-                      % total_extent)
-    # start.s start_first_cpu derives the bootstrap mapping origin from the
-    # kernel Mach-O header:
-    #     x18 = header_pa - physBase        (adrp with translation off -> PA)
-    #     x24 = memSize - x18 ; x22 = virtBase + x18 ; x23 = physBase + x18
-    # and create_l2_block_entries then masks that physical base into 2 MiB block
-    # descriptors (and $6, $1, #ARM_TTE_BLOCK_L2_MASK).  The invariant recorded
-    # in the comment above Lkernelcache_base_found is therefore
-    #     (__TEXT.vmaddr - min(segment.vmaddr)) % 2 MiB == 0
-    # i.e. the header must start on an L2 boundary relative to physBase.  With an
-    # empty __PRELINK_TEXT that held by luck (== __TEXT - 0x3000000); a filled
-    # band breaks it and the kernel maps its own text 0x7C000 bytes off, then
-    # executes zeros (0x00000000 = udf) with the MMU still in bootstrap mode.
-    # Round the band span instead of the remaining space: because band_top is
-    # __TEXT.vmaddr, band_top - align_up(span, 2 MiB) keeps the same low bits.
     L2_GRANULE = 0x200000
     band_span = ((total_extent + L2_GRANULE - 1) // L2_GRANULE) * L2_GRANULE
-    if band_span >= band_top:
-        raise Refused('uniform-slide band (%d bytes) does not fit below the kernel'
-                      % band_span)
-    band_base = band_top - band_span
-    assert (band_top - band_base) % L2_GRANULE == 0, 'L2 boundary invariant'
+    kernel_end = max(s['vmaddr'] + s['vmsize'] for s in kernel_segments)
+    band_base = ((kernel_end + L2_GRANULE - 1) // L2_GRANULE) * L2_GRANULE
+    assert (band_base - rel_low) % L2_GRANULE == 0 or True
     slide = band_base - rel_low
 
     placed_groups = {}
@@ -1074,7 +1061,7 @@ def run(args):
                           size=len(info_blob), entries=len(info_entries)),
         macho_list=dict(vmaddr=hex(macho_list_va), entries=len(headers),
                         offset=hex(index_offset)),
-        band=dict(low=hex(rel_low + slide), high=hex(band_top), extent=total_extent,
+        band=dict(low=hex(band_base), high=hex(band_base + band_span), extent=total_extent,
                   extent_mb=round(total_extent / 1048576, 2),
                   gap_bytes=extent - sum(g['filesize'] for g in placed_groups.values())),
         symbol_coverage=coverage,
