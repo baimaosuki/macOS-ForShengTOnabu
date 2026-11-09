@@ -60,21 +60,48 @@ def run(*command, check: bool = True) -> subprocess.CompletedProcess:
     return result
 
 
-def gpt_entry(index: int, first: int, last: int, name: str) -> bytes:
+ENTRIES = 128
+ENTRY_SIZE = 128
+HEADER_SIZE = 92
+
+
+def crc32(data: bytes) -> int:
+    return zlib.crc32(data) & 0xFFFFFFFF
+
+
+def gpt_entry(first: int, last: int, name: str, unique: uuid.UUID) -> bytes:
     encoded = name.encode('utf-16-le')[:72]
-    return (APFS_TYPE.bytes_le
-            + uuid.uuid4().bytes_le
-            + struct.pack('<QQQ', first, last, 0)
-            + encoded.ljust(72, b'\0')
-            + b'\0' * (128 - 16 - 16 - 24 - 72))
+    entry = (APFS_TYPE.bytes_le + unique.bytes_le
+             + struct.pack('<QQQ', first, last, 0)
+             + encoded.ljust(72, b'\0'))
+    if len(entry) != ENTRY_SIZE:
+        raise SystemExit(f'GPT entry is {len(entry)} bytes, expected {ENTRY_SIZE}')
+    return entry
 
 
-def gpt_header(entries_lba: int, entries_crc: int, first_usable: int,
-               last_usable: int, disk_lba: int, backup_lba: int) -> bytes:
-    body = struct.pack('<8sIIIIQQQQ16sQIII', b'EFI PART', 0x00010000, 92, 0, 0,
-                       0, backup_lba, first_usable, last_usable,
-                       uuid.uuid4().bytes_le, entries_lba, 128, 128, entries_crc)
-    return body + struct.pack('<I', zlib.crc32(body) & 0xFFFFFFFF)
+def gpt_header(current: int, backup: int, entries_lba: int, entries_crc: int,
+               first_usable: int, last_usable: int, disk_guid: uuid.UUID) -> bytes:
+    """A GPT header with the CRC stored *in* the header, computed over 92 bytes."""
+    fields = [b'EFI PART', 0x00010000, HEADER_SIZE, 0, 0,
+              current, backup, first_usable, last_usable,
+              disk_guid.bytes_le, entries_lba, ENTRIES, ENTRY_SIZE, entries_crc]
+    body = struct.pack('<8sIIIIQQQQ16sQIII', *fields)
+    if len(body) != HEADER_SIZE:
+        raise SystemExit(f'GPT header is {len(body)} bytes, expected {HEADER_SIZE}')
+    fields[3] = crc32(body)                     # the CRC field sits at offset 16
+    body = struct.pack('<8sIIIIQQQQ16sQIII', *fields)
+    if struct.unpack_from('<I', body, 16)[0] == 0:
+        raise SystemExit('GPT header CRC was not written into the header')
+    return body.ljust(SECTOR, b'\0')
+
+
+def protective_mbr(disk_lba: int) -> bytes:
+    entry = (b'\0' + b'\0\x02\0' + b'\xEE' + b'\xFF\xFF\xFF'
+             + struct.pack('<II', 1, min(disk_lba - 1, 0xFFFFFFFF)))
+    mbr = b'\0' * 446 + entry
+    if len(mbr) != 462:
+        raise SystemExit(f'protective MBR body is {len(mbr)} bytes, expected 462')
+    return mbr.ljust(510, b'\0') + b'\x55\xAA'
 
 
 def wrap_gpt(container: Path, wrapper: Path) -> dict:
@@ -82,29 +109,84 @@ def wrap_gpt(container: Path, wrapper: Path) -> dict:
     payload = container.read_bytes()
     if len(payload) % SECTOR:
         payload += b'\0' * (SECTOR - len(payload) % SECTOR)
-    total = len(payload)
+    sectors = len(payload) // SECTOR
     first = ALIGN
-    last = first + total // SECTOR - 1
-    entries = gpt_entry(0, first, last, 'NabuRoot') + b'\0' * (128 * 128 - 128)
-    entries_crc = zlib.crc32(entries) & 0xFFFFFFFF
-    backup_entries_lba = last + 2
-    backup_lba = backup_entries_lba + 32
-    disk_lba = backup_lba + 1
+    last = first + sectors - 1
+    entries_lba = 2
+    backup_entries_lba = last + 1
+    backup_header_lba = backup_entries_lba + ENTRIES * ENTRY_SIZE // SECTOR
+    disk_lba = backup_header_lba + 1
+    disk_guid = uuid.uuid4()
+
+    entries = gpt_entry(first, last, 'NabuRoot', uuid.uuid4())
+    entries += b'\0' * (ENTRIES * ENTRY_SIZE - ENTRY_SIZE)
+    entries_crc = crc32(entries)
+
     image = bytearray(SECTOR * disk_lba)
-    image[0:512] = (b'\0' * 446
-                    + struct.pack('<BBBBBBBB', 0, 0, 2, 0, 0xEE, 0xFF, 0xFF, 0xFF)
-                    + struct.pack('<II', 1, disk_lba - 1)
-                    + b'\0' * 16 + b'\x55\xAA')
-    image[SECTOR:SECTOR * 2] = gpt_header(2, entries_crc, first, last, disk_lba, backup_lba)
-    image[SECTOR * 2:SECTOR * 2 + len(entries)] = entries
-    image[SECTOR * first:SECTOR * first + total] = payload
+    image[0:SECTOR] = protective_mbr(disk_lba)
+    image[SECTOR * 1:SECTOR * 2] = gpt_header(1, backup_header_lba, entries_lba, entries_crc,
+                                              first, last, disk_guid)
+    image[SECTOR * entries_lba:SECTOR * entries_lba + len(entries)] = entries
+    image[SECTOR * first:SECTOR * first + len(payload)] = payload
     image[SECTOR * backup_entries_lba:SECTOR * backup_entries_lba + len(entries)] = entries
-    image[SECTOR * backup_lba:SECTOR * (backup_lba + 1)] = gpt_header(
-        backup_entries_lba, entries_crc, first, last, disk_lba, backup_lba)
+    image[SECTOR * backup_header_lba:SECTOR * (backup_header_lba + 1)] = gpt_header(
+        backup_header_lba, 1, backup_entries_lba, entries_crc, first, last, disk_guid)
+
+    if len(image) != SECTOR * disk_lba:
+        raise SystemExit(f'wrapper is {len(image)} bytes, expected {SECTOR * disk_lba}')
+    if image[510:512] != b'\x55\xAA':
+        raise SystemExit('protective MBR signature is not at offset 510')
+    if image[SECTOR * first:SECTOR * first + len(payload)] != payload:
+        raise SystemExit('partition payload does not match the container')
     wrapper.write_bytes(image)
-    return dict(wrapper=str(wrapper), wrapper_bytes=len(image), payload_bytes=total,
+    checked = verify_gpt(wrapper, len(payload), first)
+    return dict(checked, wrapper=str(wrapper), wrapper_bytes=len(image), payload_bytes=len(payload),
                 payload_offset=SECTOR * first, partition_first_lba=first,
-                partition_last_lba=last, disk_lba=disk_lba)
+                partition_last_lba=last, backup_entries_lba=backup_entries_lba,
+                backup_header_lba=backup_header_lba, disk_lba=disk_lba,
+                disk_guid=str(disk_guid), entries_crc=hex(entries_crc))
+
+
+def verify_gpt(wrapper: Path, payload_bytes: int, first_lba: int) -> dict:
+    """Re-read the wrapper we just wrote and assert its geometry and CRCs."""
+    data = wrapper.read_bytes()
+    if len(data) % SECTOR:
+        raise SystemExit('wrapper length is not a whole number of sectors')
+    disk_lba = len(data) // SECTOR
+    if data[510:512] != b'\x55\xAA' or data[450] != 0xEE:
+        raise SystemExit('protective MBR is malformed')
+    primary = data[SECTOR:SECTOR + HEADER_SIZE + 4]
+    stored = struct.unpack_from('<I', primary, 16)[0]
+    if crc32(primary[:16] + b'\0\0\0\0' + primary[20:92]) != stored:
+        raise SystemExit('primary GPT header CRC is wrong')
+    current, backup = struct.unpack_from('<QQ', primary, 24)
+    entries_lba, count, size, entries_crc = struct.unpack_from('<QIII', primary, 72)
+    if (current, backup, count, size) != (1, disk_lba - 1, ENTRIES, ENTRY_SIZE):
+        raise SystemExit(f'primary header geometry is wrong: {current}/{backup}/{count}/{size}')
+    entries = data[SECTOR * entries_lba:SECTOR * entries_lba + count * size]
+    if crc32(entries) != entries_crc:
+        raise SystemExit('primary partition entry array CRC is wrong')
+    first, last = struct.unpack_from('<QQ', entries, 32)
+    if (entries[:16] != APFS_TYPE.bytes_le or first != first_lba
+            or last + 34 != disk_lba):
+        raise SystemExit('partition 1 is not the Apple_APFS extent we asked for')
+    backup_header = data[SECTOR * (disk_lba - 1):]
+    if backup_header[0:8] != b'EFI PART':
+        raise SystemExit('backup GPT header is missing')
+    backup_stored = struct.unpack_from('<I', backup_header, 16)[0]
+    if crc32(backup_header[:16] + b'\0\0\0\0' + backup_header[20:92]) != backup_stored:
+        raise SystemExit('backup GPT header CRC is wrong')
+    backup_current, backup_other = struct.unpack_from('<QQ', backup_header, 24)
+    if (backup_current, backup_other) != (disk_lba - 1, 1):
+        raise SystemExit('backup header does not point back at the primary header')
+    if backup_header[56:72] != primary[56:72]:
+        raise SystemExit('primary and backup headers disagree about the disk GUID')
+    offset = SECTOR * first_lba
+    if data[offset:offset + payload_bytes][0x20:0x24] != b'NXSB':
+        raise SystemExit('payload at the partition offset is not an APFS container')
+    return dict(disk_lba=disk_lba, payload_offset=offset, header_crc=hex(stored),
+                entries_crc=hex(entries_crc))
+
 
 
 def unwrap_gpt(wrapper: Path, offset: int, length: int, out: Path) -> None:
@@ -290,11 +372,11 @@ def main() -> int:
         target.chmod(0o755)
         run('xattr', '-c', target, check=False)
         entry['resign'] = resign(target)
-        entry['inside_image'] = describe(target)
-        step('replace', asset=image_path, md5=entry['inside_image']['md5'],
+        if not entry['resign']['verify_ok']:
+            raise SystemExit(f'{image_path}: codesign verification failed, refusing to ship it')
+        entry['signed_inside_image'] = describe(target)
+        step('replace', asset=image_path, signed_md5=entry['signed_inside_image']['md5'],
              verify_ok=entry['resign']['verify_ok'])
-        if entry['inside_image']['md5'] != entry['arm64_md5']:
-            raise SystemExit(f'{image_path}: bytes inside the image differ from the translated file')
 
     report['inventory_after_inside'] = inventory(mountpoint, work / 'inventory-after.json')
     detach(mountpoint)
@@ -332,16 +414,18 @@ def main() -> int:
         target = mountpoint / entry['image_path'].lstrip('/')
         now = describe(target) if target.exists() else None
         entry['after_repack'] = now
+        expected = entry['signed_inside_image']['md5']
         seen.append(dict(image_path=entry['image_path'],
                          present=bool(now),
-                         matches_staged=bool(now) and now['md5'] == entry['arm64_md5'],
+                         matches_signed=bool(now) and now['md5'] == expected,
+                         expected_signed_md5=expected,
                          md5=now['md5'] if now else None,
                          architectures=now['architectures'] if now else None))
     report['roundtrip']['replaced_inside_rebuilt'] = seen
     report['inventory_after_repack'] = inventory(mountpoint, work / 'inventory-repacked.json')
     detach(mountpoint)
 
-    ok = all(item['matches_staged'] for item in seen) and identical
+    ok = all(item['matches_signed'] for item in seen) and identical
     report['verdict'] = dict(candidate_ok=ok,
                              acceptance='entering dyld userspace still has to be shown on device',
                              unsigned_disclaimer='replacements are ad-hoc signed: AMFI may reject '

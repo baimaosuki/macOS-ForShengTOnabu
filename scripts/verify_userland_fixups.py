@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
-"""Independently verify that a translated userland Mach-O carries only arm64
-(non-arm64e) chained fixups.
+"""Independently verify a translated userland Mach-O.
 
-This is deliberately a *second* parser: it does not import the translator, so a
-bug that writes bad pointers cannot also validate them.  The translated image is
-walked as DYLD_CHAINED_PTR_64_OFFSET (format 6, 4-byte stride) and every site is
-compared against the same site in the arm64e original, decoded per
-fixup-chains.h: auth=bit63, bind=bit62, next=bits51..61 with an 8-byte stride,
-unauthenticated target = vm offset from the image base, authenticated target =
-32-bit runtimeOffset.
+Second, independent parser: it never imports the translator, so a bug that writes
+bad pointers cannot also validate them.
+
+Format 6 (DYLD_CHAINED_PTR_64_OFFSET) has no auth bit: bit 63 is the bind flag,
+the rebase target is a 36-bit offset from the image base, and bits 36..50
+(high8 + reserved) must be zero.  The arm64e original is decoded per
+fixup-chains.h for formats 9 and 12: auth = bit 63, bind = bit 62, next = bits
+51..61 with an 8-byte stride, unauthenticated target = vm offset from the image
+base with a separate high8 byte, authenticated target = 32-bit runtimeOffset.
+Only formats 9 and 12 are accepted as originals; anything else stops the check
+instead of being silently skipped.
 """
 
 from __future__ import annotations
@@ -25,9 +28,10 @@ LC_DYLD_CHAINED_FIXUPS = 0x80000034
 PTR_64_OFFSET = 6
 ARM64E_USERLAND = 9
 ARM64E_USERLAND24 = 12
+ACCEPTED_ORIGINALS = (ARM64E_USERLAND, ARM64E_USERLAND24)
 
-BIND_BIT = 1 << 62
-AUTH_BIT = 1 << 63
+BIND_BIT_ARM64E = 1 << 62
+AUTH_BIT_ARM64E = 1 << 63
 
 
 def image(data: bytes) -> dict:
@@ -55,35 +59,9 @@ def base_of(img: dict) -> int:
     return min(seg['va'] for seg in img['segments'])
 
 
-def decode_arm64e(raw: int) -> dict:
-    auth = bool(raw & AUTH_BIT)
-    bind = bool(raw & BIND_BIT)
-    nxt = (raw >> 51) & 0x7FF
-    if bind:
-        ordinal = raw & 0xFFFFFF
-        addend = 0 if auth else ((raw >> 32) & 0x7FFFF)
-        if not auth and addend & 0x40000:
-            addend -= 0x80000
-        return dict(kind='bind', auth=auth, ordinal=ordinal, addend=addend, next=nxt)
-    offset = raw & (0xFFFFFFFF if auth else ((1 << 43) - 1))
-    return dict(kind='rebase', auth=auth, offset=offset, next=nxt)
-
-
-def decode_64_offset(raw: int) -> dict:
-    bind = bool(raw >> 63)
-    nxt = (raw >> 51) & 0xFFF
-    if bind:
-        addend = (raw >> 24) & 0xFF
-        if addend & 0x80:
-            addend -= 0x100
-        return dict(kind='bind', ordinal=raw & 0xFFFFFF, addend=addend, next=nxt)
-    return dict(kind='rebase', offset=raw & ((1 << 36) - 1), next=nxt)
-
-
-def walk(data: bytes, img: dict, command, expect_format: int, stride: int,
-         stride_scale: int = 1):
-    """Yield (segment, site, raw) for every chain member."""
-    off, size = command
+def segment_starts(data: bytes, img: dict):
+    """Yield (segment, page_size, pointer_format, page_start_list) per chained segment."""
+    off, size = img['fixups']
     blob = data[off:off + size]
     version, starts = struct.unpack_from('<II', blob, 0)
     if version != 0:
@@ -95,26 +73,54 @@ def walk(data: bytes, img: dict, command, expect_format: int, stride: int,
             continue
         pos = starts + relative
         span, page_size, fmt, seg_off, max_valid, pages = struct.unpack_from('<IHHQIH', blob, pos)
-        yield ('format', seg, fmt)
-        if fmt != expect_format:
+        starts_list = [struct.unpack_from('<H', blob, pos + 22 + 2 * page)[0] for page in range(pages)]
+        yield dict(seg=seg, page_size=page_size, format=fmt, seg_off=seg_off,
+                   pages=pages, starts=starts_list)
+
+
+def decode_arm64e(raw: int, fmt: int) -> dict:
+    auth = bool(raw & AUTH_BIT_ARM64E)
+    bind = bool(raw & BIND_BIT_ARM64E)
+    nxt = (raw >> 51) & 0x7FF
+    if bind:
+        ordinal = raw & (0xFFFFFF if fmt == ARM64E_USERLAND24 else 0xFFFF)
+        addend = 0 if auth else ((raw >> 32) & 0x7FFFF)
+        if not auth and addend & 0x40000:
+            addend -= 0x80000
+        return dict(kind='bind', auth=auth, ordinal=ordinal, addend=addend, next=nxt, high8=None)
+    if auth:
+        return dict(kind='rebase', auth=True, offset=raw & 0xFFFFFFFF, next=nxt, high8=None)
+    return dict(kind='rebase', auth=False, offset=raw & ((1 << 43) - 1), next=nxt,
+                high8=(raw >> 43) & 0xFF)
+
+
+def decode_64_offset(raw: int) -> dict:
+    if raw >> 63:
+        addend = (raw >> 24) & 0xFF
+        if addend & 0x80:
+            addend -= 0x100
+        return dict(kind='bind', ordinal=raw & 0xFFFFFF, addend=addend,
+                    next=(raw >> 51) & 0xFFF, reserved=(raw >> 32) & 0x7FFFF)
+    return dict(kind='rebase', offset=raw & ((1 << 36) - 1), next=(raw >> 51) & 0xFFF,
+                reserved=(raw >> 36) & 0x7FFF)
+
+
+def walk(data: bytes, starts_entry: dict, stride: int):
+    seg = starts_entry['seg']
+    for page, start in enumerate(starts_entry['starts']):
+        if start == 0xFFFF:
             continue
-        if seg_off != seg['fileoff']:
-            yield ('offset-mismatch', seg, seg_off)
-        for page in range(pages):
-            start, = struct.unpack_from('<H', blob, pos + 22 + 2 * page)
-            if start == 0xFFFF:
-                continue
-            site = page * page_size + start
-            while True:
-                raw, = struct.unpack_from('<Q', data, seg['fileoff'] + site)
-                yield ('pointer', seg, site, raw)
-                if expect_format == PTR_64_OFFSET:
-                    nxt = (raw >> 51) & 0xFFF
-                else:
-                    nxt = (raw >> 51) & 0x7FF
-                if not nxt:
-                    break
-                site += nxt * stride
+        site = page * starts_entry['page_size'] + start
+        while True:
+            raw, = struct.unpack_from('<Q', data, seg['fileoff'] + site)
+            yield site, raw
+            if stride == 8:
+                nxt = (raw >> 51) & 0x7FF
+            else:
+                nxt = (raw >> 51) & 0xFFF
+            if not nxt:
+                break
+            site += nxt * stride
 
 
 def main() -> int:
@@ -129,64 +135,75 @@ def main() -> int:
     if img['fixups'] is None:
         raise SystemExit('no LC_DYLD_CHAINED_FIXUPS: nothing to verify')
 
-    formats = {}
-    pointers = 0
-    auth_left = 0
-    offsets_ok = True
-    for item in walk(data, img, img['fixups'], PTR_64_OFFSET, 4):
-        if item[0] == 'format':
-            formats[item[1]['name']] = item[2]
-        elif item[0] == 'offset-mismatch':
-            offsets_ok = False
-        else:
-            pointers += 1
-            if item[3] & AUTH_BIT:
-                auth_left += 1
-
-    bad_formats = {k: v for k, v in formats.items() if v not in (0, PTR_64_OFFSET)}
     report = dict(subtype=hex(img['subtype']), image_base=hex(base_of(img)),
-                  pointer_formats=formats, pointers=pointers,
-                  auth_bits_left=auth_left, segment_offsets_match=True and offsets_ok,
-                  non_arm64_formats=bad_formats)
+                  pointer_formats={}, pointers=0, reserved_dirty=[], reserved_dirty_count=0,
+                  segment_offsets_match=True, non_arm64_formats={})
+    new_map = {}
+    for entry in segment_starts(data, img):
+        name = entry['seg']['name']
+        report['pointer_formats'][name] = entry['format']
+        if entry['format'] != PTR_64_OFFSET:
+            report['non_arm64_formats'][name] = entry['format']
+            continue
+        if entry['seg_off'] != entry['seg']['fileoff']:
+            report['segment_offsets_match'] = False
+        for site, raw in walk(data, entry, 4):
+            report['pointers'] += 1
+            new_map[(name, site)] = raw
+            decoded = decode_64_offset(raw)
+            if decoded['reserved']:
+                if len(report['reserved_dirty']) < 8:
+                    report['reserved_dirty'].append(
+                        dict(segment=name, va=hex(entry['seg']['va'] + site),
+                             kind=decoded['kind'], reserved=hex(decoded['reserved'])))
+                report['reserved_dirty_count'] += 1
 
     mismatches = []
     verified = 0
     if args.original:
         orig = args.original.read_bytes()
         oimg = image(orig)
-        new_map = {}
-        for item in walk(data, img, img['fixups'], PTR_64_OFFSET, 4):
-            if item[0] == 'pointer':
-                new_map[(item[1]['name'], item[2])] = item[3]
-        old_sites = 0
-        for item in walk(orig, oimg, oimg['fixups'], 12, 8):
-            if item[0] != 'pointer':
+        oentries = list(segment_starts(orig, oimg))
+        oformats = {e['seg']['name']: e['format'] for e in oentries if e['format']}
+        exotic = {k: v for k, v in oformats.items() if v not in ACCEPTED_ORIGINALS}
+        if exotic:
+            raise SystemExit(f'original uses chained fixup formats this checker cannot decode: {exotic}')
+        old_map = {}
+        oimg_base = base_of(oimg)
+        for entry in oentries:
+            if not entry['format']:
                 continue
-            old_sites += 1
-            key = (item[1]['name'], item[2])
+            for site, raw in walk(orig, entry, 8):
+                old_map[(entry['seg']['name'], site)] = (raw, entry['format'])
+        report['originals_walked'] = len(old_map)
+        report['original_formats'] = oformats
+        report['original_image_base'] = hex(oimg_base)
+        for key, (raw, fmt) in old_map.items():
             if key not in new_map:
-                mismatches.append(('missing', item[1]['name'], hex(item[2])))
+                mismatches.append(dict(kind='missing', segment=key[0], site=hex(key[1])))
                 continue
-            old = decode_arm64e(item[3])
+            old = decode_arm64e(raw, fmt)
             new = decode_64_offset(new_map[key])
             if old['kind'] != new['kind']:
-                mismatches.append(('kind', key[0], hex(key[1]), old['kind'], new['kind']))
+                mismatches.append(dict(kind='kind', segment=key[0], site=hex(key[1]),
+                                       old=old['kind'], new=new['kind']))
             elif old['kind'] == 'rebase':
-                if old['offset'] != new['offset']:
-                    mismatches.append(('offset', key[0], hex(key[1]),
-                                       hex(old['offset']), hex(new['offset'])))
+                if old['high8'] not in (None, 0):
+                    mismatches.append(dict(kind='high8-unrepresentable', segment=key[0],
+                                           site=hex(key[1]), high8=hex(old['high8'])))
+                elif old['offset'] != new['offset']:
+                    mismatches.append(dict(kind='offset', segment=key[0], site=hex(key[1]),
+                                           old=hex(old['offset']), new=hex(new['offset'])))
                 else:
                     verified += 1
+            elif old['ordinal'] != new['ordinal'] or old['addend'] != new['addend']:
+                mismatches.append(dict(kind='bind', segment=key[0], site=hex(key[1]),
+                                       old=f"{old['ordinal']}/{old['addend']}",
+                                       new=f"{new['ordinal']}/{new['addend']}"))
             else:
-                if old['ordinal'] != new['ordinal'] or old['addend'] != new['addend']:
-                    mismatches.append(('bind', key[0], hex(key[1]),
-                                       f"{old['ordinal']}/{old['addend']}",
-                                       f"{new['ordinal']}/{new['addend']}"))
-                else:
-                    verified += 1
-        if len(new_map) != old_sites:
-            mismatches.append(('site-count', len(new_map), old_sites))
-        report['originals_walked'] = old_sites
+                verified += 1
+        if len(new_map) != len(old_map):
+            mismatches.append(dict(kind='site-count', new=len(new_map), old=len(old_map)))
         report['semantic_verified'] = verified
         report['mismatch_count'] = len(mismatches)
         report['mismatches'] = mismatches[:12]
@@ -194,9 +211,9 @@ def main() -> int:
     if args.report:
         args.report.write_text(json.dumps(report, indent=2) + '\n')
     print(json.dumps(report, indent=2))
-    if auth_left or bad_formats or mismatches:
-        return 1
-    return 0
+    failed = (report['reserved_dirty_count'] or report['non_arm64_formats']
+              or not report['segment_offsets_match'] or mismatches)
+    return 1 if failed else 0
 
 
 if __name__ == '__main__':

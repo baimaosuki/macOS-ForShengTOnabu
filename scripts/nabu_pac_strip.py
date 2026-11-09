@@ -198,6 +198,12 @@ def rewrite_chained_fixups(image_buf: bytearray, parsed: dict, high8: int = 0xFF
                             raise ValueError('bind %#x did not survive the rewrite' % site_va)
                     else:
                         offset = raw & (0xFFFFFFFF if is_auth else ((1 << 43) - 1))
+                        if not is_auth:
+                            high8 = (raw >> 43) & 0xFF
+                            if high8:
+                                raise ValueError(
+                                    'rebase at %#x carries high8=%#x; the 36-bit offset field of '
+                                    'DYLD_CHAINED_PTR_64_OFFSET cannot express it' % (site_va, high8))
                         stats['auth_rebase' if is_auth else 'rebase'] += 1
                         if offset >= 1 << 36:
                             raise ValueError(
