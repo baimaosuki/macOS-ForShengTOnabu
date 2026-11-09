@@ -110,6 +110,7 @@ CPU_PATCH = board_patch('machine-cpu-registration.patch')
 CPU_INTERRUPT_PATCH = board_patch('machine-cpu-interrupt-order.patch')
 CPU_SMP_PATCH = board_patch('machine-cpu-smp-bootstrap.patch')
 CPU_ASM_PATCH = board_patch('machine-cpu-inline-asm.patch')
+CPU_GIC_PATCH = board_patch('machine-cpu-gic-group.patch')
 
 
 # Preserve diagnostics for exported Apple source/tool-generated code on Clang 27.
@@ -579,6 +580,9 @@ def compile_sources(args, record: dict) -> None:
     subprocess.run(['git', 'apply', '--directory=' + str(machine.relative_to(ROOT)),
                     str(CPU_ASM_PATCH)], cwd=ROOT, check=True)
     record['cpu_inline_asm_patch_sha256'] = sha(CPU_ASM_PATCH)
+    subprocess.run(['git', 'apply', '--directory=' + str(machine.relative_to(ROOT)),
+                    str(CPU_GIC_PATCH)], cwd=ROOT, check=True)
+    record['cpu_gic_group_patch_sha256'] = sha(CPU_GIC_PATCH)
     record['platform_objects'] = {}
     for component in ('ArmDTPlatform', 'ArmCpu'):
         original = ROOT / f'UniXNU/drivers/{component}/{component}.cpp'

@@ -1,0 +1,27 @@
+--- a/ArmCpu/ArmCpu.cpp
++++ b/ArmCpu/ArmCpu.cpp
+@@ -341,7 +341,11 @@ void ArmCpu::enableGic (void)
+   if (!secondary) { gBootAffinity = affinity & 0xff00ffffffULL; }
+   if (!secondary || !gRemoteGic) {
+     write32 (redist + 0x10000, 0x100, kSgiPpiEnable);
+-    write32 (dist, 0, read32 (dist, 0) | 0x12U);
++    // GICD_CTLR is read at EL1 through the non-secure view, where bit0 is
++    // EnableGrp1.  bit1 is EnableGrp1NS in the secure view and EnableGrp1A on
++    // GICv3.1, which SM8150 does not implement, so setting bit1 alone left
++    // group 1 disabled: the timer PPI (27) was never forwarded to the CPU.
++    write32 (dist, 0, read32 (dist, 0) | 0x13U);
+   }
+   value = 1;
+   __asm__ volatile ("msr icc_igrpen1_el1, %0\n\tdsb sy\n\tisb" :: "r" (value) : "memory");
+@@ -534,6 +538,11 @@ void ArmCpu::initCPU (bool boot)
+   }
+   enableGic ();
+   if (gSpiIpi) { spiIpiConfigure (gDist, logicalId, affinity); }
++  // The boot core installs the same per-CPU handler the secondary cores do:
++  // sleh_irq reaches it through cpu_data, while IOCPUInterruptController only
++  // keeps the action in its own vector table.
++  ml_install_interrupt_handler (this, static_cast<int> (logicalId), this,
++      reinterpret_cast<IOInterruptHandler> (&ArmCpu::dispatch), nullptr);
+   enableCPUTimeBase (true);
+   setCPUState (kIOCPUStateRunning);
+   if (gSelfIpi) { signalCPU (this); }
