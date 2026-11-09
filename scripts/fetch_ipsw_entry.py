@@ -15,6 +15,7 @@ import argparse
 import hashlib
 import struct
 import sys
+import time
 import urllib.request
 import zlib
 
@@ -25,7 +26,23 @@ CENTRAL = 0x02014B50
 LOCAL = 0x04034B50
 
 
+def retry(call, attempts: int = 4):
+    last = None
+    for attempt in range(attempts):
+        try:
+            return call()
+        except Exception as error:               # network flake: retry, then surface it
+            last = error
+            print('retry %d/%d after %s' % (attempt + 1, attempts, error))
+            time.sleep(2 * (attempt + 1))
+    raise SystemExit('range request kept failing: %s' % last)
+
+
 def fetch(url: str, start: int, length: int) -> bytes:
+    return retry(lambda: _fetch_once(url, start, length))
+
+
+def _fetch_once(url: str, start: int, length: int) -> bytes:
     request = urllib.request.Request(url, headers={'Range': f'bytes={start}-{start + length - 1}'})
     with urllib.request.urlopen(request, timeout=120) as response:
         status = response.status
@@ -38,12 +55,14 @@ def fetch(url: str, start: int, length: int) -> bytes:
 
 
 def total_size(url: str) -> int:
-    request = urllib.request.Request(url, headers={'Range': 'bytes=0-0'})
-    with urllib.request.urlopen(request, timeout=120) as response:
-        content_range = response.headers.get('Content-Range', '')
-    if '/' not in content_range:
-        raise SystemExit('server did not answer with a Content-Range header')
-    return int(content_range.rsplit('/', 1)[1])
+    def once() -> int:
+        request = urllib.request.Request(url, headers={'Range': 'bytes=0-0'})
+        with urllib.request.urlopen(request, timeout=120) as response:
+            content_range = response.headers.get('Content-Range', '')
+        if '/' not in content_range:
+            raise ValueError('server did not answer with a Content-Range header')
+        return int(content_range.rsplit('/', 1)[1])
+    return retry(once)
 
 
 def find_eocd(url: str, size: int) -> int:
