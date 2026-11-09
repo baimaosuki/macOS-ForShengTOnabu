@@ -27,6 +27,9 @@ import uuid
 import zlib
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import verify_page_hashes  # noqa: E402  (local helper, needs the scripts dir on sys.path)
+
 ROOT = Path(__file__).resolve().parents[1]
 SECTOR = 512
 ALIGN = 2048                      # 1 MiB partition start, standard for APFS
@@ -261,6 +264,15 @@ def inventory(mountpoint: Path, report_path: Path) -> dict:
     return report
 
 
+
+def page_hashes(path: Path) -> dict:
+    """Recompute the CodeDirectory page hashes against the file's own bytes."""
+    try:
+        return verify_page_hashes.verify(str(path))
+    except SystemExit as error:
+        return {'ok': False, 'error': str(error)}
+
+
 def convert(source: Path, work: Path, report_dir: Path) -> dict:
     stem = source.name[:-7] if source.name.endswith('.arm64e') else source.name
     arm64e = work / f'{stem}.arm64e'
@@ -368,7 +380,9 @@ def main() -> int:
     for image_path, copy in staged:
         result = convert(copy, work, args.report.parent)
         converted.append((image_path, result))
-        entry = dict(image_path=image_path, before=result['before'],
+        entry = dict(image_path=image_path,
+                     before=dict(result['before'],
+                                 page_hashes=page_hashes(work / (image_path.strip('/').replace('/', '_') + '.arm64e'))),
                      translation=result['translation'], verification=result['verification'],
                      arm64_md5=md5(result['arm64']), arm64_size=result['arm64'].stat().st_size)
         report['assets'].append(entry)
@@ -386,6 +400,10 @@ def main() -> int:
         if not entry['resign']['verify_ok']:
             raise SystemExit(f'{image_path}: codesign verification failed, refusing to ship it')
         entry['signed_inside_image'] = describe(target)
+        entry['page_hashes'] = page_hashes(target)
+        if not entry['page_hashes'].get('ok'):
+            raise SystemExit('%s: page hashes do not match the embedded CodeDirectory: %s'
+                             % (image_path, entry['page_hashes'].get('mismatches', entry['page_hashes'])))
         step('replace', asset=image_path, signed_md5=entry['signed_inside_image']['md5'],
              verify_ok=entry['resign']['verify_ok'])
 
