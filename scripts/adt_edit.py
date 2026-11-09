@@ -86,6 +86,26 @@ def set_prop(node, key, value):
     return 'added'
 
 
+def encode_value(spec):
+    """`text` -> NUL-terminated ASCII; `u32:1`, `u64:0x10`, `raw:0100ff`, `str:abc` -> typed bytes."""
+    kind, sep, rest = spec.partition(':')
+    kind = kind.lower()
+    if sep and kind in ('u32', 'u64'):
+        n = int(rest, 0)
+        width = 4 if kind == 'u32' else 8
+        if not 0 <= n < (1 << (8 * width)):
+            raise SystemExit('adt: %s value %r does not fit in %d bytes' % (kind, rest, width))
+        return struct.pack('<I' if width == 4 else '<Q', n)
+    if sep and kind == 'raw':
+        try:
+            return bytes.fromhex(rest)
+        except ValueError:
+            raise SystemExit('adt: raw value %r is not hex' % rest)
+    if sep and kind == 'str':
+        return rest.encode('ascii') + b'\0'
+    return spec.encode('ascii') + b'\0'
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument('adt')
@@ -109,13 +129,15 @@ def main(argv=None):
         return 0
 
     for spec in args.add_prop:
-        where, _, assignment = spec.rpartition(':')
-        key, _, value = assignment.partition('=')
+        where, _, assignment = spec.partition(':')
+        key, _, raw_value = assignment.partition('=')
+        value = encode_value(raw_value)
         node = find(root, where)
-        state = set_prop(node, key, value.encode('ascii') + b'\0')
-        print('  %-34s %s -> %r [%s]' % (where, key, value, state))
+        state = set_prop(node, key, value)
+        print('  %-30s %-26s %d B %s [%s]'
+              % (where, key, len(value), value[:16].hex(), state))
     for spec in args.add_child:
-        where, _, child = spec.rpartition(':')
+        where, _, child = spec.partition(':')
         node = find(root, where)
         if any(name_of(c) == child for c in node['children']):
             print('  %-34s child %-24s already present' % (where, child))
