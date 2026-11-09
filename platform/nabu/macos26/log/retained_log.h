@@ -140,7 +140,7 @@ void sheng_log_bind_panic_panel(uintptr_t address, unsigned stride, unsigned col
     unsigned rows, unsigned scale)
 {
     if (!address || stride < 2560 || stride > 65536 || columns < 32 || columns > 100 ||
-        rows < 6 || rows > 16 || (scale != 1 && scale != 2) || columns * 8 * scale * 4 > stride) return;
+        rows < 6 || rows > 32 || (scale != 1 && scale != 2) || columns * 8 * scale * 4 > stride) return;
     sheng_panic_panel.base = address;
     sheng_panic_panel.stride = stride;
     sheng_panic_panel.columns = columns;
@@ -156,7 +156,8 @@ void sheng_log_bind_panel(uintptr_t address, unsigned stride, unsigned columns,
     struct sheng_log_record *r = &sheng_log_buffer;
     uint32_t expected = 0;
     if (!address || stride < 2560 || stride > 65536 || columns < 32 || columns > 100 ||
-        (rows < 6 || rows > 24) || (scale != 1 && scale != 2) || columns * 8 * scale * 4 > stride ||
+        /* 行数策略由 sheng_vm_trace() 决定（当前 40）；此处只过滤荒谬值，不要写成策略上限。 */
+        (rows < 6 || rows > 64) || (scale != 1 && scale != 2) || columns * 8 * scale * 4 > stride ||
         !__atomic_compare_exchange_n(&sheng_log_panel_writer, &expected, 1, 0,
                                     __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) return;
     uint8_t history[512];
