@@ -1,0 +1,23 @@
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -3045,7 +3045,19 @@
+ 	sleh_interrupt_handler_prologue(state, DBG_INTR_TYPE_OTHER);
+ 
+ #if USE_APPLEARMSMP
+-	PE_handle_ext_interrupt();
++	/* nabu has no Apple AIC: PassthruInterruptController::child_handler is only
++	 * assigned when an interrupt is registered *through* it, and ArmCpu registers
++	 * with its own IOCPUInterruptController.  Prefer the per-CPU handler that
++	 * ml_install_interrupt_handler() recorded, and keep the Apple path as fallback.
++	 */
++	if (__improbable(cdp->interrupt_handler != NULL)) {
++		cdp->interrupt_handler(cdp->interrupt_target,
++		    cdp->interrupt_refCon,
++		    cdp->interrupt_nub,
++		    cdp->interrupt_source);
++	} else {
++		PE_handle_ext_interrupt();
++	}
+ #else
+ 	/* Run the registered interrupt handler. */
+ 	cdp->interrupt_handler(cdp->interrupt_target,
