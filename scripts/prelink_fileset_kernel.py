@@ -238,7 +238,12 @@ def insert_extra_sections(output, native, native_segments, text_args, info_args)
 # can only arrive inside the fileset image, so an image built without it dies before
 # the root device is ever looked for.  Keep the requirement explicit here instead of
 # relying on every caller remembering a fifth --root.
-REQUIRED_COMPONENTS = ('com.apple.kec.pthread',)
+REQUIRED_COMPONENTS = (
+    'com.apple.kec.pthread',
+    # /sbin/launchd is stored with decmpfs type 4; without the zlib provider the
+    # kernel returns ENOTSUP (45) from decmpfs.c and PID 1 dies in kern_exec.c.
+    'com.apple.AppleFSCompression.AppleFSCompressionTypeZlib',
+)
 
 
 def main():

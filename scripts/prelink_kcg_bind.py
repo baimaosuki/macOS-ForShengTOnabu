@@ -79,9 +79,15 @@ DEFAULT_ROOTS = (
     # bsd_init() -> pthread_init() panics with a NULL shim table when this kext is
     # absent, so it is a hard part of the boot set and not an optional extra.
     'com.apple.kec.pthread',
+    # decmpfs type 4 (zlib) provider: launchd and friends are compressed with it,
+    # and the read path answers ENOTSUP without a registered decompressor.
+    'com.apple.AppleFSCompression.AppleFSCompressionTypeZlib',
 )
 
-REQUIRED_ROOTS = ('com.apple.kec.pthread',)
+REQUIRED_ROOTS = (
+    'com.apple.kec.pthread',
+    'com.apple.AppleFSCompression.AppleFSCompressionTypeZlib',
+)
 
 
 class Refused(Exception):
