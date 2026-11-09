@@ -304,10 +304,21 @@ def resign(path: Path) -> dict:
         result = run('codesign', '--force', '--sign', '-', '--timestamp=none', path, check=False)
         fallback = 'plain ad-hoc (preserve-metadata rejected)'
     verify = run('codesign', '--verify', '--verbose=2', path, check=False)
+    details = run('codesign', '-d', '--verbose=4', path, check=False)
+    text = details.stderr or details.stdout
+    evidence = {}
+    for line in text.splitlines():
+        for key in ('Identifier', 'TeamIdentifier', 'Authority', 'CDHash', 'Flags',
+                    'CandidateCDHash', 'Sealed Resources'):
+            if line.startswith(key + '='):
+                evidence.setdefault(key, []).append(line.split('=', 1)[1])
     return dict(returncode=result.returncode, fallback=fallback,
                 output=(result.stdout + result.stderr).strip()[:400],
                 verify_ok=verify.returncode == 0,
-                verify_output=(verify.stdout + verify.stderr).strip()[:400])
+                verify_output=(verify.stdout + verify.stderr).strip()[:400],
+                signature=evidence,
+                adhoc_only=not evidence.get('Authority'),
+                platform_identity=False)
 
 
 def main() -> int:
