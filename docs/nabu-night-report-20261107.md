@@ -168,6 +168,13 @@ cpusubtype 低字节 0（arm64，不触发 ARM64E 的 EL1 PAC 检查）
 不修的后果：ADT 只描述 1 个 CPU，XNU 拿 `cpus=8` 会等不存在的从核；`native-ufs-root=1`
 会让内核在没有 UFS 节点的情况下找根设备。两者都会让首启表现成“卡死”而不是给出诊断。
 
+> **2026-11-09 更正：适用范围。** 上表"已改 `cpus=1`，去 UFS 根与 t733"只对 **fastboot 直载路线**
+> 成立——`platform/nabu/macos26/boot/nabu_darwinboot_fastboot.c:318` 现在是
+> `-v debug=0x14e keepsyms=1 cpus=1 armcpu-self-ipi=1 nabu-vc-scale=2 nabu-source-text=1`。
+> 当前实际迭代走的是 **ESP + UniXNU 路线**，其 boot-args 来自
+> `platform/nabu/macos26/esp/EFI/UniXNU/unixnu.toml`，**仍是 `cpus=8` + `native-ufs-root=1`
+> + `t733-managed-rt-normal=1`**。两条路线的 boot-args 不共享，改动勿混。
+
 ### 8.1 重打后的镜像
 
 ```

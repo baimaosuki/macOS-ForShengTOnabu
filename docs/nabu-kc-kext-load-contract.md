@@ -211,8 +211,15 @@ else if (amfi->TrustCache.version < 2) panic("amfi interface is stale: %u", ...)
 - `amfi` 同理：`libkern/libkern/amfi/amfi.h:312`（`extern const amfi_t * amfi;`）、
   `:321-333`（`amfi_interface_register`）。
 
-**这两个寄存器只能由那两个 kext 的 `_start` 写。** 于是当前"0 个预链接 kext"必然在此 panic
-（`[repo]docs/nabu-kernel-bringup-lessons.md:157` 已记录该边界）。
+**这两个寄存器只能由那两个 kext 的 `_start` 写。** 所以在"0 个预链接 kext"的镜像上，
+走到这里必然 panic。
+
+> **2026-11-09 更正**：该前提已不成立——镜像现在带预链接 kext，pointer slots 26,504 个、
+> 其中 13,358 个指向拷贝集合外（12,940 `__TEXT_EXEC` / 336 `__DATA` / 82 `__DATA_CONST`）
+> 均已按常量 slide `0x2000000` 重绑，跨模块 `BL` 重编码 19,860 处。
+> 而且执行根本还没走到这里：当前实机停在 **stage 2 `IOKit entry`** 且是死等（非 panic）。
+> 原先引用的 `nabu-kernel-bringup-lessons.md:157`「当前边界」一节已作废，
+> 线性现状见 [`docs/nabu-20261109-status.md`](nabu-20261109-status.md)。
 
 ### 1.7 内存/pmap 契约
 

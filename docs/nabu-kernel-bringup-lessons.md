@@ -144,19 +144,36 @@ HMP `pmemsave` 拒绝绝对路径（`invalid char 't' in expression`），给相
 
 1. 本地或 CI 产出内核 → 记录 md5
 2. `fastboot boot recovery-win.img`（失败先查槽位）→ 等 `adb devices`
+   —— 该文件是 **TWRP 临时 recovery**，不是本项目构建的镜像，也不是 ESP 备份；
+   它的唯一作用是把 `/esp` 挂起来做 `adb push`/`md5sum`
 3. `adb push` 到 `/esp/EFI/UniXNU/Payloads/kernel.macho`
 4. `adb shell md5sum` 核对，与第 1 步一致再 `sync`
 5. ADT 有改动则同法核对 `kernel.macho.adt`，并先跑 `audit_adt.py`
 6. `adb reboot`，拍屏幕，读 `ELR/ESR/FAR` 和 STAGES 带
 7. 记录：哪条指令、哪个符号偏移、源码哪一行
 
-## 当前边界
+## 当前边界（2026-11-09 修订）
 
-- 内核已过：引导汇编 → MMU → `arm_vm_init` → 控制台 → SMP 8 核 → `bsd_init` 前半段
-  （NVRAM、swap、lockdown、amfi_policy、vmguard、dtrace 全绿）
-- 卡在 `trust_cache_init`：`img4if`/`amfi` 只能由 `AppleImage4` 与 `AMFI` kext 注册，
-  而当前镜像是 **0 个预链接 kext**
-- 因此真正的下一关是 prelink stage 2（指针重绑定），不是继续在源码里放行断言
+> 下面这段是 **2026-11-07 的判断，已被推翻**，保留作为历史记录。
+> 线性现状见 [`docs/nabu-20261109-status.md`](nabu-20261109-status.md)。
+
+~~内核已过：引导汇编 → MMU → `arm_vm_init` → 控制台 → SMP 8 核 → `bsd_init` 前半段~~
+~~卡在 `trust_cache_init`：… 当前镜像是 0 个预链接 kext~~
+~~因此真正的下一关是 prelink stage 2（指针重绑定）~~
+
+三点更正：
+
+1. **stage 2（指针重绑定）已经做完**，不再是待办：拷贝区间内 26,504 个指针槽，
+   其中 13,358 个指向集合外（12,940 → `__TEXT_EXEC`，336 → `__DATA`，82 → `__DATA_CONST`）
+   已按常量 slide `0x2000000` 重绑；跨模块 `BL` 重编码 19,860 处；`ADRP` 保持 0 处修改。
+2. **当前卡点不是 `trust_cache_init`**，而是更早的 **stage 2 `IOKit entry`**：屏显启动条
+   `BOOT [###-------]`（mask = `1<<0 | 1<<1 | 1<<2`），且是死等而非 panic，所以不出现二维码。
+3. **"点不亮"的两个真因是引导器契约，不是内核源码**：`unixnu.toml` 缺根级
+   `[[driver]]`（→ `Config->DriverCount == 0` → `xnu: no loader protocol installed` →
+   `EFI_UNSUPPORTED`，内核一个字节都没被读），以及 ADT 缺 `/chosen/memory-map` 的
+   16 字节 `RAMDisk` 属性。两条都写进了 `docs/nabu-20261109-status.md` §3。
+4. **"SMP 8 核"这条也待复验**：ADT 的 `/cpus` 只有 1 个 CPU 节点（`/cpus/cpu@0`），
+   而 toml 的 `cpus=8` 尚未收敛，已按单变量在做 `cpus=1` 试验。
 
 ## 规则八：ARMv8.2 缺失的加密指令必须在同步异常里就地仿真，不能等它 panic
 

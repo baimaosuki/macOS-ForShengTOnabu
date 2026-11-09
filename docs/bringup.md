@@ -125,6 +125,12 @@ python3 scripts/build_macos26_xnu.py --arch arm64e --link-kernel \
 | Android userdata | 重建后的 Android 数据分区 |
 
 当前设备使用临时 `fastboot boot` 加载候选。执行前核对候选身份、活动槽和可启动状态。
+
+> **nabu 实况（2026-11-09）**：nabu 走的是 **ESP + rEFInd + UniXNU** 路线，
+> `fastboot boot` 的 NRAM 直载只是旁路。ESP 是**独立 GPT 分区**（`/dev/block/sda31`，
+> 300 MiB），不是 boot.img 内嵌的 FAT；`Payloads/kernel.macho` 就落在该分区上，
+> 热替换靠 `fastboot boot recovery-win.img`（TWRP）挂载后 `adb push`。
+> 详见 [`docs/nabu-20261109-status.md`](nabu-20261109-status.md) §5。
 `Booting OKAY` 表示 ABL 接受启动交接；内核和服务是否执行，由屏幕及日志确认。
 该流程不要求刷写 boot、Recovery 或厂商固件分区。
 

@@ -5,3 +5,7 @@ macOS-ForSheng 是面向小米平板 6S Pro（sheng / SM8550）的原生 macOS �
 项目通过 UEFI、DarwinBoot 和自构建 SHENG EL1 内核加载系统，硬件适配参考 UniXNU，组件与显示实现参考 Snapintosh 和 DroidVM。
 
 项目当前仍处于实验阶段。已验证功能、当前阻断和实机测试结果见[移植状态](docs/status.md)。
+
+- sheng（SM8550）：[移植状态](docs/status.md)
+- nabu（SM8150-AC）：[引导现状 2026-11-09](docs/nabu-20261109-status.md)
+
