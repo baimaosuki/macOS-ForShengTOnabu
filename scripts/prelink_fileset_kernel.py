@@ -87,10 +87,11 @@ def segments(data, image):
         for _ in range(nsects):
             sectname, segname, addr, size, file_offset = struct.unpack_from(
                 '<16s16sQQI', data, cursor)
+            flags = struct.unpack_from('<I', data, cursor + 64)[0]
             sections.append(dict(name=sectname.rstrip(b'\x00').decode(),
                                  segment=segname.rstrip(b'\x00').decode(),
                                  addr=addr, size=size, offset=file_offset,
-                                 command_offset=cursor))
+                                 flags=flags, command_offset=cursor))
             cursor += 80
         result.append(dict(name=name.rstrip(b'\x00').decode(), vmaddr=vmaddr, vmsize=vmsize,
                            fileoff=fileoff, filesize=filesize, initprot=initprot,
@@ -109,6 +110,115 @@ def fileset(data, top):
         result.append(dict(entry_id=data[offset + entry_id_offset:end].decode(),
                            vmaddr=vmaddr, fileoff=fileoff))
     return result
+
+# --- instruction provenance -------------------------------------------------
+# A constant table can live inside __TEXT_EXEC, so the four bytes of a B/BL
+# encoding are not evidence of an instruction: SHA-256 K[31] = 0x14292967 has
+# opcode 0x14000000, and a scan that rewrites every such word turns that data
+# into a branch and corrupts every digest the kernel computes.  Candidates here
+# come from a recursive-descent walk over the kext, so literal pools are only
+# reachable if real code branches into them.
+S_ATTR_PURE_INSTRUCTIONS = 0x80000000
+S_ATTR_SOME_INSTRUCTIONS = 0x00000400
+
+NON_RETURNING_BRANCHES = ('b', 'br', 'ret', 'braa', 'braaz', 'retaa')
+
+
+def sign_extend(value, bits):
+    return value - (1 << bits) if value >> (bits - 1) else value
+
+
+def instruction_class(word):
+    """Branch class for the A64 encodings the walk follows, else None."""
+    if word & 0xFC000000 == 0x14000000:
+        return 'b'
+    if word & 0xFC000000 == 0x94000000:
+        return 'bl'
+    if word & 0xFF000010 == 0x54000000:
+        return 'bcond'
+    if word & 0x7E000000 == 0x34000000:
+        return 'cbz'
+    if word & 0x7E000000 == 0x36000000:
+        return 'tbz'
+    if word in (0xD61F081F, 0xD61F0C1F):
+        return 'braaz'
+    if word in (0xD63F081F, 0xD63F0C1F):
+        return 'blraaz'
+    if word & 0xFFFFFC00 in (0xD71F0800, 0xD71F0C00):
+        return 'braa'
+    if word & 0xFFFFFC00 in (0xD73F0800, 0xD73F0C00):
+        return 'blraa'
+    if word in (0xD65F0BFF, 0xD65F0FFF):
+        return 'retaa'
+    if word & 0xFFFFFC1F == 0xD61F0000:
+        return 'br'
+    if word & 0xFFFFFC1F == 0xD63F0000:
+        return 'blr'
+    if word & 0xFFFFFC1F == 0xD65F0000:
+        return 'ret'
+    return None
+
+
+def relative_target(word, site):
+    """Absolute target for the PC-relative branch forms, else None."""
+    if word & 0xFC000000 in (0x14000000, 0x94000000):
+        return site + sign_extend(word & 0x03FFFFFF, 26) * 4
+    if word & 0xFF000010 == 0x54000000:
+        return site + sign_extend((word >> 5) & 0x7FFFF, 19) * 4
+    if word & 0x7E000000 == 0x34000000:
+        return site + sign_extend((word >> 5) & 0x7FFFF, 19) * 4
+    if word & 0x7E000000 == 0x36000000:
+        return site + sign_extend((word >> 5) & 0x3FFF, 14) * 4
+    return None
+
+
+def code_spans(image_segments):
+    """[(start, end)] for sections the image itself marks as code."""
+    spans = []
+    for segment in image_segments:
+        for section in segment['sections']:
+            if not section['size']:
+                continue
+            flags = section.get('flags', 0)
+            if not flags & (S_ATTR_PURE_INSTRUCTIONS | S_ATTR_SOME_INSTRUCTIONS):
+                continue
+            spans.append((section['addr'], section['addr'] + section['size']))
+    return spans
+
+
+def instruction_sites(data, image_segments, image_base, file_base, seeds):
+    """VAs the recursive-descent walk proves are instruction starts.
+
+    `image_base`/`file_base` map a component VA to its offset inside the kernel
+    collection, because a fileset entry stores segment file offsets relative to
+    the component, not to the collection.
+    """
+    spans = code_spans(image_segments)
+    if not spans:
+        return set(), spans
+
+    def inside(va):
+        return any(start <= va < end for start, end in spans)
+
+    seen, pending = set(), [va for va in seeds if inside(va)]
+    while pending:
+        va = pending.pop()
+        while True:
+            if va in seen or not inside(va):
+                break
+            at = file_base + (va - image_base)
+            if at < 0 or at + 4 > len(data):
+                break
+            word = struct.unpack_from('<I', data, at)[0]
+            seen.add(va)
+            target = relative_target(word, va)
+            if target is not None and inside(target) and target not in seen:
+                pending.append(target)
+            if instruction_class(word) in NON_RETURNING_BRANCHES:
+                break
+            va += 4
+    return seen, spans
+
 
 
 def fixup_slots(data, image, segs):
@@ -258,6 +368,14 @@ def main():
                         help='emit an image without this required component (repeatable)')
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--report', required=True, type=Path)
+    parser.add_argument('--allow-unresolved-branches', action='store_true',
+                        help='record, but do not fail on, branch sites that cannot be'
+                             ' mapped with evidence; the list lands in the report'
+                             ' so a boot test can state exactly what is still missing')
+    parser.add_argument('--branch-manifest', type=Path, action='append',
+                        help='JSON list of {component, site, dest, reason}'
+                             ' branch sites verified by hand; non-exact'
+                             ' bindings outside this list fail the build')
     parser.add_argument('--base', type=lambda v: int(v, 0), default=None,
                         help='virtual address of the first emitted coalesced segment')
     parser.add_argument('--slide', type=lambda v: int(v, 0), default=0x2000000,
@@ -441,19 +559,39 @@ def main():
     external_unresolved = []
     external_mismatch = []
 
+    native_text_spans = [(s['vmaddr'], s['vmaddr'] + s['vmsize'])
+                         for s in native_segments
+                         if s['name'] in ('__TEXT', '__TEXT_EXEC') and s['vmsize']]
+
+    def in_native_text(va):
+        return any(a <= va < b for a, b in native_text_spans)
+
     def bind_kernel(apple_va):
-        """Apple kernel VA -> our kernel VA, by symbol name (exact first)."""
+        """Apple kernel VA -> our kernel VA, with the evidence kept explicit.
+
+        The exact form binds by name. The offset form is only used when the
+        target provably stays inside the same Apple function and the result
+        provably lands in our kernel's code; otherwise it reports failure instead
+        of inventing an address.
+        """
+        import bisect as _bisect
         names = apple_symbols.names_at(apple_va)
         present = sorted(n for n in names if n in kernel_symbols.by_name)
         if present:
             return kernel_symbols.by_name[present[0]], present[0], True
         nearest = apple_symbols.nearest_below(apple_va)
         if nearest is not None:
-            near_names = sorted(n for n in apple_symbols.names_at(nearest)
-                                if n in kernel_symbols.by_name)
-            if near_names:
-                return (kernel_symbols.by_name[near_names[0]] + (apple_va - nearest),
-                        near_names[0], False)
+            addresses = apple_symbols.sorted_addresses
+            index = _bisect.bisect_right(addresses, nearest)
+            next_symbol = addresses[index] if index < len(addresses) else None
+            if next_symbol is None or apple_va < next_symbol:
+                near_names = sorted(n for n in apple_symbols.names_at(nearest)
+                                    if n in kernel_symbols.by_name)
+                if near_names:
+                    delta = apple_va - nearest
+                    mapped = kernel_symbols.by_name[near_names[0]] + delta
+                    if in_native_text(mapped):
+                        return mapped, near_names[0], False
         return None, (sorted(names)[0] if names else None), False
 
     chain = kc_chains.chain_header(kc, top['commands'])
@@ -491,7 +629,7 @@ def main():
     for offset, value, _ in rewrites:
         struct.pack_into('<Q', output, offset, value)
 
-    # --- direct BL/B leaving the placed components (kext -> Apple kernel text) ---
+    # --- direct B/BL leaving the placed components (kext -> Apple kernel text) ---
     # Uniform Slide keeps intra-container PC-relative branches exact, but a branch
     # into the Apple kernel's own text must be rerouted to the same symbol in our
     # native kernel: its target did not move with us while the CPU adds our slide to
@@ -510,27 +648,90 @@ def main():
     def in_spans(va, spans):
         return any(a <= va < b for a, b in spans)
 
-    branch_kernel = branch_skipped = branch_outside = 0
-    branch_unresolved = []
+    proven_cache = {}
+
+    def proven_sites(component):
+        """Instruction starts proven by recursive descent in this kext."""
+        if component not in proven_cache:
+            module = modules[component]
+            seeds = list(pkb.read_function_starts(kc, module['image'], module['segments']))
+            for _name, ntype, value in pkb.read_symtab(kc, module['image']):
+                if value and (ntype & 0x0E) == 0x0E and not (ntype & 0xE0):
+                    seeds.append(value)
+            proven_cache[component] = instruction_sites(
+                kc, module['segments'], module['vmaddr'], module['fileoff'], seeds)
+        return proven_cache[component]
+
+    manifest = {}
+    for item in getattr(args, 'branch_manifest', None) or []:
+        for record in json.loads(Path(item).read_text()):
+            manifest[(record['component'], int(record['site'], 0))] = record.get('reason', '')
+
+    # Diagnostic: how many B/BL-shaped words live in __TEXT_EXEC but are not
+    # proven instructions. Those are data (constant tables, literal pools) and
+    # must never be rewritten; the count keeps that set visible in the report.
+    unproven = []
     for record in ranges:
         if record['segment'] != '__TEXT_EXEC':
             continue
-        for i in range(0, record['size'] - 3, 4):
-            word = struct.unpack_from('<I', output, record['new_off'] + i)[0]
+        proven, _spans = proven_sites(record['component'])
+        for word_index in range(0, record['size'] - 3, 4):
+            site_orig = record['old_va'] + word_index
+            if site_orig in proven:
+                continue
+            word = struct.unpack_from('<I', output, record['new_off'] + word_index)[0]
+            if word & 0xFC000000 in (0x94000000, 0x14000000):
+                unproven.append((record['component'], site_orig, word))
+    # Of those data words, the ones whose target happens to bind inside kernel
+    # text are exactly what the old encoding-only scan rewrote: the corrupted set.
+    corrupted = []
+    for component, va, word in unproven:
+        imm = word & 0x03FFFFFF
+        if imm & 0x02000000:
+            imm -= 0x04000000
+        dest = va + imm * 4
+        if any(r['old_va'] <= dest < r['old_va'] + r['size'] for r in ranges):
+            continue
+        if not in_spans(dest, kernel_text):
+            continue
+        bound, sym, _exact = bind_kernel(dest)
+        if bound is None or not in_spans(bound, native_text):
+            continue
+        corrupted.append((component, va, word, dest, sym))
+    print('  unproven B/BL-shaped words in __TEXT_EXEC: %d (data, never rewritten)'
+          % len(unproven))
+    print('  data words the old scan would have rewritten: %d' % len(corrupted))
+    unproven_sample = [(c, '%#x' % va, '%#010x' % w) for c, va, w in unproven[:8]]
+    corrupted_sample = [(c, '%#x' % va, '%#010x' % w, '%#x' % d, s)
+                        for c, va, w, d, s in corrupted[:8]]
+
+    branch_before = bytes(output)
+    branch_sites = []
+    branch_exact_flags = []
+    branch_kernel = branch_skipped = branch_outside = 0
+    branch_non_exact, branch_unresolved = [], []
+    for record in ranges:
+        if record['segment'] != '__TEXT_EXEC':
+            continue
+        proven, spans = proven_sites(record['component'])
+        for site_orig in sorted(proven):
+            if not (record['old_va'] <= site_orig < record['old_va'] + record['size'] - 3):
+                continue
+            at = record['new_off'] + (site_orig - record['old_va'])
+            word = struct.unpack_from('<I', output, at)[0]
             op = word & 0xFC000000
             if op not in (0x94000000, 0x14000000):
                 continue
             imm = word & 0x03FFFFFF
             if imm & 0x02000000:
                 imm -= 0x04000000
-            site_orig = record['old_va'] + i
             dest = site_orig + imm * 4
             if any(r['old_va'] <= dest < r['old_va'] + r['size'] for r in ranges):
                 branch_skipped += 1
                 continue
             if not in_spans(dest, kernel_text):
                 branch_outside += 1
-            site_new = record['new_va'] + i
+            site_new = record['new_va'] + (site_orig - record['old_va'])
             bound, sym, exact = bind_kernel(dest)
             if bound is None:
                 branch_unresolved.append((record['component'], site_orig, dest, sym))
@@ -539,17 +740,72 @@ def main():
                 branch_unresolved.append((record['component'], site_orig, dest,
                                           '%s->%#x' % (sym, bound)))
                 continue
+            if not exact and (record['component'], site_orig) not in manifest:
+                # Nearest-symbol + offset is not evidence: it maps any word that
+                # merely looks like a branch onto a plausible address. Such sites
+                # must be inspected and listed explicitly.
+                branch_non_exact.append((record['component'], site_orig, dest, sym))
+                continue
             delta = bound - site_new
             if delta % 4 or not (-(1 << 27) <= delta < (1 << 27)):
                 raise ValueError('branch %s:%#x -> %#x outside imm26 range'
                                  % (record['component'], site_orig, bound))
-            struct.pack_into('<I', output, record['new_off'] + i,
-                             op | ((delta >> 2) & 0x03FFFFFF))
+            new_word = op | ((delta >> 2) & 0x03FFFFFF)
+            struct.pack_into('<I', output, at, new_word)
+            branch_sites.append((at, word, new_word))
+            branch_exact_flags.append(exact)
             branch_kernel += 1
     print('  branch pass: %d rerouted, %d intra-component kept, %d outside kernel text,'
-          ' %d unresolved %s'
+          ' %d unresolved, %d non-exact refused'
           % (branch_kernel, branch_skipped, branch_outside, len(branch_unresolved),
-             [c for c, _, _, _ in branch_unresolved[:5]]))
+             len(branch_non_exact)))
+    if branch_unresolved:
+        print('   unresolved sample %s' % [c for c, _, _, _ in branch_unresolved[:5]])
+    if branch_non_exact:
+        for component, site, dest, sym in branch_non_exact[:8]:
+            nearest = apple_symbols.nearest_below(dest)
+            print('   non-exact %s @%#x -> %#x  sym=%s nearest=%#x off=%d'
+                  % (component, site, dest, sym, nearest or 0, dest - (nearest or dest)))
+    if branch_unresolved:
+        for component, site, dest, sym in branch_unresolved[:8]:
+            nearest = apple_symbols.nearest_below(dest)
+            print('   unresolved %s @%#x -> %#x  sym=%s nearest=%s in_kernel_text=%s'
+                  % (component, site, dest, sym, hex(nearest) if nearest else None,
+                     in_spans(dest, kernel_text)))
+    branch_refused = (
+        [dict(component=c, site='%#x' % site, target='%#x' % dest, symbol=sym,
+              kind='non-exact')
+         for c, site, dest, sym in branch_non_exact] +
+        [dict(component=c, site='%#x' % site, target='%#x' % dest, symbol=sym,
+              kind='unresolved')
+         for c, site, dest, sym in branch_unresolved])
+    if branch_refused and not args.allow_unresolved_branches:
+        raise SystemExit(
+            'branch pass refused %d non-exact and %d unresolved site(s); pass'
+            ' --allow-unresolved-branches to record them in the report instead of'
+            ' failing (they stay at their Apple address and will fault if executed)'
+            % (len(branch_non_exact), len(branch_unresolved)))
+    if branch_refused:
+        print('  WARNING: %d branch site(s) left at their Apple address:'
+              ' %s' % (len(branch_refused),
+                       [r['site'] for r in branch_refused[:6]]))
+
+    # Post-condition: the pass may only change words it recorded. A data word
+    # rewritten as a branch shows up here as a change with no recorded site.
+    changed = set()
+    for offset in range(0, len(branch_before) - 3, 4):
+        if branch_before[offset:offset + 4] != output[offset:offset + 4]:
+            changed.add(offset)
+    unrecorded = sorted(changed - {offset for offset, _, _ in branch_sites})
+    if unrecorded:
+        raise SystemExit('branch pass changed %d unrecorded word(s), first at %#x'
+                         % (len(unrecorded), unrecorded[0]))
+    print('  branch pass diff: %d word(s) changed, all recorded' % len(changed))
+    print('  unproven sample %s' % unproven_sample)
+    print('  corrupted-data sample %s' % corrupted_sample)
+    Path('/tmp/fix18/data_branch_words.json').write_text(json.dumps(
+        [dict(component=c, site='%#x' % va, word='%#010x' % w, target='%#x' % d, symbol=s)
+         for c, va, w, d, s in corrupted], indent=1))
 
     header_index, headers = [], []
     pending_macho_list = None
@@ -731,6 +987,19 @@ def main():
                          '(pass --allow-missing-required to override)'
                          % ', '.join(missing_required))
 
+    # Gate: no constant table may be left broken. The 4-byte branch scan used to
+    # rewrite SHA-256's K[31] into a branch, so every digest the kernel computed
+    # was wrong and correctly signed pages were rejected.
+    import audit_kernel_crypto
+    crypto = audit_kernel_crypto.audit(bytes(output))
+    broken = [item for item in crypto if item['status'] == 'BROKEN']
+    for item in crypto:
+        print('  crypto table %-10s %-7s %d copy/copies'
+              % (item['table'], item['status'], len(item['occurrences'])))
+    if broken:
+        raise SystemExit('image has broken constant table(s): %s'
+                         % ', '.join(item['table'] for item in broken))
+
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_bytes(bytes(output))
     report = dict(
@@ -759,6 +1028,15 @@ def main():
         external_unresolved=len(external_unresolved),
         external_unresolved_sample=[(hex(a), n) for a, n in external_unresolved[:12]],
         external_targets=dict(sorted(external.items(), key=lambda item: -item[1])[:8]),
+        branch_non_exact_refused=len(branch_non_exact),
+        branch_refused=branch_refused,
+        branch_internal_offset=sum(1 for flag in branch_exact_flags if not flag),
+        unproven_branch_words=len(unproven),
+        branch_data_words_refused=len(corrupted),
+        branch_data_words_sample=[(c, hex(va), '%#010x' % w) for c, va, w, _d, _s in corrupted[:12]],
+        branch_diff_words=len(changed),
+        crypto_tables=[dict(table=item['table'], status=item['status'],
+                            copies=len(item['occurrences'])) for item in crypto],
         stage='layout+rebind', pointers_rebound=True, loadable=False)
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(json.dumps(report, indent=2) + '\n')
