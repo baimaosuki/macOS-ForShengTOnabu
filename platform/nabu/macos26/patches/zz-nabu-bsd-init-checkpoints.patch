@@ -1,0 +1,68 @@
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -688,7 +688,7 @@
+ 	 *		happen after a credential has been associated with
+ 	 *		the kernel task.
+ 	 */
+-	bsd_init_kprintf("calling bsd_bufferinit\n");
++	printf("NABU-CHK bsd_bufferinit\n");
+ 	bsd_bufferinit();
+ 
+ 	/*
+@@ -698,7 +698,7 @@
+ 	IOKitInitializeTime();
+ 
+ 	/* Initialize the file systems. */
+-	bsd_init_kprintf("calling vfsinit\n");
++	printf("NABU-CHK vfsinit\n");
+ 	vfsinit();
+ 
+ #if CONFIG_PROC_UUID_POLICY
+@@ -804,7 +804,7 @@
+ 	bsd_init_kprintf("calling sysctl_mib_init\n");
+ 	sysctl_mib_init();
+ 
+-	bsd_init_kprintf("calling bsd_autoconf\n");
++	printf("NABU-CHK bsd_autoconf\n");
+ 	bsd_autoconf();
+ 
+ #if CONFIG_DTRACE
+@@ -818,7 +818,7 @@
+ 	 */
+ #include <loop.h>
+ #if NLOOP > 0
+-	bsd_init_kprintf("calling loopattach\n");
++	printf("NABU-CHK loopattach\n");
+ 	loopattach();                   /* XXX */
+ #endif
+ #if NGIF
+@@ -875,24 +875,24 @@
+ 	 * The the networking stack is now initialized so it is a good time to call
+ 	 * the clients that are waiting for the networking stack to be usable.
+ 	 */
+-	bsd_init_kprintf("calling net_init_run\n");
++	printf("NABU-CHK net_init_run\n");
+ 	net_init_run();
+ #endif /* NETWORKING */
+ 
+-	bsd_init_kprintf("calling inittodr\n");
++	printf("NABU-CHK inittodr\n");
+ 	inittodr(0);
+ 
+ 	/* Mount the root file system. */
+ 	while (TRUE) {
+ 		int err;
+ 
+-		bsd_init_kprintf("calling setconf\n");
++		printf("NABU-CHK setconf\n");
+ 		setconf();
+ #if CONFIG_NETBOOT
+ 		netboot = (mountroot == netboot_mountroot);
+ #endif
+ 
+-		bsd_init_kprintf("vfs_mountroot\n");
++		printf("NABU-CHK vfs_mountroot\n");
+ 		if (0 == (err = vfs_mountroot())) {
+ #if SHENG
+ 			sheng_boot_progress_start();
