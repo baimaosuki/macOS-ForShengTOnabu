@@ -1,0 +1,4 @@
+# Exceed GitHub's 100 MiB blob limit and the fork refuses LFS uploads.
+# Pinned by sha256 in NABU-ESP-MANIFEST.json; restore with fetch_payloads.py
+EFI/UniXNU/Payloads/kernel.macho
+EFI/UniXNU/Payloads/kernel.prev.macho

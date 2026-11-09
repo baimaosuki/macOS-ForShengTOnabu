@@ -1,0 +1,136 @@
+{
+  "role": "nabu macOS 26.5 ESP staging for the UniXNU route: rEFInd, UniXNU application, DarwinBoot loader, kernel collection and its paired device tree",
+  "flashing": false,
+  "source": "device /dev/block/sda31 (GPT partition 31, sectors 2654272-2731071, 300 MiB vfat), captured byte-for-byte",
+  "external_binaries": "kernel.macho (107 MiB) and kernel.prev.macho (28 MiB) exceed GitHub's 100 MiB blob limit and the fork refuses LFS uploads; they are pinned by hash and restored with fetch_payloads.py",
+  "files": [
+    {
+      "path": "EFI/Boot/bootaa64.efi",
+      "purpose": "rEFInd main boot loader at the UEFI default path \\EFI\\BOOT\\BOOTAA64.EFI; enumerates volumes and hands off to the UniXNU application",
+      "bytes": 256960,
+      "md5": "4d737362824dc9c32312180b5c721a31",
+      "sha256": "c563b52e4068d2e8a836c43b10465b4ea066ca7f3d1266107b6b11698270ee4c",
+      "storage": "git"
+    },
+    {
+      "path": "EFI/Boot/bootmgfw-orig.efi",
+      "purpose": "pristine Windows Boot Manager copy kept only for rollback; not used by the boot chain",
+      "bytes": 256960,
+      "md5": "4d737362824dc9c32312180b5c721a31",
+      "sha256": "c563b52e4068d2e8a836c43b10465b4ea066ca7f3d1266107b6b11698270ee4c",
+      "storage": "git"
+    },
+    {
+      "path": "EFI/Boot/refind.conf",
+      "purpose": "rEFInd configuration: menu entries, timeout, driver loading, UniXNU entry pointing at \\EFI\\UniXNU\\UniXNU.efi",
+      "bytes": 3263,
+      "md5": "e8dba7b35c44d5f48b74392049c5bb05",
+      "sha256": "e2e2a0a0893c15ca36d96da1dc7768a952339c18b5d93ca261a0c16fbf3b79ef",
+      "storage": "git"
+    },
+    {
+      "path": "EFI/Boot/refind.conf.bak",
+      "purpose": "previous refind.conf revision kept for rollback",
+      "bytes": 3233,
+      "md5": "e95934e05b4ae2d8cf6dd1c08355ba71",
+      "sha256": "a4893941209890fec5eb0cbbd16c0d1d630693741b77ddd1bd12732150b29cbe",
+      "storage": "git"
+    },
+    {
+      "path": "EFI/Boot/vars/PreviousBoot",
+      "purpose": "rEFInd runtime state recording the last booted entry; safe to delete",
+      "bytes": 198,
+      "md5": "50592315cfe68dce8a7a2d0b02d79ab9",
+      "sha256": "acdced92976a50e6e77bcd83d0f0538b5c54cbdb1ac5104b3547ee295aa00a29",
+      "storage": "git"
+    },
+    {
+      "path": "EFI/UniXNU/Drivers/DarwinBoot.efi",
+      "purpose": "DXE driver exposing UNIXNU_LOADER_PROTOCOL: reads <kernel>.adt, validates the 16-byte /chosen/memory-map slots (RAMDisk, TrustCache, GPUAddon), allocates the owned window, lays out Mach-O segments, fills DarwinBootArgs and jumps into XNU",
+      "bytes": 45056,
+      "md5": "3802c4bdf026e74b4a6d493e125769cd",
+      "sha256": "4ceb18422e446db521414416861fa838ccb843310df1b0483e8519c0f105932d",
+      "storage": "git"
+    },
+    {
+      "path": "EFI/UniXNU/Drivers/UniXNUDxe.efi",
+      "purpose": "UniXNU DXE support driver: protocol registration and injection helpers",
+      "bytes": 16384,
+      "md5": "e74b24889c57ab82547b60c05dc4b36e",
+      "sha256": "ecf6729ce8bb2582b1b81aefccf447e11622062c4c3fd8bf499f455f643ed8f8",
+      "storage": "git"
+    },
+    {
+      "path": "EFI/UniXNU/HelloPayload.efi",
+      "purpose": "smoke payload that only proves LoadImage/StartImage on the loader protocol works; not part of the boot chain",
+      "bytes": 20480,
+      "md5": "01aab0a5547cd02181faa9cdca3028aa",
+      "sha256": "c3b2f683440f1db7aacb356938bde594d3dff06f288fd0f22012297aa340d884",
+      "storage": "git"
+    },
+    {
+      "path": "EFI/UniXNU/Payloads/kernel.macho",
+      "purpose": "current boot kernel: fileset kernel collection produced by the Uniform Slide emitter (uniform15); DarwinBoot places it at window + (vmaddr - min_va)",
+      "bytes": 112390144,
+      "md5": "6c8fa3b38a9d47b2b1ff545a4e945f4e",
+      "sha256": "16ced8e2796cc5b217aefb25483bcdcaf51ef873460147e8f876831191dff872",
+      "storage": "external"
+    },
+    {
+      "path": "EFI/UniXNU/Payloads/kernel.macho.adt",
+      "purpose": "device tree paired with kernel.macho: /chosen/memory-map, darwinboot-memory-size = 1 GiB, panic-log node and native text console state; generated with the two-step recipe",
+      "bytes": 11824,
+      "md5": "0ac51a29ce3b6220ae26934b71ca7ed9",
+      "sha256": "6bf9f5b593fac124fb22b36940d424979ece3cd299af90e53bee86e15d1f75bf",
+      "storage": "git"
+    },
+    {
+      "path": "EFI/UniXNU/Payloads/kernel.macho.adt.bak64",
+      "purpose": "historical ADT variant, not used by the boot chain",
+      "bytes": 11640,
+      "md5": "70e41cf89cf2b29347cb109f95d8aab5",
+      "sha256": "054b5b0d32a5233cadb82db0b4a8cee31157713b0f5c982a8afdd3f0bdde78ea",
+      "storage": "git"
+    },
+    {
+      "path": "EFI/UniXNU/Payloads/kernel.macho.adt.new11424",
+      "purpose": "historical ADT variant, not used by the boot chain",
+      "bytes": 11424,
+      "md5": "6e3c6e7f6d8d3519fa0562ce69f6474b",
+      "sha256": "0d262564d898aa6ec56d580c5a98295df372ecc29e5c679ce02411020a044c7b",
+      "storage": "git"
+    },
+    {
+      "path": "EFI/UniXNU/Payloads/kernel.prev.macho",
+      "purpose": "previous kernel revision kept for rollback; not part of the boot chain",
+      "bytes": 29949952,
+      "md5": "485cedc8a435be423908228671a4bb97",
+      "sha256": "85a978c2cdc2f9a72a837135c429cdc9c1bd2f54f7e466e2610d52f55b3775d2",
+      "storage": "external"
+    },
+    {
+      "path": "EFI/UniXNU/UniXNU.efi",
+      "purpose": "UEFI application: parses unixnu.toml, loads [[driver]] images, prepares the device tree, calls the loader protocol Boot() callback, owns the menu and countdown",
+      "bytes": 90112,
+      "md5": "c3ab70c73c11caaf0a2864b58fee34f3",
+      "sha256": "19e1b4fff9a7b3ceae42429940db0e2be0d2ff52275e5d730167722672d4bf4b",
+      "storage": "git"
+    },
+    {
+      "path": "EFI/UniXNU/unixnu.toml",
+      "purpose": "authoritative UniXNU configuration: [[driver]] path Drivers/DarwinBoot.efi and the 12 boot arguments required by the kernel/ADT pair",
+      "bytes": 524,
+      "md5": "1f3e874ed604f00a66711b98e1b91682",
+      "sha256": "58d31bf342302b69c6ce47d1b3749069ae67e44e10e493dfb838d22bf8deda00",
+      "storage": "git"
+    },
+    {
+      "path": "EFI/UniXNU/unixnu.toml.bak56",
+      "purpose": "previous configuration revision; lacks nabu-source-text=1",
+      "bytes": 502,
+      "md5": "9bc1664400ba670a41d84fae3c87d799",
+      "sha256": "17553f35e3f94711bf8933e6adcd28e0d7d6ebe3b587d384174e7605511dd4c9",
+      "storage": "git"
+    }
+  ]
+}

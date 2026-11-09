@@ -85,3 +85,26 @@ DarwinBoot 申请: 1 GiB 连续 conventional memory
   需通过 `XnuPrelink` 在 macOS 上执行。
 - 用户态 PAC 降级：`scripts/nabu_pac_strip.py` 已具备能力（arm64e Mach-O +
   format-7/8 chained fixups → ARMv8.2 无 PAC），待 BaseSystem 从 19.77 GB IPSW 解出后跑。
+
+## ESP 启动树（纳管，勿手改）
+
+ESP 上 UniXNU 链路的每一个文件都纳管在 `platform/nabu/macos26/esp/`，逐字节来自设备
+`/dev/block/sda31`（GPT 分区 31，扇区 2654272–2731071，300 MiB vfat）：
+
+- 每个文件的用途、来源、可否手工编辑：`esp/README.md`
+- 每个文件的字节数 / md5 / sha256 / purpose：`esp/NABU-ESP-MANIFEST.json`
+  （由 `esp/make_manifest.py` 生成，缺 purpose 直接失败）
+
+硬性纪律：
+
+1. 改 ESP 前先 `diff -r <设备>/EFI/UniXNU platform/nabu/macos26/esp/EFI/UniXNU`；
+2. 一次只动一个变量，其余保持逐字节不变；
+3. 本地 MD5 → 推设备 → 设备侧 MD5，两侧一致才算写入成功；
+4. 同步更新本目录并提交。
+
+两个已被事故验证的坑：
+
+- `unixnu.toml` 缺 `[[driver]]` → `Config->DriverCount == 0` → 没有 loader protocol
+  → UniXNU 立即返回 `EFI_ERROR`，内核一个字节都不会被读；
+- ADT 必须两步生成（`make_nabu_adt` + `configure_native_text_state`），只做第一步
+  会少约 140 字节文本控制台状态，内核在 `trust_cache_init` 之后挂。

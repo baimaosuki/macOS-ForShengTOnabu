@@ -1,0 +1,16 @@
+﻿version = 1
+
+[boot]
+timeout = 1
+default = "nabu-xnu"
+
+[[driver]]
+path = "Drivers/DarwinBoot.efi"
+
+[[entry]]
+id = "nabu-xnu"
+title = "NABU SM8150 - macOS 26.5 / 25F71"
+type = "xnu"
+path = "Payloads/kernel.macho"
+adt = "Payloads/kernel.macho.adt"
+args = "-v serial=3 cpus=8 nabu-log=1 nabu-source-text=1 nabu-gpu=1 native-ufs-root=1 native-ufs-os-lba=2739968 native-ufs-os-sectors=11718723 native-ufs-systemos-lba=4204809 native-ufs-systemos-sectors=6451200 armcpu-self-ipi=1 t733-managed-rt-normal=1 sheng-boot-progress=1"
