@@ -1,0 +1,43 @@
+--- a/iokit/Kernel/IOStartIOKit.cpp
++++ b/iokit/Kernel/IOStartIOKit.cpp
+@@ -67,6 +67,7 @@
+ SECURITY_READ_ONLY_LATE(static IOPlatformExpertDevice*) gRootNub;
+ 
+ #include <kern/clock.h>
++#include <mach/mach_time.h>
+ #include <sys/time.h>
+ 
+ void
+@@ -77,14 +78,32 @@
+ 	t.tv_sec = 30;
+ 	t.tv_nsec = 0;
+ 
++	printf("NABU-CHK timer t0=%llu\n", mach_absolute_time());
++	{
++		uint64_t daif, igrp, pmr, cntv, tval, cntp;
++		__asm__ volatile ("mrs %0, daif" : "=r" (daif));
++		__asm__ volatile ("mrs %0, icc_igrpen1_el1" : "=r" (igrp));
++		__asm__ volatile ("mrs %0, icc_pmr_el1" : "=r" (pmr));
++		__asm__ volatile ("mrs %0, cntv_ctl_el0" : "=r" (cntv));
++		__asm__ volatile ("mrs %0, cntv_tval_el0" : "=r" (tval));
++		__asm__ volatile ("mrs %0, cntp_ctl_el0" : "=r" (cntp));
++		printf("NABU-CHK irq pre daif=%#llx igrp=%#llx pmr=%#llx cntv=%#llx tval=%#llx cntp=%#llx\n",
++		    daif, igrp, pmr, cntv, tval, cntp);
++	}
++	IOSleep(1000);
++	printf("NABU-CHK timer t1=%llu\n", mach_absolute_time());
++	printf("NABU-CHK rtc wait enter\n");
+ 	IOService::waitForService(
+ 		IOService::resourceMatching("IORTC"), &t );
++	printf("NABU-CHK rtc wait done\n");
+ #if defined(__i386__) || defined(__x86_64__)
+ 	IOService::waitForService(
+ 		IOService::resourceMatching("IONVRAM"), &t );
+ #endif
+ 
++	printf("NABU-CHK clock init enter\n");
+ 	clock_initialize_calendar();
++	printf("NABU-CHK clock init done\n");
+ }
+ 
+ void
