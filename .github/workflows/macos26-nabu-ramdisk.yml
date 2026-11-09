@@ -1,0 +1,118 @@
+name: macos26-nabu-ramdisk
+
+# Builds a Nabu macOS root-ramdisk candidate on a macOS runner:
+#  * pulls only the ramdisk member out of the pinned restore IPSW with HTTP range requests
+#  * inventories the mounted APFS root (launchd, dyld, shared cache, system version)
+#  * translates /sbin/launchd and /usr/lib/dyld to arm64 instructions *and* arm64
+#    chained fixups, verified by an independent parser against the arm64e originals
+#  * ad-hoc re-signs the replacements, repacks DBRDISK1, then unpacks and re-mounts
+#    the artefact to prove the replaced files survived the round trip
+# The original root image is never destroyed: it is fetched fresh from Apple each run
+# and the produced container is delivered only as a CI artefact.
+
+on:
+  workflow_dispatch:
+    inputs:
+      match:
+        description: 'IPSW member name to extract (the ramdisk)'
+        default: '094-55986-095.dmg'
+      assets:
+        description: 'Comma separated in-image paths to translate and replace'
+        default: '/sbin/launchd,/usr/lib/dyld'
+      base_md5:
+        description: 'Expected md5 of the extracted APFS image (pin)'
+        default: '8fb39bbb3fca7f4af79f651d45575215'
+      keep_raw:
+        description: 'Keep the modified raw image in the artefact (large)'
+        default: 'false'
+
+concurrency:
+  group: macos26-nabu-ramdisk
+  cancel-in-progress: false
+
+jobs:
+  ramdisk:
+    runs-on: ${{ vars.MACOS_RUNNER || 'xcode-27' }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Host toolchain
+        run: |
+          set -euo pipefail
+          sw_vers
+          python3 -V
+          for tool in hdiutil codesign lipo plutil file; do
+            printf '%s -> %s\n' "$tool" "$(command -v "$tool" || echo MISSING)"
+          done
+
+      - name: Fetch the ramdisk member out of the pinned IPSW
+        run: |
+          set -euo pipefail
+          URL=$(python3 -c "import json;print(json.load(open('config/macos26.json'))['ipsw']['url'])")
+          echo "IPSW=$URL"
+          python3 scripts/fetch_ipsw_entry.py --url "$URL" --match "${{ inputs.match }}" \
+            --output "$RUNNER_TEMP/ramdisk.img4"
+          ls -l "$RUNNER_TEMP/ramdisk.img4"
+
+      - name: Strip the IMG4 wrapper and check the base image pin
+        run: |
+          set -euo pipefail
+          python3 scripts/strip_img4_payload.py "$RUNNER_TEMP/ramdisk.img4" "$RUNNER_TEMP/base.raw" \
+            --report "$RUNNER_TEMP/img4.json"
+          GOT=$(python3 -c "import json;print(json.load(open('$RUNNER_TEMP/img4.json'))['md5'])")
+          echo "base md5=$GOT expected=${{ inputs.base_md5 }}"
+          test "$GOT" = "${{ inputs.base_md5 }}" || { echo 'base image pin mismatch'; exit 1; }
+
+      - name: Build the userspace candidate
+        run: |
+          set -euo pipefail
+          ASSETS=$(python3 -c "import sys;print(' '.join(a for a in sys.argv[1].split(',') if a))" "${{ inputs.assets }}")
+          echo "assets: $ASSETS"
+          mkdir -p out/nabu-ramdisk
+          python3 scripts/build_ramdisk_userspace.py \
+            --base-raw "$RUNNER_TEMP/base.raw" \
+            --asset $ASSETS \
+            --work "$RUNNER_TEMP/work" \
+            --out out/nabu-ramdisk/nabu-root-userspace.packed \
+            --report out/nabu-ramdisk/build-report.json \
+            ${{ inputs.keep_raw == 'true' && '--keep-raw' || '' }}
+          ls -l out/nabu-ramdisk
+
+      - name: Summarise the candidate
+        if: always()
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, pathlib
+          report = pathlib.Path('out/nabu-ramdisk/build-report.json')
+          if not report.exists():
+              print('no build report')
+              raise SystemExit(0)
+          d = json.loads(report.read_text())
+          inv = d.get('inventory_before', {})
+          print('root files=%s bytes=%s' % (inv.get('total_files'), inv.get('total_bytes')))
+          print('system version:', (inv.get('system_version') or '').replace('\n', ' ')[:160])
+          for item in inv.get('interesting', []):
+              print('  %-40s %10s %s' % (item.get('relative'), item.get('size'),
+                                         item.get('architectures') or item.get('file')))
+          for entry in d.get('assets', []):
+              chains = entry['translation']['chained_fixups']['userland_chains']
+              print('asset %s -> instr=%s pointers=%s verified=%s md5=%s'
+                    % (entry['image_path'], entry['translation']['instructions_rewritten'],
+                       chains.get('converted'), entry['verification'].get('semantic_verified'),
+                       entry['arm64_md5']))
+          print('pack:', d.get('pack'))
+          print('roundtrip:', json.dumps(d.get('roundtrip', {}))[:600])
+          print('verdict:', d.get('verdict'))
+          PY
+
+      - name: Upload the candidate and its evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos26-nabu-root-userspace
+          path: |
+            out/nabu-ramdisk/*
+          if-no-files-found: warn
+          retention-days: 14

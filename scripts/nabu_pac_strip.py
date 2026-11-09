@@ -133,6 +133,8 @@ def rewrite_chained_fixups(image_buf: bytearray, parsed: dict, high8: int = 0xFF
         raise ValueError('unsupported chained fixup header for Nabu translation')
 
     count, = struct.unpack_from('<I', blob, starts)
+    image_base = next((seg['va'] for seg in parsed['segments'] if seg['name'] == '__TEXT'),
+                      min(seg['va'] for seg in parsed['segments']))
     pointers_total = 0
     auth_converted = 0
     chains_scanned = 0
@@ -147,28 +149,72 @@ def rewrite_chained_fixups(image_buf: bytearray, parsed: dict, high8: int = 0xFF
         pos = starts + relative
         span, page_size, fmt, _, _, pages = struct.unpack_from('<IHHQIH', blob, pos)
         if fmt in (9, 12):
-            # Userspace arm64e chains: bits are bind(63), auth(62), next(51..61);
-            # an auth rebase carries a 32-bit vm offset, not the kernel cache's
-            # 30-bit target, so the kernel-cache conversion below does not apply.
-            stats = {'auth_rebase': 0, 'bind': 0, 'rebase': 0}
+            # DYLD_CHAINED_PTR_ARM64E_USERLAND[24] (fixup-chains.h): auth is bit 63,
+            # bind is bit 62, next is bits 51..61 with an **8-byte** stride, and an
+            # unauthenticated rebase stores the vm offset from the image base while an
+            # authenticated rebase stores a 32-bit runtimeOffset.  Everything is
+            # rewritten to DYLD_CHAINED_PTR_64_OFFSET (format 6), which keeps the same
+            # "offset from image base" meaning but uses a 4-byte stride, so every next
+            # value has to be doubled to keep the chain at the same addresses.
+            stats = {'auth_rebase': 0, 'auth_bind': 0, 'rebase': 0, 'bind': 0,
+                     'converted': 0, 'verified': 0, 'stride_rescaled': 0}
             for page in range(pages):
                 start, = struct.unpack_from('<H', blob, pos + 22 + 2 * page)
                 if start == 0xFFFF:
                     continue
                 site = page * page_size + start
                 while True:
-                    raw, = struct.unpack_from('<Q', image_buf, segment['fileoff'] + site)
-                    if (raw >> 63) & 1:
-                        stats['bind'] += 1
-                    elif (raw >> 62) & 1:
-                        stats['auth_rebase'] += 1
-                    else:
-                        stats['rebase'] += 1
+                    file_pos = segment['fileoff'] + site
+                    raw, = struct.unpack_from('<Q', image_buf, file_pos)
+                    is_auth = (raw >> 63) & 1
+                    is_bind = (raw >> 62) & 1
                     following = (raw >> 51) & 0x7FF
+                    site_va = segment['va'] + site
+                    new_next = following * 2
+                    if new_next > 0xFFF:
+                        raise ValueError('chain stride at %#x overflows the 12-bit next field' % site_va)
+                    if new_next != following:
+                        stats['stride_rescaled'] += 1
+                    if is_bind:
+                        ordinal = (raw & 0xFFFFFF) if fmt == 12 else (raw & 0xFFFF)
+                        if is_auth:
+                            stats['auth_bind'] += 1
+                            addend = 0          # auth binds carry diversity/key, never an addend
+                        else:
+                            stats['bind'] += 1
+                            addend = (raw >> 32) & 0x7FFFF
+                            if addend & 0x40000:
+                                addend -= 0x80000
+                        if not -128 <= addend <= 127:
+                            raise ValueError(
+                                'bind addend %d at %#x does not fit the signed 8-bit addend of '
+                                'DYLD_CHAINED_PTR_64_BIND; refusing to truncate' % (addend, site_va))
+                        new_raw = ((1 << 63) | ((new_next & 0xFFF) << 51)
+                                   | ((addend & 0xFF) << 24) | (ordinal & 0xFFFFFF))
+                        check_add = (new_raw >> 24) & 0xFF
+                        if check_add & 0x80:
+                            check_add -= 0x100
+                        if ((new_raw >> 63) & 1) != 1 or (new_raw & 0xFFFFFF) != ordinal or check_add != addend:
+                            raise ValueError('bind %#x did not survive the rewrite' % site_va)
+                    else:
+                        offset = raw & (0xFFFFFFFF if is_auth else ((1 << 43) - 1))
+                        stats['auth_rebase' if is_auth else 'rebase'] += 1
+                        if offset >= 1 << 36:
+                            raise ValueError(
+                                'rebase offset %#x at %#x exceeds the 36-bit target field of '
+                                'DYLD_CHAINED_PTR_64_OFFSET' % (offset, site_va))
+                        new_raw = ((new_next & 0xFFF) << 51) | offset
+                        if ((new_raw >> 63) & 1) or (new_raw & ((1 << 36) - 1)) != offset:
+                            raise ValueError('rebase %#x did not survive the rewrite' % site_va)
+                    struct.pack_into('<Q', image_buf, file_pos, new_raw)
+                    stats['converted'] += 1
+                    stats['verified'] += 1
                     if not following:
                         break
-                    site += following * 4
-            userland['pointer_format'] = fmt
+                    site += following * 8
+            struct.pack_into('<H', image_buf, off + pos + 6, 6)
+            userland['pointer_format_before'] = fmt
+            userland['pointer_format_after'] = 6
             for key, value in stats.items():
                 userland[key] = userland.get(key, 0) + value
             continue
