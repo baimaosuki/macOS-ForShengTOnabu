@@ -1,0 +1,65 @@
+diff --git a/bsd/kern/bsd_init.c b/bsd/kern/bsd_init.c
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -690,6 +690,7 @@
+ 	 */
+ 	printf("NABU-CHK bsd_bufferinit\n");
+ 	bsd_bufferinit();
++	printf("NABU-CHK bsd_bufferinit done\n");
+ 
+ 	/*
+ 	 * Initialize the calendar.
+diff --git a/bsd/vfs/vfs_bio.c b/bsd/vfs/vfs_bio.c
+--- a/bsd/vfs/vfs_bio.c
++++ b/bsd/vfs/vfs_bio.c
+@@ -2388,14 +2388,17 @@
+ 
+ 	printf("using %d buffer headers and %d cluster IO buffer headers\n",
+ 	    nbuf_headers, niobuf_headers);
++	printf("NABU-CHK bufinit after-printf\n");
+ 
+ 	/* start the bcleanbuf() thread */
+ 	bcleanbuf_thread_init();
++	printf("NABU-CHK bcleanbuf thread ok\n");
+ 
+ 	/* Register a callout for relieving vm pressure */
+ 	if (vm_set_buffer_cleanup_callout(buffer_cache_gc) != KERN_SUCCESS) {
+ 		panic("Couldn't register buffer cache callout for vm pressure!");
+ 	}
++	printf("NABU-CHK buf gc callout ok\n");
+ }
+ 
+ /*
+diff --git a/iokit/Kernel/IOStartIOKit.cpp b/iokit/Kernel/IOStartIOKit.cpp
+--- a/iokit/Kernel/IOStartIOKit.cpp
++++ b/iokit/Kernel/IOStartIOKit.cpp
+@@ -67,6 +67,7 @@
+ SECURITY_READ_ONLY_LATE(static IOPlatformExpertDevice*) gRootNub;
+ 
+ #include <kern/clock.h>
++#include <mach/mach_time.h>
+ #include <sys/time.h>
+ 
+ void
+@@ -77,14 +78,21 @@
+ 	t.tv_sec = 30;
+ 	t.tv_nsec = 0;
+ 
++	printf("NABU-CHK timer t0=%llu\n", mach_absolute_time());
++	IOSleep(1000);
++	printf("NABU-CHK timer t1=%llu\n", mach_absolute_time());
++	printf("NABU-CHK rtc wait enter\n");
+ 	IOService::waitForService(
+ 		IOService::resourceMatching("IORTC"), &t );
++	printf("NABU-CHK rtc wait done\n");
+ #if defined(__i386__) || defined(__x86_64__)
+ 	IOService::waitForService(
+ 		IOService::resourceMatching("IONVRAM"), &t );
+ #endif
+ 
++	printf("NABU-CHK clock init enter\n");
+ 	clock_initialize_calendar();
++	printf("NABU-CHK clock init done\n");
+ }
+ 
+ void
