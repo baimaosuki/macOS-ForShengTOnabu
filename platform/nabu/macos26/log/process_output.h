@@ -24,7 +24,7 @@ static void sheng_process_output_text(struct proc *process, int fd, char text[16
         if ((unsigned char)text[i] < 32 || text[i] == 127)
             text[i] = ' ';
     text[count] = 0;
-    printf("SHENG: fd%d pid %d %s - %s%s\n", fd, proc_getpid(process),
+    printf("NABU: fd%d pid %d %s - %s%s\n", fd, proc_getpid(process),
         process->p_comm, text, truncated ? " [truncated]" : "");
 }
 

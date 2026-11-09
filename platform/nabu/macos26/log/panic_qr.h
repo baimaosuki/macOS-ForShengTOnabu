@@ -37,7 +37,7 @@ static int sheng_qr_prepare(const struct sheng_panic_qr_capture *capture, const 
         __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) return 0;
     sheng_qr_capture = *capture;
     unsigned used = 0;
-    sheng_qr_append(&used, "SHENG-PANIC-1\nUUID=");
+    sheng_qr_append(&used, "NABU-PANIC-1\nUUID=");
     for (unsigned i = 0; i < 16; i++) {
         if (i == 4 || i == 6 || i == 8 || i == 10) sheng_qr_append(&used, "-");
         sheng_qr_hex(&used, capture->uuid[i], 2);

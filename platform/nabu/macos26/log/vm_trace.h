@@ -66,7 +66,11 @@ sheng_vm_trace_begin(const boot_args *args)
             const uint64_t rows = available_rows > 32 ? (available_rows - 32) / 16 : 0;
             const uint64_t panic_rows = rows >= 12 ? (rows - 6 > 16 ? 16 : rows - 6) : 0;
             const uint64_t normal_rows = rows - panic_rows;
-            const uint64_t bounded_rows = normal_rows > 24 ? 24 : normal_rows;
+            /* 1600x2560 竖屏的实测几何：top=608、scale=2，
+             * available_rows=(2560-608)/2=976、rows=(976-32)/16=59、panic_rows=16，
+             * 于是 normal_rows=43。旧上限 24 白扔 19 行，前期 IOKit 注册输出被顶出屏幕。
+             * 取 40 行仍满足像素边界：608 + (32 + (40+16)*16) * 2 = 2464 <= 2560。 */
+            const uint64_t bounded_rows = normal_rows > 40 ? 40 : normal_rows;
             const uint64_t pixels = (32 + (bounded_rows + panic_rows) * 16) * scale;
             const uint64_t status_end = status + (pixels - 1) * stride + columns * 8 * scale * 4;
             if (video->v_width >= 224 + 44 * 8 * scale &&

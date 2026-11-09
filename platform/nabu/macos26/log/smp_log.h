@@ -19,7 +19,7 @@ static void sheng_smp_field(char *line, unsigned *n, const char *name, uint64_t 
 
 static void sheng_smp_emit(const char *line)
 {
-    const char *prefix = "\nSHENG-SMP: ";
+    const char *prefix = "\nNABU-SMP: ";
     while (*prefix) sheng_log_putc(*prefix++);
     for (unsigned n = 0; line[n] && n < 95; n++) sheng_log_putc(line[n]);
     sheng_log_putc('\n');

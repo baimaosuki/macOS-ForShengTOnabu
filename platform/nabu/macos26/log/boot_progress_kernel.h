@@ -54,7 +54,7 @@ static void sheng_boot_render(char lines[4][96])
 
 static void sheng_boot_emit(const char *text)
 {
-    const char *prefix = "\nSHENG-PROGRESS: ";
+    const char *prefix = "\nNABU-PROGRESS: ";
     while (*prefix) sheng_log_putc(*prefix++);
     for (unsigned i = 0; text[i] && i < 95; i++) sheng_log_putc(text[i]);
     sheng_log_putc('\n');

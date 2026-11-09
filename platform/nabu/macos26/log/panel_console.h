@@ -38,7 +38,7 @@ static void sheng_panic_panel_render(void)
         : sheng_panic_panel.columns;
     unsigned row = 0, column = 0;
     for (unsigned part = 0; part < 2; part++) {
-        const char *text = part ? sheng_first_panic_text : "SHENG - PANIC DETAIL\n";
+        const char *text = part ? sheng_first_panic_text : "NABU - PANIC DETAIL\n";
         for (unsigned n = 0; text[n] && n < 4095 && row < sheng_panic_panel.rows; n++) {
             const unsigned char c = (unsigned char)text[n];
             if (c == '\r') { column = 0; continue; }
@@ -79,8 +79,8 @@ static void sheng_status_render(const char *prefix, const char *message)
     uintptr_t white = 0;
     for (unsigned line = 0; line < 2; line++) {
         const char *text = line ? sheng_status_message :
-            (sheng_status_pinned == 2 ? "SHENG - FIRST EL1 SYNC" :
-             sheng_status_pinned ? "SHENG - FIRST PANIC" : "SHENG - BOOT LOG");
+            (sheng_status_pinned == 2 ? "NABU - FIRST EL1 SYNC" :
+             sheng_status_pinned ? "NABU - FIRST PANIC" : "NABU - BOOT LOG");
         unsigned col = 0;
         for (; col < 44; col++) {
             const unsigned char c = *text ? (unsigned char)*text++ : ' ';
@@ -110,7 +110,7 @@ out:
 void sheng_log_status(const char *message)
 {
     if (sheng_status_pinned) sheng_status_render("", sheng_status_message);
-    else sheng_status_render("SHENG: ", message);
+    else sheng_status_render("NABU: ", message);
 }
 
 static void sheng_status_panic(const char *message)

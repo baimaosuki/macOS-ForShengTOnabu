@@ -248,7 +248,7 @@ void sheng_log_stage(const char *message)
         if (n == sizeof(expected) - 1 && !message[n]) sheng_boot_checkpoint(2);
     }
     sheng_log_status(message);
-    const char *prefix = "\nSHENG: ";
+    const char *prefix = "\nNABU: ";
     while (*prefix) sheng_log_putc(*prefix++);
     for (unsigned n = 0; message && message[n] && n < 160; n++) sheng_log_putc(message[n]);
     sheng_log_putc('\n');
@@ -275,7 +275,7 @@ void sheng_log_begin(uint64_t physical_base, uint64_t virtual_base, const void *
         }
     }
     sheng_log_clean(r, 128);
-    const char *message = "\nSHENG-LOG: arm_init\n";
+    const char *message = "\nNABU-LOG: arm_init\n";
     while (*message) sheng_log_putc(*message++);
 }
 
@@ -333,7 +333,7 @@ void sheng_log_panic(uint64_t caller, const char *message)
         sheng_panic_panel_render();
     }
     {
-        const char *prefix = "\nSHENG-LOG: panic: ";
+        const char *prefix = "\nNABU-LOG: panic: ";
         while (*prefix) sheng_log_putc(*prefix++);
         for (unsigned n = 0; message && message[n] && n < 4095; n++)
             sheng_log_putc(message[n]);
