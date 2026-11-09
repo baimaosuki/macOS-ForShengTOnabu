@@ -175,6 +175,7 @@ def main() -> int:
     if sys.platform != 'darwin':
         raise SystemExit('this builder needs macOS (hdiutil, codesign)')
 
+    args.report.parent.mkdir(parents=True, exist_ok=True)
     work = args.work
     work.mkdir(parents=True, exist_ok=True)
     mountpoint = work / 'mnt'
