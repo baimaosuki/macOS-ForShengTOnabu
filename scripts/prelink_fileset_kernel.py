@@ -233,6 +233,14 @@ def insert_extra_sections(output, native, native_segments, text_args, info_args)
               % (entry_info['va'], info_blob_len, crypto_early_va, crypto_early_size))
 
 
+# bsd_init() calls pthread_init() unconditionally and that function panics when no
+# pthread kernel extension registered the shim table (pthread_shims.c:319).  The kext
+# can only arrive inside the fileset image, so an image built without it dies before
+# the root device is ever looked for.  Keep the requirement explicit here instead of
+# relying on every caller remembering a fifth --root.
+REQUIRED_COMPONENTS = ('com.apple.kec.pthread',)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--kernel', required=True, type=Path)
@@ -240,6 +248,9 @@ def main():
     parser.add_argument('--root', action='append', default=[])
     parser.add_argument('--all', action='store_true',
                         help='prelink every component declared by __PRELINK_INFO')
+    parser.add_argument('--allow-missing-required', action='append', default=[],
+                        metavar='IDENTIFIER',
+                        help='emit an image without this required component (repeatable)')
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--report', required=True, type=Path)
     parser.add_argument('--base', type=lambda v: int(v, 0), default=None,
@@ -707,6 +718,13 @@ def main():
 
     info_args = (info_seg, info_va + pointer_off, 8, pointer_off, pointer_off)
     insert_extra_sections(output, native, native_segments, pending_macho_list, info_args)
+
+    missing_required = [name for name in REQUIRED_COMPONENTS
+                        if name not in selected and name not in args.allow_missing_required]
+    if missing_required:
+        raise SystemExit('image would lack required component(s): %s '
+                         '(pass --allow-missing-required to override)'
+                         % ', '.join(missing_required))
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_bytes(bytes(output))

@@ -76,7 +76,12 @@ DEFAULT_ROOTS = (
     'com.apple.driver.AppleMobileFileIntegrity',
     'com.apple.filesystems.apfs',
     'com.apple.security.sandbox',
+    # bsd_init() -> pthread_init() panics with a NULL shim table when this kext is
+    # absent, so it is a hard part of the boot set and not an optional extra.
+    'com.apple.kec.pthread',
 )
+
+REQUIRED_ROOTS = ('com.apple.kec.pthread',)
 
 
 class Refused(Exception):
@@ -500,6 +505,10 @@ def run(args):
     declared = {e['CFBundleIdentifier']: e for e in metadata['_PrelinkInfoDictionary']}
 
     roots = list(args.root) if args.root else list(DEFAULT_ROOTS)
+    missing_required = [name for name in REQUIRED_ROOTS if name not in roots]
+    if missing_required:
+        raise Refused('required root(s) absent from the boot set: '
+                      + ', '.join(missing_required))
     selected, interfaces, missing = dependency_closure(declared, located, roots)
     if missing:
         raise ValueError('selected components without an image in the collection: %s'
