@@ -28,9 +28,12 @@ LOCAL = 0x04034B50
 def fetch(url: str, start: int, length: int) -> bytes:
     request = urllib.request.Request(url, headers={'Range': f'bytes={start}-{start + length - 1}'})
     with urllib.request.urlopen(request, timeout=120) as response:
+        status = response.status
+        content_range = response.headers.get('Content-Range')
         data = response.read()
     if len(data) != length:
-        raise SystemExit(f'short read at {start}: wanted {length}, got {len(data)}')
+        raise SystemExit(f'short read at {start}: wanted {length}, got {len(data)} '
+                         f'(status {status}, Content-Range {content_range})')
     return data
 
 
@@ -59,7 +62,8 @@ def find_eocd(url: str, size: int) -> int:
 def central_directory(url: str, size: int) -> tuple[list[dict], int]:
     eocd_at = find_eocd(url, size)
     head = fetch(url, eocd_at, 22)
-    _, disk, cd_disk, _, count, cd_size, cd_offset = struct.unpack('<IHHHHII', head)
+    print('EOCD at %d of %d' % (eocd_at, size))
+    _, disk, cd_disk, _, count, cd_size, cd_offset, comment_len = struct.unpack('<IHHHHIIH', head)
     if count == 0xFFFF or cd_offset == 0xFFFFFFFF or cd_size == 0xFFFFFFFF:
         locator = fetch(url, eocd_at - 20, 20)
         signature, _, zip64_at, _ = struct.unpack('<IIQI', locator)
@@ -111,7 +115,9 @@ def main() -> int:
 
     size = total_size(args.url)
     entries, cd_end = central_directory(args.url, size)
-    matches = [e for e in entries if args.match in e['name']]
+    matches = [e for e in entries if e['name'] == args.match]
+    if not matches:
+        matches = [e for e in entries if args.match in e['name']]
     for entry in matches:
         print('candidate %-40s method=%d compressed=%d uncompressed=%d'
               % (entry['name'], entry['method'], entry['compressed'], entry['uncompressed']))
