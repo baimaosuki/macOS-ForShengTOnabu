@@ -619,85 +619,56 @@ def run(args):
           % (coverage['distinct_external_targets'], coverage['exact_percent'],
              coverage['name_present_percent']))
 
-    # ---- layout: repacked band (sheng layout, NOT a uniform slide) -------
-    # SHENG's proven bring-up never preserves Apple's *inter-module* scatter:
-    # it moves the whole component block and re-encodes every cross-module
-    # branch by symbol name (docs/history/macos26-security-20261026.md).  That
-    # is also what keeps its image small.  Here the scatter is what makes our
-    # image pathological: the 11 components really occupy 3.95 MB, but Apple
-    # spreads them over 107 MB of the KC, so a uniform slide has to reserve an
-    # 84 MB band and an 82 MB boot image for 3.95 MB of kext code.
-    #
-    # So pack the parts of each group contiguously on a 16 KiB granule.  Each
-    # part keeps its internal byte layout untouched -- that intra-part
-    # isometry is the only relative-distance invariant that must survive,
-    # because mv() below translates every other address explicitly.
+    # ---- layout: uniform slide --------------------------------------------
     PART_ALIGN = 0x4000
-    L2_GRANULE = 0x200000
-    # Place the band ABOVE the kernel so that min(segment.vmaddr) == __TEXT
-    # and start_first_cpu runs with x18 == 0, exactly as on real Apple
-    # hardware (kc.mac13g boots this way).
     kernel_text = next(s for s in kernel_segments if s['name'] == '__TEXT')
-    # Apple's static region satisfies fileoff == vmaddr - image_base, and the
-    # loader reports topOfKernelData as physBase + image_size.  arm_vm_init then
-    # maps [end_kern, phystokv(topOfKernelData)); if a file offset lags its VA,
-    # end_kern overtakes topOfKernelData, that subtraction underflows and the
-    # tail of the band is left without page tables.  Every offset below is
-    # therefore derived from the VA, never from the append position.
     img_base = kernel_text['vmaddr']
-    kernel_end = max(s['vmaddr'] + s['vmsize'] for s in kernel_segments)
-    band_base = ((kernel_end + L2_GRANULE - 1) // L2_GRANULE) * L2_GRANULE
-
+    slide = getattr(args, 'slide', 0x2000000)
+    if slide % 4096:
+        raise ValueError('slide must be 4096-aligned: %#x' % slide)
 
     table_size = 8 * len([i for i in selected if components[i]['text'] is not None])
     placed_groups = {}
-    placed_parts = []          # (old_lo, old_hi, new_lo), sorted, backing mv()
-    cursor_va = band_base
+    placed_parts = []
+
     for group_name, component_name, prot in GROUPS:
+        kc_source_name = '__PRELINK_TEXT' if group_name == '__PRELINK_TEXT' else component_name
+        source = next((s for s in kc_segments if s['name'] == kc_source_name), None)
+        if source is None:
+            raise ValueError('kernel collection lacks source segment for %s' % group_name)
+
         parts = [segment for identifier in selected
                  for segment in components[identifier]['segments']
                  if segment['name'] == component_name and segment['filesize']]
         if not parts:
             continue
-        group_va = cursor_va
-        layout, offset = [], 0
+
+        group_va = source['vmaddr'] + slide
+        low = source['vmaddr']
+        file_high = source['filesize']
+        vm_high = source['vmsize']
+        blob = bytearray(file_high)
         for part in parts:
-            offset = align_up(offset, PART_ALIGN)
-            part['new_vmaddr'] = group_va + offset
-            part['group_offset'] = offset
-            placed_parts.append((part['vmaddr'], part['vmaddr'] + part['filesize'],
-                                 part['new_vmaddr']))
-            layout.append((offset, part))
-            offset += part['filesize']
-        text_span = offset
+            begin = part['vmaddr'] - low
+            part['new_vmaddr'] = group_va + begin
+            part['group_offset'] = begin
+            placed_parts.append((part['vmaddr'], part['vmaddr'] + part['filesize'], part['new_vmaddr']))
+            blob[begin:begin + part['filesize']] = kc[part['fileoff']:part['fileoff'] + part['filesize']]
+
         table_offset = None
         if group_name == '__PRELINK_TEXT':
-            # The sparse header index lives inside this segment, after __text.
-            table_offset = align_up(text_span, 8)
-            file_high = align_up(max(text_span, table_offset + table_size), PART_ALIGN)
-        else:
-            file_high = align_up(text_span, PART_ALIGN)
-        vm_high = file_high
-        blob = bytearray(vm_high)
-        for start, part in layout:
-            blob[start:start + part['filesize']] = \
-                kc[part['fileoff']:part['fileoff'] + part['filesize']]
-        placed_groups[group_name] = dict(
-            name=group_name, old_low=min(p['vmaddr'] for p in parts), vmaddr=group_va,
-            vmsize=vm_high, filesize=file_high, text_span=text_span, prot=prot,
-            blob=blob, parts=parts, fileoff=None, table_offset=table_offset)
-        cursor_va = group_va + vm_high
+            table_offset = (file_high - table_size) & ~7
 
-    # ---- sixth group: the shared __LINKEDIT -------------------------------
-    # All 11 components report the *same* __LINKEDIT (one KC-wide segment at
-    # 0xfffffe000c824000, 0x17050bc bytes), so it is copied exactly once.
-    # Keeping it is what lets every LINKEDIT-backed load command offset and the
-    # symbol table stay valid instead of being zeroed away.
+        placed_groups[group_name] = dict(
+            name=group_name, old_low=low, vmaddr=group_va,
+            vmsize=vm_high, filesize=file_high, text_span=file_high, prot=prot,
+            blob=blob, parts=parts, fileoff=None, table_offset=table_offset)
+
     shared_linkedit = next((s for s in kc_segments
                             if s['name'] == '__LINKEDIT' and s['filesize']), None)
     if shared_linkedit is not None and any(s['name'] == '__PLK_LINKEDIT'
                                           for s in kernel_segments):
-        link_va = align_up(cursor_va, PART_ALIGN)
+        link_va = shared_linkedit['vmaddr'] + slide
         link_part = dict(name='__LINKEDIT', vmaddr=shared_linkedit['vmaddr'],
                          vmsize=shared_linkedit['vmsize'],
                          filesize=shared_linkedit['filesize'],
@@ -707,40 +678,33 @@ def run(args):
         placed_parts.append((link_part['vmaddr'],
                              link_part['vmaddr'] + link_part['filesize'],
                              link_part['new_vmaddr']))
-        link_size = align_up(shared_linkedit['filesize'], PART_ALIGN)
-        link_blob = bytearray(link_size)
-        link_blob[0:shared_linkedit['filesize']] = kc[
-            shared_linkedit['fileoff']:shared_linkedit['fileoff']
-            + shared_linkedit['filesize']]
+        link_size = shared_linkedit['filesize']
+        link_blob = bytearray(kc[shared_linkedit['fileoff']:shared_linkedit['fileoff'] + shared_linkedit['filesize']])
         placed_groups['__PLK_LINKEDIT'] = dict(
             name='__PLK_LINKEDIT', old_low=shared_linkedit['vmaddr'], vmaddr=link_va,
-            vmsize=link_size, filesize=link_size,
-            text_span=shared_linkedit['filesize'], prot=1, blob=link_blob,
+            vmsize=shared_linkedit['vmsize'], filesize=link_size,
+            text_span=link_size, prot=1, blob=link_blob,
             parts=[link_part], fileoff=None, table_offset=None)
-        # Later passes (publishing, placeholder replacement, pointer hosts)
-        # iterate GROUPS, so the sixth group has to be visible to them.
         globals()['GROUPS'] = GROUPS + (('__PLK_LINKEDIT', '__LINKEDIT', 1),)
-        cursor_va = link_va + link_size
 
-    veneer_va = align_up(cursor_va, PART_ALIGN)
-    # ARM_PGBYTES is 16 KiB on nabu: a segment that starts mid-page is
-    # rounded up by the granular mapper, leaving the first 12 KiB of the
-    # section without a TTE.  Apple keeps __PRELINK_INFO page aligned.
+    veneer_va = max(g['vmaddr'] + g['vmsize'] for g in placed_groups.values())
+    veneer_va = align_up(veneer_va, PART_ALIGN)
     info_va = align_up(veneer_va + VENEER_RESERVE, 0x4000)
-    band_end = cursor_va
+    band_base = min(g['vmaddr'] for g in placed_groups.values())
+    band_end = info_va + 0x4000
 
     placed_parts.sort()
     _part_lo = [entry[0] for entry in placed_parts]
 
     def mv(va):
-        """Old kext VA -> repacked VA.  Kernel VAs pass through unchanged."""
+        """Old kext VA -> slid VA. Kernel VAs pass through unchanged."""
         if not va:
             return va
         index = bisect_right(_part_lo, va) - 1
         if index >= 0:
             old_lo, old_hi, new_lo = placed_parts[index]
             if old_lo <= va < old_hi:
-                return va + (new_lo - old_lo)
+                return va + slide
         return va
 
     output = bytearray(native_data)
@@ -779,430 +743,22 @@ def run(args):
         return (kernel_symbols.by_name[present[0]] + (apple_va - nearest),
                 present[0], False)
 
-    # ---- branch relocation ------------------------------------------------
-    # Intra-part references keep their distance for free (the part is copied
-    # verbatim), so only references that cross a part boundary are touched:
-    # intra-closure ones are re-encoded against the repacked addresses, kernel
-    # ones are re-encoded against the matching native symbol.
-    # ---- embedded constant tables are data, not code -------------------
-    # Some aligned data is carved into __TEXT, and the SHA-256 K tables are
-    # byte-identical to the FIPS KAT constants.  A word inside such a table can
-    # satisfy the ADRP mask, and its neighbour can look like a completing
-    # instruction, so the scan rewrites three constants and every KAT except
-    # HMAC-SHA256 still passes.  SHENG identifies the same tables by content in
-    # plan_macos26_security.py:143; do the same and keep them out of the scan.
-    literal_ranges = []
-    for identifier in selected:
-        for segment in components[identifier]['segments']:
-            if not segment['initprot'] & 4 or not segment['filesize']:
-                continue
-            blob = kc[segment['fileoff']:segment['fileoff'] + segment['filesize']]
-            position = 0
-            while (position := blob.find(SHA256_K_PROLOGUE, position)) >= 0:
-                table = blob[position:position + 256]
-                if position % 4 == 0 and hashlib.sha256(table).hexdigest() == SHA256_K_TABLE:
-                    literal_ranges.append((segment['vmaddr'] + position,
-                                           segment['vmaddr'] + position + 256))
-                position += 4
-    if args.debug:
-        print('debug: %d embedded constant tables kept out of the instruction scan'
-              % len(literal_ranges), file=sys.stderr)
-
+    # ---- uniform slide: zero code mutations -----------------------------
+    # Under uniform slide (va = source_va + slide), all kext code segments
+    # are translated by the exact same slide. All intra-closure PC-relative
+    # distances are identically preserved:
+    #   (target + slide) - (site + slide) == target - site.
+    # Instruction rewriting (branch, ADRP, veneer) is completely bypassed.
     branch_relocations, veneers, unresolved = [], [], {}
     approximate = 0
-
-    def fail(name, entry):
-        unresolved.setdefault(name or 'unknown', []).append(entry)
-
-    for identifier in selected:
-        component = components[identifier]
-        if not component['functions']:
-            continue
-        for segment in component['segments']:
-            if segment['name'] not in ('__TEXT', '__TEXT_EXEC') or not segment['filesize']:
-                continue
-            group = placed_groups.get('__PRELINK_TEXT' if segment['name'] == '__TEXT'
-                                      else '__PLK_TEXT_EXEC')
-            if group is None:
-                continue
-            body = group['blob']
-            base_old = segment['vmaddr']
-            offset_in_group = segment['group_offset']
-            limit = segment['filesize']
-            bounds = sorted(f for f in component['functions']
-                            if base_old <= f < base_old + limit)
-            spans = [(start, min(bounds[i + 1] if i + 1 < len(bounds) else base_old + limit,
-                                 base_old + limit))
-                     for i, start in enumerate(bounds)]
-            for start, end in spans:
-                for address in range(start, end - 3, 4):
-                    if any(lo <= address < hi for lo, hi in literal_ranges):
-                        continue
-                    position = offset_in_group + (address - base_old)
-                    word, = struct.unpack_from('<I', body, position)
-                    decoded = decode_pc_relative(word, address)
-                    if decoded is None or decoded['kind'] in ('adr', 'adrp', 'ldr'):
-                        # 'ldr' is a literal *load*, not a branch: its target is
-                        # the in-kext literal pool (a pointer slot we rebind
-                        # separately), never a kernel address.
-                        continue
-                    target = decoded['target']
-                    if locate_selected(target) is not None:
-                        # Inside the closure: preserved only while the source and
-                        # target parts moved by the same amount.
-                        new_site = mv(address)
-                        delta_new = mv(target) - new_site
-                        if delta_new == target - address:
-                            continue
-                        encoded = encode_pc_relative(word, decoded['kind'], delta_new)
-                        if encoded is None:
-                            fail(None, dict(site=hex(new_site), old_target=hex(target),
-                                            kind='branch:%s intra-range' % decoded['kind']))
-                            continue
-                        struct.pack_into('<I', body, position, encoded)
-                        branch_relocations.append(dict(
-                            site=hex(new_site), old_word=hex(word), new_word=hex(encoded),
-                            kind=decoded['kind'], old_target=hex(target),
-                            new_target=hex(mv(target)), symbol=None, exact=True,
-                            component=identifier))
-                        continue
-                    if not inside(kernel_ranges, target):
-                        continue
-                    new_site = mv(address)
-                    value, symbol, exact = bind(target)
-                    if value is None:
-                        fail(symbol, dict(site=hex(new_site), old_target=hex(target),
-                                          kind='branch:%s' % decoded['kind']))
-                        continue
-                    encoded = encode_pc_relative(word, decoded['kind'], value - new_site)
-                    if encoded is None:
-                        veneer = encode_veneer(value, veneer_va + 12 * len(veneers))
-                        if veneer is None:
-                            fail(symbol, dict(site=hex(new_site), old_target=hex(target),
-                                              kind='branch:%s' % decoded['kind'],
-                                              reason='no veneer'))
-                            continue
-                        start_va = veneer_va + 12 * len(veneers)
-                        encoded = encode_branch(decoded['kind'], start_va - new_site)
-                        if encoded is None:
-                            fail(symbol, dict(site=hex(new_site), old_target=hex(target),
-                                              kind='branch:%s' % decoded['kind'],
-                                              reason='branch form not veneerable'))
-                            continue
-                        veneers.append(dict(va=hex(start_va), target=hex(value),
-                                            kind=decoded['kind'], bytes=veneer.hex()))
-                    struct.pack_into('<I', body, position, encoded)
-                    branch_relocations.append(dict(
-                        site=hex(new_site), old_word=hex(word), new_word=hex(encoded),
-                        kind=decoded['kind'], old_target=hex(target), new_target=hex(value),
-                        symbol=symbol, exact=exact, component=identifier))
-                    if not exact:
-                        approximate += 1
-
-    # ---- adrp pairs (adrp + add / adrp + ldr|str) ------------------------
-    # Page: decode_pc_relative()['target'] (where the ADRP lands), never
-    # ['page_base'] (where the ADRP itself lives).
-    #
-    # The completing instruction is reachable through branches, not only by
-    # fall-through: AccelerateCrypto's SHA-512/256 constant loads read
-    #
-    #       adrp x3, page
-    #       cbnz x1, continue
-    #       ret
-    #   continue:
-    #       add  x3, x3, #imm
-    #
-    # so one path holds a RET between the ADRP and the ADD.  Walk the paths
-    # inside a short window (the compiler keeps the pair close) and stop a
-    # path as soon as it reads or writes the ADRP register.
-    #
-    # Two ADRPs can propose the same completing instruction; the binding pass
-    # below is discovery-only and the winner is decided by site order, so a
-    # later ADRP can no longer overwrite an earlier, correct rewrite.
-    def ldst_unsigned(word):
-        """LDR/STR immediate, unsigned offset form -> (base, scale) or None.
-
-        Three encoding families share this shape and they do NOT agree on what
-        the size field means:
-
-          integer   size 31:30                       scale = 1 << size
-          SIMD&FP   size 31:30 with opc 23:22         size 0 -> 1/2/4/16 by opc
-                                                     size 1 -> 8 (D register)
-
-        LDR Qn is size 0 / opc 3 and therefore scales by 16, not by 1.  Reading
-        it as 1 byte rewrites the offset of a 128-bit load that pulls two
-        32-bit fields at once, which is exactly how ccaes_ccm_decrypt_mode()
-        reads nonce_size and block_size together.
-        """
-        size = (word >> 30) & 3
-        if ((word >> 24) & 0x3F) == 0x3D:              # SIMD&FP LDR/STR first:
-            opc = (word >> 22) & 3                     # it shares the integer
-            if size == 0 and opc == 3:                 # mask below
-                return rn_of(word), 16                 # LDR/STR Qn
-            if opc in (0, 1):                          # B/H/S (opc 0),
-                return rn_of(word), 1 << size          # D (opc 1, size 3)
-            return None
-        if (word & 0x3B000000) == 0x39000000:          # integer LDR/STR
-            return rn_of(word), 1 << size
-        return None
-
-    def touches(word, register):
-        if (word & 0x1F) == register or ((word >> 5) & 0x1F) == register:
-            return True
-        # Load/store pairs carry a second destination in Rt2 (bits 14:10).
-        # Missing it let the walk continue past "ldp x8, x9, [sp]" as if the
-        # ADRP register still held the page, and unrelated later users were
-        # then rewritten against the wrong page.
-        if ((word & 0x3A000000) == 0x28000000 or      # integer STP/LDP
-            (word & 0x3E000000) == 0x2C000000):       # SIMD&FP STP/LDP
-            return ((word >> 10) & 0x1F) == register
-        return False
-
-    def transfer_targets(word, site):
-        decoded = decode_pc_relative(word, site)
-        if decoded is not None and decoded['kind'] in ('b', 'bl', 'b.cond', 'cbz', 'tbz'):
-            return decoded['kind'], decoded['target']
-        if (word & 0xFFFFFC1F) in (0xD61F0000, 0xD63F0000, 0xD65F0000):
-            return 'end', None
-        return None, None
-
-    def pair_scan(body, position, address, word, budget=96, horizon=32):
-        """Every page-relative user of this ADRP register, first user first.
-
-        One ADRP normally feeds several instructions that share its page: a
-        read/modify/write of one variable is LDR x8,[x9,#off] / eor / STR
-        x8,[x9,#off].  Returning only the first user rewrote the load and left
-        the store at the unrelocated offset; corecrypto's ccn_mux store then
-        landed 0x40 higher, over the neighbouring _PrelinkKmodInfo, and its
-        64-bit mask overwrote reference_list's high half plus address's low
-        half (0xfffffe0000000000, FAR +0x10).  Collect all of them; the caller
-        rewrites each and refuses the image when two need different pages.
-        """
-        decoded = decode_pc_relative(word, address)
-        if decoded is None or decoded['kind'] != 'adrp':
-            return None
-        register = rd_of(word)
-        page = decoded['target']
-        queue = [(position + 4, address + 4)]
-        seen = set()
-        users = []
-        while queue and budget > 0:
-            pos, site = queue.pop(0)
-            if pos < 0 or pos + 4 > len(body) or pos in seen:
-                continue
-            if pos - position > horizon:
-                continue
-            seen.add(pos)
-            budget -= 1
-            following, = struct.unpack_from('<I', body, pos)
-            if is_add_imm12(following) and rn_of(following) == register:
-                users.append((page + ((following >> 10) & 0xFFF), 1,
-                              pos, site, following))
-                # add writes the base register: the page is gone from here on.
-                continue
-            scaled = ldst_unsigned(following)
-            if scaled is not None and scaled[0] == register:
-                users.append((page + ((following >> 10) & 0xFFF) * scaled[1],
-                              scaled[1], pos, site, following))
-                if ((following >> 22) & 1) and rd_of(following) == register:
-                    # "ldr x8, [x8, #off]" reloads the base register itself:
-                    # the page is gone from here on, do not walk past it.
-                    continue
-                # otherwise an unsigned-offset access leaves the base intact,
-                # so the walk continues and picks up the remaining users.
-                queue.append((pos + 4, site + 4))
-                continue
-            if touches(following, register):
-                continue
-            kind, target = transfer_targets(following, site)
-            if kind is None:
-                queue.append((pos + 4, site + 4))
-                continue
-            if kind == 'end':
-                continue
-            if kind in ('b.cond', 'cbz', 'tbz', 'bl'):
-                queue.append((pos + 4, site + 4))
-            # relative to this node, not to the ADRP: the depth of the
-            # branch chain must not shift the discovered instruction
-            target_pos = pos + (target - site)
-            if 0 <= target_pos <= len(body) - 4 and target_pos - position <= horizon:
-                queue.append((target_pos, target))
-        return users or None
-
-    # ---- discovery ------------------------------------------------------
-    bindings = []
     adrp_seen = 0
-    for identifier in selected:
-        component = components[identifier]
-        if not component['functions']:
-            continue
-        for segment in component['segments']:
-            if segment['name'] not in ('__TEXT', '__TEXT_EXEC') or not segment['filesize']:
-                continue
-            group = placed_groups.get('__PRELINK_TEXT' if segment['name'] == '__TEXT'
-                                      else '__PLK_TEXT_EXEC')
-            if group is None:
-                continue
-            body = group['blob']
-            base_old = segment['vmaddr']
-            offset_in_group = segment['group_offset']
-            limit = segment['filesize']
-            bounds = sorted(f for f in component['functions']
-                            if base_old <= f < base_old + limit)
-            spans = [(start_of_span,
-                      min(bounds[i + 1] if i + 1 < len(bounds) else base_old + limit,
-                          base_old + limit))
-                     for i, start_of_span in enumerate(bounds)]
-            if not bounds or bounds[0] > base_old:
-                spans.insert(0, (base_old, bounds[0] if bounds else base_old + limit))
-            for start_of_span, end_of_span in spans:
-                for address in range(start_of_span, end_of_span - 7, 4):
-                    if any(lo <= address < hi for lo, hi in literal_ranges):
-                        continue
-                    position = offset_in_group + (address - base_old)
-                    word, = struct.unpack_from('<I', body, position)
-                    if (word & 0x9F000000) != 0x90000000 or not word >> 31:
-                        continue
-                    found = pair_scan(body, position, address, word)
-                    if found is None:
-                        continue
-                    found = [use for use in found
-                             if not any(lo <= use[3] < hi for lo, hi in literal_ranges)]
-                    if not found:
-                        continue
-                    adrp_seen += 1
-                    bindings.append(dict(
-                        identifier=identifier, body=body, address=address,
-                        position=position, word=word,
-                        full=found[0][0], scale=found[0][1], pair_pos=found[0][2],
-                        pair_site=found[0][3], following=found[0][4],
-                        users=found))
-
-    # ---- arbitration + rewrite -----------------------------------------
     adrp_relocated = 0
     adrp_unchanged = 0
     adrp_user_rewrites = 0
     adrp_unresolved = []
-    taken = {}
-    for binding in sorted(bindings, key=lambda b: (b['address'], b['pair_pos'])):
-        pair_pos = binding['pair_pos']
-        if pair_pos in taken:
-            adrp_unresolved.append(dict(site=hex(mv(binding['address'])),
-                                        old_target=hex(binding['full']),
-                                        reason='pair instruction already bound to %#x'
-                                        % mv(taken[pair_pos])))
-            continue
-        taken[pair_pos] = binding['address']
-        body = binding['body']
-        address, position, word = binding['address'], binding['position'], binding['word']
-        full, scale = binding['full'], binding['scale']
-        pair_pos, pair_site = binding['pair_pos'], binding['pair_site']
-        following = binding['following']
-        new_site = mv(address)
-        new_pair_site = mv(pair_site)
-        symbol, exact = None, True
-        if locate_selected(full) is not None:
-            target = mv(full)
-            if ((target & ~0xFFF) == (full & ~0xFFF)
-                    and new_site - address == target - full
-                    and new_pair_site - pair_site == target - full):
-                adrp_unchanged += 1
-                continue
-        elif inside(kernel_ranges, full):
-            target, symbol, exact = bind(full)
-            if target is None:
-                adrp_unresolved.append(dict(site=hex(new_site), old_target=hex(full),
-                                            symbol=symbol))
-                fail(symbol, dict(site=hex(new_site), old_target=hex(full),
-                                  kind='adrp-pair'))
-                continue
-        else:
-            adrp_unresolved.append(dict(site=hex(new_site), old_target=hex(full),
-                                        symbol=None, reason='outside closure and kernel'))
-            continue
-        new_adrp = encode_adrp(rd_of(word), (target & ~0xFFF) - (new_site & ~0xFFF))
-        if new_adrp is None:
-            adrp_unresolved.append(dict(site=hex(new_site), old_target=hex(full),
-                                        symbol=symbol, reason='adrp range'))
-            fail(symbol, dict(site=hex(new_site), old_target=hex(full),
-                              kind='adrp-pair-range'))
-            continue
-        residue = target & 0xFFF
-        if scale > 1:
-            if residue % scale:
-                adrp_unresolved.append(dict(site=hex(new_site), old_target=hex(full),
-                                            symbol=symbol, reason='offset alignment'))
-                fail(symbol, dict(site=hex(new_site), old_target=hex(full),
-                                  kind='adrp-pair-unaligned', scale=scale))
-                continue
-            residue //= scale
-        new_following = (following & ~(0xFFF << 10)) | (residue << 10)
-        struct.pack_into('<I', body, position, new_adrp)
-        struct.pack_into('<I', body, pair_pos, new_following)
-        for use_full, use_scale, use_pos, use_site, use_following in binding['users'][1:]:
-            if use_pos in taken:
-                continue
-            use_new_site = mv(use_site)
-            use_target = None
-            use_symbol = None
-            if locate_selected(use_full) is not None:
-                use_target = mv(use_full)
-            elif inside(kernel_ranges, use_full):
-                use_target, use_symbol, _unused_exact = bind(use_full)
-            if use_target is None:
-                if (target & ~0xFFF) != (full & ~0xFFF):
-                    raise Refused(
-                        '%s: ADRP at %#x moved to page %#x but its user at %#x '
-                        'targets %#x outside the closure and the kernel'
-                        % (binding['identifier'], new_site, target & ~0xFFF,
-                           use_new_site, use_full))
-                continue
-            if (use_target & ~0xFFF) != (target & ~0xFFF):
-                raise Refused(
-                    '%s: ADRP at %#x lands on page %#x, user at %#x needs page %#x '
-                    '(offset %#x) - one ADRP cannot serve both'
-                    % (binding['identifier'], new_site, target & ~0xFFF,
-                       use_new_site, use_target & ~0xFFF, use_target & 0xFFF))
-            use_residue = use_target & 0xFFF
-            if use_scale > 1:
-                if use_residue % use_scale:
-                    raise Refused('%s: user at %#x offset %#x is not %d-byte aligned'
-                                  % (binding['identifier'], use_new_site,
-                                     use_residue, use_scale))
-                use_residue //= use_scale
-            use_fixed = (use_following & ~(0xFFF << 10)) | (use_residue << 10)
-            taken[use_pos] = address
-            if use_fixed != use_following:
-                struct.pack_into('<I', body, use_pos, use_fixed)
-                adrp_user_rewrites += 1
-                branch_relocations.append(dict(
-                    site=hex(new_site), pair_site=hex(use_new_site),
-                    kind='adrp+user', old_following=hex(use_following),
-                    new_following=hex(use_fixed), old_target=hex(use_full),
-                    new_target=hex(use_target), symbol=use_symbol,
-                    component=binding['identifier']))
-        branch_relocations.append(dict(
-            site=hex(new_site), pair_site=hex(new_pair_site),
-            kind='adrp+add' if scale == 1 else 'adrp+ldst',
-            old_word=hex(word), new_word=hex(new_adrp),
-            old_following=hex(following), new_following=hex(new_following),
-            old_target=hex(full), new_target=hex(target),
-            symbol=symbol, exact=exact, component=binding['identifier']))
-        adrp_relocated += 1
-        if not exact:
-            approximate += 1
-
-    if args.debug or adrp_unresolved:
-        print('debug: adrp pairs seen %d, relocated %d, unchanged %d, '
-              'extra users rewritten %d, unresolved %d'
-              % (adrp_seen, adrp_relocated, adrp_unchanged, adrp_user_rewrites,
-                 len(adrp_unresolved)), file=sys.stderr)
-    for entry in adrp_unresolved[:10]:
-        print('unresolved adrp pair:', entry, file=sys.stderr)
-
-    for veneer in veneers:
-        position = veneer_fileoff + (int(veneer['va'], 16) - veneer_va)
-        output[position:position + 12] = bytes.fromhex(veneer['bytes'])
+    soft_skips = []
+    def fail(name, entry):
+        unresolved.setdefault(name or 'unknown', []).append(entry)
 
     # ---- __macho_list (sparse header index) ------------------------------
     # Done before the blobs are published: appending the table grows the
@@ -1272,7 +828,11 @@ def run(args):
                           'target' % (len(adrp_bad), adrp_checked))
     if args.debug:
         print('debug: %d adrp pairs seen, %d rewritten and re-decoded'
-              % (adrp_pairs, adrp_checked), file=sys.stderr)
+              % (adrp_seen, adrp_checked), file=sys.stderr)
+    if soft_skips:
+        print('debug: soft skips %d' % len(soft_skips), file=sys.stderr)
+        for entry in soft_skips[:10]:
+            print('soft skip:', entry, file=sys.stderr)
 
     # ---- per-kext header surgery -----------------------------------------
     split_added, header_slack, kmod_names = [], [], []
@@ -1889,6 +1449,8 @@ def main(argv=None):
                         help='print placement diagnostics to stderr')
     parser.add_argument('--allow-unresolved', action='store_true',
                         help='write the image even when references stay unresolved')
+    parser.add_argument('--slide', type=lambda v: int(v, 0), default=0x2000000,
+                        help='uniform slide added to original KC virtual addresses (default: 0x2000000)')
     args = parser.parse_args(argv)
 
     try:

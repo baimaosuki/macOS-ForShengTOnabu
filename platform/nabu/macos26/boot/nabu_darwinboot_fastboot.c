@@ -315,7 +315,7 @@ void nabu_darwinboot_main(uint64_t fdt_pa)
     // Single-core controlled boot: the generated ADT advertises exactly one
     // cpu@0, so cpus=8 would wait forever for secondaries that are absent.
     // Storage stays off until the UFS driver is qualified for this board.
-    const char *cmdline = "-v debug=0x14e keepsyms=1 cpus=1 armcpu-self-ipi=1 nabu-vc-scale=2";
+    const char *cmdline = "-v debug=0x14e keepsyms=1 cpus=1 armcpu-self-ipi=1 nabu-vc-scale=2 nabu-source-text=1";
     for (size_t i = 0; cmdline[i] && i < sizeof(args->CommandLine) - 1; i++) {
         args->CommandLine[i] = cmdline[i];
     }

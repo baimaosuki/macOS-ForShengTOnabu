@@ -22,11 +22,17 @@ from native_prelink import backed_offset
 
 def identify(build_dir: Path) -> tuple[Path, dict, dict]:
     build = json.loads((build_dir / 'build.json').read_text())
-    kernel = build_dir / 'kernel.development.sheng'
+    artifacts = sorted(q for q in build_dir.iterdir()
+                       if q.is_file() and q.name.startswith('kernel.development.')
+                       and q.name.count('.') == 2 and q.suffix != '.map')
+    if len(artifacts) != 1:
+        raise ValueError('requires exactly one kernel.development.* artifact, found %d'
+                         % len(artifacts))
+    kernel = artifacts[0]
     data = kernel.read_bytes()
     digest = hashlib.sha256(data).hexdigest()
     if (build.get('xnu') != '12377.121.6' or build.get('build') != '25F71'
-            or build.get('machine') != 'SHENG' or not build.get('executable_kernel_built')
+            or build.get('machine') != kernel.name.rsplit('.', 1)[-1].upper() or not build.get('executable_kernel_built')
             or digest != build.get('executable_kernel_sha256')):
         raise ValueError('requires the actual linked SHENG macOS 26.5 artifact')
     architecture = build.get('architecture', 'arm64')
@@ -56,7 +62,7 @@ def identify(build_dir: Path) -> tuple[Path, dict, dict]:
     if entry != addresses.get('__start') or min(s['va'] for s in image['segments']
             if s['size']) != 0xfffffe0007004000:
         raise ValueError('entry or linked base differs from the native SHENG layout')
-    dwarfs = list((build_dir / 'kernel.development.sheng.dSYM/Contents/Resources/DWARF').iterdir())
+    dwarfs = list((build_dir / (kernel.name + '.dSYM') / 'Contents/Resources/DWARF').iterdir())
     if len(dwarfs) != 1 or not dwarfs[0].is_file():
         raise ValueError('requires exactly one linked kernel DWARF image')
     dwarf_data = dwarfs[0].read_bytes()

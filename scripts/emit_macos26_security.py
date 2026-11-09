@@ -115,7 +115,7 @@ def chain_blob(segments, relocations):
 
 
 def emit(native_data, original, native_names, identity, slide, roots=ROOTS, storage_driver=None):
-    image = macho(native_data, 'arm64e')
+    image = macho(native_data, identity['architecture'])
     marker = native_names.get('_sheng_security_prelink_version')
     if marker is None or struct.unpack_from('<I', native_data,
             backed_offset(image['segments'], marker, 4, len(native_data)))[0] != 1:
@@ -455,6 +455,9 @@ def main():
     parser.add_argument('--qemu-only', action='store_true', required=True)
     parser.add_argument('--include-module', action='append', default=[], metavar='BUNDLE',
                         help='include another original BootKC module and its dependency closure')
+    parser.add_argument('--recovery-contract', type=Path,
+                        default=ROOT / 'config/macos26-recovery-modules.json',
+                        help='recovery module contract; architecture must match the native kernel')
     parser.add_argument('--recovery-components', action='store_true',
                         help='include the paired original BaseSystem startup components')
     parser.add_argument('--hid-components', action='store_true',
@@ -468,7 +471,7 @@ def main():
         modules = list(args.include_module)
         recovery_contract = None
         if args.recovery_components:
-            contract_path = ROOT / 'config/macos26-recovery-modules.json'
+            contract_path = args.recovery_contract
             recovery_contract = json.loads(contract_path.read_text())
             if (recovery_contract['build'] != '25F71' or recovery_contract['xnu'] != '12377.121.6'
                     or recovery_contract['architecture'] != identity['architecture']):
@@ -491,8 +494,12 @@ def main():
             report['hid_components'] = hid_contract
         args.output.mkdir(parents=True, exist_ok=False)
         (args.output / kernel.name).write_bytes(candidate)
-        shutil.copytree(args.kernel_build / 'kernel.development.sheng.dSYM', args.output / 'kernel.development.sheng.dSYM')
-        shutil.copy2(args.kernel_build / 'kernel.development.sheng.map', args.output / 'kernel.development.sheng.map')
+        dsym = args.kernel_build / (kernel.name + '.dSYM')
+        kmap = args.kernel_build / (kernel.name + '.map')
+        if dsym.is_dir():
+            shutil.copytree(dsym, args.output / dsym.name)
+        if kmap.is_file():
+            shutil.copy2(kmap, args.output / kmap.name)
         metadata = json.loads((args.kernel_build / 'build.json').read_text())
         metadata.update(executable_kernel_sha256=report['candidate_sha256'], native_security_candidate=True,
                         source_kernel_sha256=identity['kernel_sha256'], hardware_admitted=False,
