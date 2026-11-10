@@ -177,6 +177,34 @@ def stage_file(source: Path, destination: Path) -> None:
         shutil.copy2(source, destination)
 
 
+def audit_desktop_source(source: Path) -> dict:
+    """Check the actual patched callsites, not just patch application status."""
+    text = (source / 'bsd/kern/kern_exec.c').read_text()
+    startup = text[text.index('void\nload_init_program(proc_t p)'):]
+    ordered = (startup.index('mach_vm_allocate_kernel(map, &scratch_addr')
+               < startup.index('native_owner_cache_prepare(p, (user_addr_t)scratch_addr')
+               < startup.index('native_owner_macos_data_prepare(p, (user_addr_t)scratch_addr')
+               < startup.index('load_init_program_at_path(p, (user_addr_t)scratch_addr'))
+    if not ordered or 'NABU desktop: init scratch allocation failed' not in startup:
+        raise ValueError('desktop owner mount is not after checked user scratch allocation and before launchd')
+    if not (text.index('native_owner_macos_app_cryptex(proc_t p')
+            < text.index('native_owner_macos_data_prepare(proc_t p')):
+        raise ValueError('desktop App cryptex helper must be declared before the Data caller')
+    data = text[text.index('native_owner_macos_data_prepare(proc_t p'):text.index('static int\nload_init_program_at_path')]
+    for required in ('NATIVE_OWNER_DATA_MOUNT_POINT', 'native_owner_data_firmlinks',
+                     'native_owner_macos_cryptex_view(p, scratch)', 'native_owner_macos_app_cryptex(p, scratch)'):
+        if required not in data:
+            raise ValueError('desktop Data path omitted: ' + required)
+    if 'native_owner_publish_boot_manifest(root_device, XNU_OWNER_OS_VOLUME_UUID,' not in text:
+        raise ValueError('desktop boot manifest must use the paired candidate OS UUID')
+    root = (source / 'bsd/kern/bsd_init.c').read_text()
+    if 'native_verified_block_root_authorized(device)' not in root or 'if (autherr && !owner_authorized)' not in root:
+        raise ValueError('desktop rootauth must call the actual owner authorization bridge')
+    return dict(scratch_allocation_before_mount=True, owner_query_in_rootauth=True,
+                cache_before_data_before_launchd=True, data_firmlinks=True,
+                app_called_from_data=True, root_uuid_from_paired_build=True)
+
+
 def save(record: dict) -> None:
     (OUT / 'build.json').write_text(json.dumps(record, indent=2) + '\n')
 
@@ -786,6 +814,7 @@ def link_kernel(args, record, common, sdk, source, env):
             required_symbols={name: hex(actual[name]) for name in required},
             systemos_union=True, data_mount='/System/Volumes/Data', firmlinks=True,
             app_cryptex=True, ram_data_volatile=True, runtime_qualified=False)
+        record['desktop_kernel']['source_audit'] = audit_desktop_source(source)
     save(record)
 
 

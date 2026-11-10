@@ -186,6 +186,25 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
     // The large direct/store-backed implementation must never activate here.
     if (logical > (4ULL << 30)) return false;
     if(false){''')
+        hash_marker = '''  if(sparse.pages){
+    static const uint8_t zero[4096]={};'''
+        if ram_text.count(hash_marker) != 1:
+            raise ValueError('unreviewed RAM seed identity source')
+        ram_text = ram_text.replace(hash_marker, '''  if(sparse.pages && logical > 0x80000000ULL) {
+    // Preserve the upstream SHNGSEED2 identity without hashing gigabytes of
+    // omitted zero pages. This disk remains writable sparse RAM, never direct.
+    uint8_t head[17] = {'S','H','N','G','S','E','E','D','2'};
+    for (unsigned i = 0; i < 8; ++i) head[9 + i] = uint8_t(logical >> (8 * i));
+    SHA256_Update(&context, head, sizeof(head));
+    for (uint64_t page = 0; page < logical / 4096; ++page) if (sparse.pages[page]) {
+      uint8_t index[8];
+      for (unsigned i = 0; i < 8; ++i) index[i] = uint8_t(page >> (8 * i));
+      SHA256_Update(&context, index, sizeof(index));
+      SHA256_Update(&context, sparse.pages[page], 4096);
+    }
+    memory = nullptr;
+  } else if(sparse.pages){
+    static const uint8_t zero[4096]={};''')
         ram_source.write_text(ram_text)
         ram_object = destination / 'NativeRamBlock.o'
         ram_command = [str(ram_source) if arg == str(wrapper) else str(ram_object) if arg == str(obj) else arg
@@ -195,7 +214,8 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
             cwd=Path(compile_record['directory']), env=env)
         objects.append(str(ram_object))
         ram_evidence = dict(revision=ram_revision, source_sha256=hashlib.sha256(ram_text.encode()).hexdigest(),
-                            logical_limit_bytes=4 << 30, volatile=True, persistent_store_used=False)
+                            logical_limit_bytes=4 << 30, volatile=True, persistent_store_used=False,
+                            seed_identity_above_2gib='SHNGSEED2', page_table_limit_bytes=(4 << 30) // 4096 * 8)
     if input_driver:
         input_object = destination / 'recovery-input/NativeRecoveryInput.o'
         input_command = [str(input_object) if arg == str(obj) else
