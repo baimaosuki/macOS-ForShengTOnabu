@@ -36,7 +36,9 @@ struct NabuStorageModuleOperations {
   void pause(unsigned milliseconds) { IOSleep(milliseconds); }
   NabuStorageProviders scanProviders() {
     IORegistryIterator *iterator = IORegistryIterator::iterateOver(
-      IOService::getServiceRoot(), gIOServicePlane, kIORegistryIterateRecursively);
+      // The iterator excludes its starting entry. The service root itself is
+      // IOPlatformExpertDevice, so start at the registry root to include it.
+      IORegistryEntry::getRegistryRoot(), gIOServicePlane, kIORegistryIterateRecursively);
     if (!iterator) return NabuStorageProviders::Retry;
     unsigned entries = 0, ufsCount = 0, dataCount = 0;
     bool complete = false;
