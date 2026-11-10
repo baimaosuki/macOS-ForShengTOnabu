@@ -5,7 +5,7 @@ on:
       target:
         description: Build target; no job deploys to hardware
         type: choice
-        options: [check, preflight, monitor, apple, apple26, macos26-xnu, macos26-kernel, kext, xnu, sheng-xnu, abi-bootstrap, reference-xnu]
+        options: [check, preflight, monitor, apple, apple26, macos26-xnu, macos26-kernel, macos26-data, kext, xnu, sheng-xnu, abi-bootstrap, reference-xnu]
         default: check
       native_ufs:
         description: Compile the default-off UFS companion; no hardware deployment
@@ -40,7 +40,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   check:
-    if: inputs.target != 'macos26-xnu' && inputs.target != 'macos26-kernel'
+    if: inputs.target != 'macos26-xnu' && inputs.target != 'macos26-kernel' && inputs.target != 'macos26-data'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
@@ -372,4 +372,22 @@ jobs:
             ${{ env.NATIVE_OUT }}/kernel.development.${{ inputs.board }}.dSYM/
             ${{ env.NATIVE_OUT }}/obj/DEVELOPMENT_ARM64_*/kernel.development.*.link/
           if-no-files-found: warn
+          retention-days: 7
+
+  macos26-data:
+    if: inputs.target == 'macos26-data'
+    runs-on: ${{ vars.MACOS_RUNNER || 'xcode-27' }}
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Build paired macOS Data seed
+        run: sudo env RUNNER_TEMP="$RUNNER_TEMP" "$(command -v python3)" scripts/build_nabu_desktop_data.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nabu-macos26-desktop-data
+          path: out/nabu-desktop-data/
+          if-no-files-found: error
           retention-days: 7
