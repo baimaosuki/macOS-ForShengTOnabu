@@ -1,0 +1,147 @@
+--- a/drivers/NativeUfs/NativeUfs.cpp
++++ b/drivers/NativeUfs/NativeUfs.cpp
+@@ -9,6 +9,8 @@
+ #include <libkern/crypto/sha2.h>
+ #include <vm/vm_kern.h>
+ #include <vm/vm_map.h>
++#include <vm/vm_kern_xnu.h>
++#include <mach/mach_vm.h>
+ #include <sys/param.h>
+ #if defined(NATIVE_VERIFIED_BLOCK) && NATIVE_VERIFIED_BLOCK
+ #include "verified_root.h"
+@@ -32,6 +34,7 @@
+ #include <pexpert/pexpert.h>
+ #include <kern/debug.h>
+ #include "NabuBoard.h"
++#include "NabuUfsResources.h"
+ #include "RootDiagnostics.h"
+ #include "TransferPoll.h"
+ #include "SmmuTakeover.h"
+@@ -824,6 +827,8 @@
+   IOLock *lock;
+   bool ready;
+   bool poisoned = false;
++  bool attempted = false, queueOwned = false, queueTouched = false, queueStopped = false;
++  uint64_t blocks = 0;
+   uintptr_t smmu = 0, cb = 0;
+ };
+ UfsHost gHost = { OSSharedPtr<IOMemoryMap> (), OSSharedPtr<IOMemoryMap> (), 0, nullptr, nullptr, 0, nullptr, false };
+@@ -884,7 +889,8 @@
+   __asm__ volatile ("dsb sy" ::: "memory");
+ }
+ 
+-#include "RootQueue.h"
++#include "NabuUfsHostSafety.h"
++#include "NabuUfsQueue.h"
+ 
+ #include "RootCommands.h"
+ 
+@@ -900,6 +906,8 @@
+   if (gHost.ready) {
+     return true;
+   }
++  if (!hostBeginBringup (why)) return false;
++  HostPreparedDmaGuard guard;
+   gRootDiagnostic.stage = "controller map";
+   gHost.hc = mapPhys (nabu_ufs::kBoard.hcBase, nabu_ufs::kBoard.hcMapBytes, gHost.hcMap);
+   if (!gHost.hc) {
+@@ -927,8 +935,8 @@
+   gHost.phys = gHost.dma->getPhysicalSegment (0, &contiguous, kIOMemoryMapperNone);
+   gRootDiagnostic.dma = gHost.phys;
+   gRootDiagnostic.contiguous = contiguous;
+-  if (!gHost.virt || !gHost.phys || (gHost.phys & 4095) || contiguous < kDmaBytes ||
+-      (!(read32 (gHost.hc, 0) & 0x01000000) && gHost.phys + kDmaBytes > 0x100000000ULL)) {
++  if (!gHost.virt || !hostDmaRangeValid (gHost.phys, contiguous,
++      (read32 (gHost.hc, 0) & 0x01000000) != 0)) {
+     *why = "DMA address/contiguity";
+     return false;
+   }
+@@ -992,7 +1000,17 @@
+         *why = "unsupported LUN 0 logical block size";
+         return false;
+       }
++      uint32_t lastLba = loadBe32 (gHost.virt + kDataOffset);
++      if (lastLba == UINT32_MAX) {
++        *why = "LUN capacity requires unsupported READ(16)";
++        return false;
++      }
++      gHost.blocks = uint64_t (lastLba) + 1;
++      IOLog ("NABU UFS capacity blocks=%llu blockBytes=%u stream=%x hc=%llx\n",
++             static_cast<unsigned long long> (gHost.blocks), blockBytes,
++             nabu_ufs::kBoard.streamId, static_cast<unsigned long long> (nabu_ufs::kBoard.hcBase));
+       gHost.ready = true;
++      guard.keep = true;
+       return true;
+     }
+     if (gHost.poisoned) break;
+@@ -1438,7 +1456,7 @@
+   memcpy (key, verified_root_key, VR_KEY_BYTES);
+   gRootDiagnostic.stage = "policy read-only protection";
+-  if (vm_map_protect (kernel_map, verifiedStorage, verifiedStorage + verifiedStorageBytes,
+-                      VM_PROT_READ, TRUE) != KERN_SUCCESS) {
++  if (mach_vm_protect (kernel_map, verifiedStorage, verifiedStorageBytes,
++                       TRUE, VM_PROT_READ) != KERN_SUCCESS) {
+     return false;
+   }
+   gRootDiagnostic.stage = "owner signature and hash table";
+@@ -1837,15 +1855,46 @@
+   panic ("%s", gMediaReport);
+ }
+ 
++static bool nabuRootProvider (IOService *provider)
++{
++  if (!OSDynamicCast (IOPlatformDevice, provider)) return false;
++  NabuUfsResources resources = {};
++  struct Field { const char *key; void *out; unsigned bytes; };
++  Field fields[] = {
++    { "nabu,ufs-hc", resources.hc, sizeof (resources.hc) },
++    { "nabu,ufs-gcc", resources.gcc, sizeof (resources.gcc) },
++    { "nabu,ufs-smmu", resources.smmu, sizeof (resources.smmu) },
++    { "nabu,ufs-stream", &resources.stream, sizeof (resources.stream) },
++    { "nabu,ufs-block-bytes", &resources.blockBytes, sizeof (resources.blockBytes) },
++  };
++  for (const Field &field : fields) {
++    OSData *data = OSDynamicCast (OSData, provider->getProperty (field.key));
++    if (!data || data->getLength () != field.bytes || !data->getBytesNoCopy ()) return false;
++    memcpy (field.out, data->getBytesNoCopy (), field.bytes);
++  }
++  if (!nabuUfsResourcesMatch (resources)) return false;
++  OSSharedPtr<IOMemoryMap> clockMap;
++  uintptr_t gcc = mapPhys (resources.gcc[0], resources.gcc[1], clockMap);
++  if (!gcc) return false;
++  const auto &board = nabu_ufs::kBoard;
++  uint32_t gdsc = read32 (gcc, board.gdscr - 0x77000);
++  uint32_t axi = read32 (gcc, board.axiEnable - 0x77000);
++  uint32_t ahb = read32 (gcc, board.ahbEnable - 0x77000);
++  IOLog ("NABU UFS provider hc=%llx bytes=%llx stream=%x gdsc=%08x axi=%08x ahb=%08x\n",
++         static_cast<unsigned long long> (resources.hc[0]),
++         static_cast<unsigned long long> (resources.hc[1]), resources.stream, gdsc, axi, ahb);
++  return nabuUfsClocksReady (gdsc, axi, ahb);
++}
++
+ bool NativeUfs::start (IOService *provider)
+ {
+   unsigned probe = 0, rootMode = 0;
+   PE_parse_boot_argn ("native-ufs-probe", &probe, sizeof (probe));
+   PE_parse_boot_argn ("native-ufs-root", &rootMode, sizeof (rootMode));
+   native_ufs_probe_requested = probe != 0;
+-  // Default: match for observability only, never touch the controller. Hardware work runs once,
+-  // from the root-device personality; the ufshc nub match stays observation-only.
+-  if ((!probe && !rootMode) || !OSDynamicCast (IOPlatformExpertDevice, provider)) {
++  // Only the resource-bearing NABU nub may start the controller. The ADT
++  // contract and clocks are checked before the first HC register access.
++  if ((!probe && rootMode != 1) || !nabuRootProvider (provider)) {
+     return false;
+   }
+   unsigned diagnostic = 0;
+--- a/drivers/NativeUfs/RootCommands.h
++++ b/drivers/NativeUfs/RootCommands.h
+@@ -240,6 +240,8 @@
+ // Read `blocks` (<= kDataMax / 4096) 4096-byte blocks of LUN `lun` starting at `lba` into dst.
+ static IOReturn hostRead4k (uint8_t lun, uint64_t lba, uint32_t blocks, void *dst)
+ {
++  if (gHost.blocks && (lba >= gHost.blocks || blocks > gHost.blocks - lba))
++    return kIOReturnBadArgument;
+   if (!gHost.ready || !dst || !blocks || blocks > kDataMax / 4096 || lba > 0xffffffffULL - (blocks - 1)) {
+     return kIOReturnBadArgument;
+   }

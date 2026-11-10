@@ -8,10 +8,11 @@
  
  static UfsRootDiagnostics gRootDiagnostic;
  static bool gRootDiagnosticEnabled;
-@@ -1964,6 +1965,32 @@
+@@ -1964,6 +1965,34 @@
      IOFree (layout, sizeof (RootLayout));
      return false;
    }
++#if defined(NATIVE_UFS_DESKTOP_ROOT) && NATIVE_UFS_DESKTOP_ROOT
 +  // nabu: a desktop root carries OS, SystemOS and App. A manifest that only has
 +  // the recovery pair is refused here instead of being published half-populated.
 +  {
@@ -38,6 +39,7 @@
 +             static_cast<unsigned long long> (gate.blocks[want]));
 +    }
 +  }
++#endif
    gStoreGeometry = { true, layout->userdataFirst, layout->userdataLast, layout->imageBytes, layout->gptEntriesLba,
                       layout->gptHeaderCrc, layout->gptEntriesCrc, layout->gptEntryCount };
  #if defined(NATIVE_UFS_RECOVERY_ROOT) && NATIVE_UFS_RECOVERY_ROOT
