@@ -350,6 +350,9 @@ def prepare(directory: Path, base: int, native: dict, original: bytes,
                 kmod=base + own['_kmod_info'], symbols={n: a + base for n, a in own.items()},
                 relocations=relocations, imports=dict(imports), pointer_formats=sorted(formats),
                 evidence=evidence, compatibility=compatibility, component=component, block_class=block_class)
+    if evidence.get('root_mode') == 'desktop' and evidence.get('board') == 'nabu':
+        from nabu_storage_contract import validate_module
+        validate_module(evidence, info, own, native, dict(imports))
     driver['vtable_abi'] = audit_storage_vtable(driver, original, kc, native, slide,
                                               require_pac=architecture == 'arm64e')
     if evidence.get('root_mode') == 'desktop':

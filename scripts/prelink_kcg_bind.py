@@ -102,6 +102,34 @@ def align_down(value, boundary=PAGE):
     return value & ~(boundary - 1)
 
 
+def storage_mapping_layout(segments, base):
+    """Use the names/protections arm_vm_sheng_transport_segments maps.
+
+    DATA_CONST must stay writable for kalloc bootstrap, then the kernel makes
+    it read-only. Renaming by ordinal silently leaves these pages unmapped.
+    """
+    layouts = {'__TEXT': ('__NVB_TEXT_EXEC', 5),
+               '__DATA_CONST': ('__NVB_DATA_CONST', 3),
+               '__DATA': ('__NVB_DATA', 3),
+               '__LINKEDIT': ('__NVB_LINKEDIT', 1)}
+    result, seen = [], set()
+    for segment in segments:
+        source = segment['name']
+        if source not in layouts or source in seen:
+            raise Refused('unsupported or duplicate UFS source segment: ' + source)
+        seen.add(source)
+        name, protection = layouts[source]
+        if (segment['initprot'] != protection or segment['maxprot'] != protection
+                or (base | segment['va'] | segment['size']) & 0x3fff
+                or segment['filesize'] > segment['size']):
+            raise Refused('UFS segment violates the actual VM mapping contract: ' + source)
+        if segment['size']:
+            result.append((segment, name, protection))
+    if seen != set(layouts):
+        raise Refused('UFS source omits a required mapped segment')
+    return result
+
+
 def cstr(raw):
     return raw.split(b'\0', 1)[0].decode('utf-8', 'replace')
 
@@ -805,15 +833,15 @@ def run(args):
         storage['header_va'] = header_va
         if any(text['blob'][header_va - text['vmaddr']:header_va - text['vmaddr'] + PART_ALIGN]):
             raise Refused('reserved UFS header page contains bytes')
-        for index, segment in enumerate(storage['image']['segments']):
-            if not segment['size']:
-                continue
-            name = '__NUFS_' + str(index)
+        for segment, name, protection in storage_mapping_layout(storage['image']['segments'], driver_base):
+            existing = [s for s in kernel_segments if s['name'] == name]
+            if name in placed_groups or len(existing) > 1 or any(s['vmsize'] for s in existing):
+                raise Refused('duplicate kernel transport mapping: ' + name)
             blob = bytearray(storage['data'][segment['fileoff']:segment['fileoff'] + segment['filesize']])
             blob.extend(bytes(segment['size'] - len(blob)))
             placed_groups[name] = dict(name=name, old_low=0,
                 vmaddr=driver_base + segment['va'], vmsize=segment['size'],
-                filesize=len(blob), text_span=len(blob), prot=segment['initprot'],
+                filesize=len(blob), text_span=len(blob), prot=protection,
                 blob=blob, parts=[], fileoff=None, table_offset=None)
     veneer_va = max(g['vmaddr'] + g['vmsize'] for g in placed_groups.values())
     veneer_va = align_up(veneer_va, PART_ALIGN)
@@ -1369,6 +1397,17 @@ def run(args):
 
     image = load_commands(output, 0)
     out_segments = read_segments(output, image)
+    if storage:
+        # The compiled kernel extends end_kern through PRELINK_INFO before
+        # checking transport ranges. Keep every storage page below that bound.
+        end_kern_bound = align_up(info_va + info_size, PART_ALIGN)
+        mapping_ok = all(sum(s['name'] == name for s in out_segments) == 1 and
+            any(s['name'] == name and s['vmaddr'] == storage['base'] + source['va']
+            and s['vmsize'] == source['size'] and s['initprot'] == protection
+            and s['maxprot'] == protection and s['vmaddr'] >= img_base
+            and s['vmaddr'] + s['vmsize'] <= end_kern_bound for s in out_segments)
+            for source, name, protection in storage_mapping_layout(storage['image']['segments'], storage['base']))
+        check('UFS segments obey compiled transport VM mappings and end_kern coverage', mapping_ok)
     out_text = next((s for s in out_segments if s['name'] == '__PRELINK_TEXT'), None)
     out_section_map = {s['name']: s for s in (out_text['sections'] if out_text else [])}
     check('__PRELINK_TEXT,__text exists', '__text' in out_section_map,

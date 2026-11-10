@@ -71,8 +71,50 @@ def segments(data, image):
             sections.append(dict(name=cstr(sectname), addr=addr, size=sz, offset=off))
             cursor += 80
         out.append(dict(name=cstr(name), vmaddr=va, vmsize=vs, fileoff=fo, filesize=fs,
-                        sections=sections, command_offset=offset))
+                        maxprot=_mp, initprot=_ip, sections=sections, command_offset=offset))
     return out
+
+
+def storage_mapping_errors(output_segments, source_segments, base, kernel_base):
+    """Independently check the compiled VM mapper's exact name/range contract."""
+    expected = {'__TEXT': ('__NVB_TEXT_EXEC', 5), '__DATA_CONST': ('__NVB_DATA_CONST', 3),
+                '__DATA': ('__NVB_DATA', 3), '__LINKEDIT': ('__NVB_LINKEDIT', 1)}
+    errors = []
+    info = [s for s in output_segments if s['name'] == '__PRELINK_INFO' and s['vmsize']]
+    if len(info) != 1:
+        return ['missing unique PRELINK_INFO end_kern bound']
+    end_kern = (info[0]['vmaddr'] + info[0]['vmsize'] + 0x3fff) & ~0x3fff
+    seen = set()
+    for source in source_segments:
+        source_name = source['name']
+        if source_name not in expected or source_name in seen:
+            errors.append('unsupported or duplicate source segment ' + source_name)
+            continue
+        seen.add(source_name)
+        name, prot = expected[source_name]
+        matches = [s for s in output_segments if s['name'] == name]
+        if not source['vmsize'] or len(matches) != 1:
+            errors.append('missing unique mapped segment ' + name)
+            continue
+        target = matches[0]
+        if (source['maxprot'] != prot or source['initprot'] != prot
+                or target['maxprot'] != prot or target['initprot'] != prot
+                or target['vmaddr'] != base + source['vmaddr']
+                or target['vmsize'] != source['vmsize']
+                or (base | target['vmaddr'] | target['vmsize']) & 0x3fff
+                or target['vmaddr'] < kernel_base or target['vmaddr'] + target['vmsize'] > end_kern
+                or target['filesize'] < source['filesize']):
+            errors.append('range/protection/alignment mismatch ' + name)
+        for section in source['sections']:
+            if section['name'] == '__kalloc_type' and not (
+                    prot == 3 and target['vmaddr'] <= base + section['addr']
+                    and base + section['addr'] + section['size'] <= target['vmaddr'] + target['vmsize']):
+                errors.append('kalloc metadata is not covered by a bootstrap-writable mapping')
+    if seen != set(expected):
+        errors.append('source mapped segment set differs')
+    if any(s['name'].startswith('__NUFS_') for s in output_segments):
+        errors.append('ordinal NUFS segment is not recognized by the compiled VM mapper')
+    return errors
 
 
 def symtab(data, image):
@@ -367,6 +409,11 @@ def main(argv=None):
 
     if report.get('storage_driver'):
         storage = report['storage_driver']
+        source_data = open(storage['source_module'], 'rb').read()
+        mapping_errors = storage_mapping_errors(segs, segments(source_data, commands(source_data, 0)),
+            int(storage['base'], 16), min(s['vmaddr'] for s in segs if s['vmsize']))
+        check('UFS pages and kalloc metadata have actual compiled VM mappings',
+              not mapping_errors, str(mapping_errors[:4]))
         check('UFS final image fits 512 MiB', len(data) <= 0x20000000)
         check('UFS keeps ordinary ARM64 64-bit chained bindings',
               storage['pointer_formats'] in ([2], [6]))

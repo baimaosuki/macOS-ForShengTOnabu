@@ -79,7 +79,9 @@ def assemble(kernel, prelink_report, policy, data, root, loader_build, output):
     if any(ufs.get(k) != v for k,v in expected.items()): raise ValueError('ADT resources differ from NabuUfsResources contract')
     mm = tree['/device-tree/chosen/memory-map']
     if mm.get('PackedRAMDisk') != bytes(16) or 'RAMDisk' in mm: raise ValueError('loader packed slot mismatch')
-    args = '-v keepsyms=1 debug=0x14e cpus=1 armcpu-self-ipi=1 native-ufs-root=1 rd=uuid boot-uuid=47719F50-5527-44A3-9F59-8170528D8C14'
+    # A root-test candidate must expose transport/layout failures on the panic
+    # panel instead of silently returning false and waiting forever for its UUID.
+    args = '-v keepsyms=1 debug=0x14e cpus=1 armcpu-self-ipi=1 nabu-source-text=1 native-ufs-root=1 native-ufs-diagnostics=1 rd=uuid boot-uuid=47719F50-5527-44A3-9F59-8170528D8C14'
     menu = ('version = 1\n[boot]\ntimeout = 5\ndefault = "nabu-ufs-root-test"\n'
             '[[driver]]\npath = "Drivers/DarwinBoot.efi"\n'
             '[[entry]]\nid = "nabu-ufs-root-test"\ntitle = "NABU 25F71 UFS/root test"\n'

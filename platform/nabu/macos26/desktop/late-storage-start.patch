@@ -1,0 +1,13 @@
+--- a/bsd/kern/bsd_init.c
++++ b/bsd/kern/bsd_init.c
+@@ -702,6 +702,10 @@
+ 	printf("NABU-CHK vfsinit\n");
+ 	vfsinit();
+ 
++	/* Module load returns before storage starts; never wait here for IOBSD/media. */
++	extern void nabu_source_storage_start(void);
++	nabu_source_storage_start();
++
+ #if CONFIG_PROC_UUID_POLICY
+ 	/* Initial proc_uuid_policy subsystem */
+ 	bsd_init_kprintf("calling proc_uuid_policy_init()\n");

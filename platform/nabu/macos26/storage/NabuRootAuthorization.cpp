@@ -12,6 +12,9 @@
 #include <libkern/crypto/sha2.h>
 #include <libkern/libkern.h>
 #include <sys/param.h>
+#include <libkern/OSKextLib.h>
+#include <kern/debug.h>
+#include "NabuStorageLifecycle.h"
 
 #if !XNU_TARGET_OS_OSX || !CONFIG_FIRMLINKS || !CONFIG_UNION_MOUNTS || !BINDFS
 #error NABU desktop owner root requires actual macOS, firmlink, union and bindfs configuration
@@ -24,6 +27,8 @@ using NabuRootAuthenticator = int (*)(IOService *, const char *, uint8_t *);
 using NabuRamSeed = int (*)(const char *, dev_t *, char *, size_t, uint64_t *, uint64_t *, uint8_t *);
 using NabuRamAddon = int (*)(const uint8_t **, uint64_t *);
 extern "C" {
+int nabu_register_storage_start(NabuStorageStart);
+void nabu_source_storage_start(void);
 int nabu_register_ram_addon(NabuRamAddon);
 int native_ram_block_gpu_addon(const uint8_t **, uint64_t *);
 int nabu_register_ram_seed(NabuRamSeed);
@@ -36,6 +41,30 @@ int native_verified_block_volume_device(const char *, dev_t *, char *, size_t);
 static NabuRootAuthenticator gAuthenticator;
 static NabuRamSeed gRamSeed;
 static NabuRamAddon gRamAddon;
+static NabuStorageStart gStorageStart;
+static unsigned gStorageStartState;
+
+extern "C" int nabu_register_storage_start(NabuStorageStart callback)
+{
+  return nabuRegisterStorageStart(gStorageStart, callback) ? 1 : 0;
+}
+
+// The BSD call site is immediately after vfsinit. Load completion establishes
+// the ordinary OSKext constructor/kmod lifecycle before the callback is used.
+extern "C" void nabu_source_storage_start(void)
+{
+  struct Operations {
+    void stage(const char *name) { IOLog("NABU storage: %s\n", name); }
+    bool load(const char *identifier) {
+      OSReturn status = OSKextLoadKextWithIdentifier(identifier);
+      if (status != kOSReturnSuccess)
+        IOLog("NABU storage: load %s failed status=%x\n", identifier, status);
+      return status == kOSReturnSuccess;
+    }
+  } operations;
+  const char *failure = nabuStartStorageOnce(gStorageStartState, gStorageStart, operations);
+  if (failure) panic("NABU late storage: %s", failure);
+}
 
 extern "C" int nabu_register_ram_addon(NabuRamAddon callback)
 {

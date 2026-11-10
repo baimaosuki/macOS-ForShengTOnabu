@@ -105,6 +105,7 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
         'static_assert(TARGET_OS_OSX == 1, "requires macOS storage ABI");\n'
         + recovery_prefix +
         f'#include "{upstream}"\n' +
+        ('#include "NabuStorageModule.h"\n' if transport == 'ufs' and root_mode == 'desktop' else '') +
         (f'#include "{display["source"]}"\n' if display else '') +
         '#include <mach/kmod.h>\n'
         + ('#include <sys/types.h>\n'
@@ -114,7 +115,7 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
            'extern "C" int nabu_ram_gpu_addon(const uint8_t **, uint64_t *);\n'
            if transport == 'ufs' and root_mode == 'desktop' else '') +
         f'extern "C" kern_return_t {entry_prefix}_start(kmod_info_t *, void *) {{ '
-        + ('if (!nabu_register_ram_seed(nabu_ram_data_volume_seed) || !nabu_register_ram_addon(nabu_ram_gpu_addon)) return KERN_FAILURE; '
+        + ('if (!nabu_register_ram_seed(nabu_ram_data_volume_seed) || !nabu_register_ram_addon(nabu_ram_gpu_addon) || !nabu_register_storage_start(nabu_storage_module_start)) return KERN_FAILURE; '
            if transport == 'ufs' and root_mode == 'desktop' else '') +
         'return KERN_SUCCESS; }\n'
         f'extern "C" kern_return_t {entry_prefix}_stop(kmod_info_t *, void *) {{ return KERN_FAILURE; }}\n'
@@ -140,7 +141,8 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
     command[1:1] = ['-I', str(destination / 'include')]
     if root_mode == 'desktop':
         command[1:1] = ['-I', str(root / 'UniXNU/kits/VerifiedRoot/include'),
-                        '-I', str(root / 'UniXNU/drivers/NativeVirtioBlock')]
+                        '-I', str(root / 'UniXNU/drivers/NativeVirtioBlock'),
+                        '-I', str(upstream.parent)]
     if transport == 'virtio':
         command[1:1] = ['-DNATIVE_QEMU_SCRATCH_BLOCK=1']
     else:
@@ -274,9 +276,9 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
             # The root personality has no UFS register resources on NABU.
             del info['IOKitPersonalities']['NativeUfsRoot']
         if root_mode == 'desktop':
-            info['IOKitPersonalities']['NativeRamData'] = dict(CFBundleIdentifier=bundle,
-                IOClass='NativeRamBlock', IOProviderClass='IOPlatformExpertDevice',
-                IOMatchCategory='NativeRamBlock', IOProbeScore=500)
+            # Both devices are started by the VFS-late kernel/module bridge.
+            # Leaving either automatic entry creates a second startup path.
+            info['IOKitPersonalities'] = {}
     if display:
         info['IOKitPersonalities']['NativeGOPDisplay'] = dict(
             CFBundleIdentifier=bundle, IOClass='NativeGOPDisplay',
@@ -312,6 +314,7 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
                         root_publication_sha256=hashlib.sha256((upstream.parent / 'RootPublication.h').read_bytes()).hexdigest())
     if transport == 'ufs' and root_mode == 'desktop':
         evidence.update(desktop_owner_policy=owner_policy,
+                        late_storage_start=True, automatic_storage_personalities=False,
                         desktop_policy_deferred=defer_desktop_policy,
                         deferred_native_link_has_chains=has_chains,
                         requires_local_owner_relink=defer_desktop_policy,

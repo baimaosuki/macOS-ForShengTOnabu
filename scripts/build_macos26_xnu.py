@@ -144,7 +144,7 @@ def apply_series(tree: Path, patch: Path) -> None:
                             capture_output=True)
     if strict.returncode == 0:
         return
-    if patch.name == 'integrated.patch' and patch.parent.name == 'desktop':
+    if patch.name in ('integrated.patch', 'late-storage-start.patch') and patch.parent.name == 'desktop':
         raise ValueError('desktop filesystem integration preimage changed; refuse fuzzy placement: '
                          + strict.stderr.decode(errors='replace')[:500])
     fuzzed = subprocess.run(['patch', '-p1', '-N', '-s', '--fuzz=3', '-r', '-', '-i', str(patch)],
@@ -200,9 +200,13 @@ def audit_desktop_source(source: Path) -> dict:
     root = (source / 'bsd/kern/bsd_init.c').read_text()
     if 'native_verified_block_root_authorized(device)' not in root or 'if (autherr && !owner_authorized)' not in root:
         raise ValueError('desktop rootauth must call the actual owner authorization bridge')
+    if (root.count('nabu_source_storage_start();') != 1 or
+            not root.index('vfsinit();') < root.index('nabu_source_storage_start();') < root.index('\n\tbsd_autoconf();')):
+        raise ValueError('desktop storage must start once after vfsinit and before IOBSD publication')
     return dict(scratch_allocation_before_mount=True, owner_query_in_rootauth=True,
                 cache_before_data_before_launchd=True, data_firmlinks=True,
-                app_called_from_data=True, root_uuid_from_paired_build=True)
+                app_called_from_data=True, root_uuid_from_paired_build=True,
+                storage_start_after_vfsinit=True)
 
 
 def save(record: dict) -> None:
@@ -812,12 +816,15 @@ def link_kernel(args, record, common, sdk, source, env):
         required = ('_native_verified_block_root_authorized', '_native_verified_block_manifest_sha384',
                     '_native_verified_block_volume_device', '_nabu_register_root_authenticator',
                     '_nabu_register_ram_seed', '_native_ram_block_volume_seed',
+                    '_nabu_register_storage_start', '_nabu_source_storage_start',
                     '_native_owner_root_accepted', '_native_owner_cache_status',
                     '_native_owner_data_stage', '_native_owner_firmlink_count',
                     '_native_owner_app_cryptex_stage')
         missing = [name for name in required if name not in actual]
         if missing:
             raise ValueError('linked desktop kernel omitted owner/root/Data code: ' + ', '.join(missing))
+        from nabu_storage_contract import audit_kernel
+        record['late_storage_kernel'] = audit_kernel(destination.read_bytes(), actual)
         record['desktop_kernel'] = dict(build='25F71', owner_callback_bridges=True,
             required_symbols={name: hex(actual[name]) for name in required},
             systemos_union=True, data_mount='/System/Volumes/Data', firmlinks=True,
@@ -885,6 +892,7 @@ def main() -> None:
         if sha(integrated) != manifest['integrated_sha256']:
             raise ValueError('desktop integrated filesystem patch changed')
         PATCHES.append(integrated)
+        PATCHES.append(desktop / 'late-storage-start.patch')
         DESKTOP_CFLAGS = (' -DXNU_OWNER_ROOT_AUDIT=1 -DXNU_OWNER_ROOT_TRUST=1 '
             '-DXNU_OWNER_CACHE_MOUNT=1 -DXNU_OWNER_CACHE_STARTUP=1 -DXNU_OWNER_BOOT_MANIFEST=1 '
             '-DXNU_OWNER_UNION_SYSTEMOS=1 -DXNU_OWNER_DATA_MOUNT=1 -DXNU_NATIVE_RAM_BLOCK=1 '

@@ -19,6 +19,15 @@ def compiled_evidence(compiled):
     The CI log and actual objects establish compilation; they do not establish
     a bootable bundle. The local link below supplies and verifies that bundle.
     """
+    wrapper = (compiled / 'NativeUfs.cpp').read_text()
+    if ('#include "NabuStorageModule.h"' not in wrapper or
+            'nabu_register_storage_start(nabu_storage_module_start)' not in wrapper):
+        raise ValueError('compiled runtime omitted the paired VFS-late startup callback')
+    for name in ('NabuStorageModule.h', 'NabuStorageLifecycle.h'):
+        staged = list(compiled.glob('source-*/drivers/NativeUfs/' + name))
+        current = Path(__file__).resolve().parents[1] / 'platform/nabu/macos26/storage' / name
+        if len(staged) != 1 or staged[0].read_bytes() != current.read_bytes():
+            raise ValueError('compiled late startup header differs: ' + name)
     if (compiled / 'build.json').exists():
         return json.loads((compiled / 'build.json').read_text())
     parent = json.loads((compiled.parent / 'build.json').read_text())
@@ -44,11 +53,7 @@ def compiled_evidence(compiled):
         CFBundleExecutable='NativeUfs',OSBundleRequired='Root',OSBundleLibraries={
         'com.apple.iokit.IOStorageFamily':'2.1','com.apple.kpi.iokit':'25.0',
         'com.apple.kpi.libkern':'25.0','com.apple.kpi.mach':'25.0','com.apple.kpi.private':'25.0'},
-        IOKitPersonalities={'NativeUfs':dict(CFBundleIdentifier=bundle,IOClass='NativeUfs',
-            IOProviderClass='IOPlatformDevice',IOProbeScore=1000,
-            IONameMatch=['qcom,sm8150-ufshc','qcom,ufshc']),
-            'NativeRamData':dict(CFBundleIdentifier=bundle,IOClass='NativeRamBlock',
-            IOProviderClass='IOPlatformExpertDevice',IOMatchCategory='NativeRamBlock',IOProbeScore=500)})
+        IOKitPersonalities={})
     return dict(bundle=bundle,architecture='arm64',root_mode='desktop',board='nabu',
         source_integration=dict(board='nabu',source_sha256=hashlib.sha256(source.read_bytes()).hexdigest()),
         desktop_policy_deferred=True,root_partition='macosroot',root_lun=0,android_userdata_used=False,
@@ -112,15 +117,21 @@ def link(compiled: Path, policy: Path, destination: Path) -> dict:
     defined = symbols(binary)
     for name in ('_verified_root_policies', '_verified_root_policy_count', '_verified_root_key',
                  '_vr_open', '_vr_verify_block', '_vr_xnu_crypto', '_kmod_info',
-                 '__ZN14NativeRamBlock10gMetaClassE', '_nabu_ram_data_volume_seed'):
+                 '__ZN14NativeRamBlock10gMetaClassE', '_nabu_ram_data_volume_seed',
+                 '_nabu_storage_module_start'):
         if name not in defined:
             raise ValueError('final UFS module omitted required definition: ' + name)
     if 'generated_info' in evidence:
         (destination / 'Info.plist').write_bytes(plistlib.dumps(evidence.pop('generated_info')))
     else:
         shutil.copy2(compiled / 'Info.plist', destination / 'Info.plist')
+    info = plistlib.loads((destination / 'Info.plist').read_bytes())
+    if any(p.get('IOClass') in ('NativeUfs', 'NativeRamBlock')
+           for p in info.get('IOKitPersonalities', {}).values()):
+        raise ValueError('late storage cannot retain an automatic UFS/Data personality')
     evidence.update(binary_sha256=hashlib.sha256(data).hexdigest(),
                     desktop_policy_deferred=False, desktop_owner_policy=contract,
+                    late_storage_start=True, automatic_storage_personalities=False,
                     compiled_objects_sha256={Path(p).name: hashlib.sha256(Path(p).read_bytes()).hexdigest()
                                              for p in objects},
                     owner_policy_bytes=sum((policy / n / 'manifest.bin').stat().st_size
