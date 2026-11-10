@@ -1,0 +1,59 @@
+diff --git a/osfmk/arm64/sleh.c b/osfmk/arm64/sleh.c
+--- a/osfmk/arm64/sleh.c
++++ b/osfmk/arm64/sleh.c
+@@ -43,6 +43,7 @@
+ #include <kern/restartable.h>
+ #include <kern/socd_client.h>
+ #include <kern/task.h>
++#include <sys/proc.h>
+ #include <kern/thread.h>
+ #include <kern/zalloc_internal.h>
+ #include <mach/exception.h>
+@@ -2151,6 +2152,47 @@
+ 		__builtin_unreachable();
+ 	}
+ #endif /* HAS_MTE */
++
++	/*
++	 * Temporary diagnostic: when PID 1 dies on an unrecoverable EL0 data abort,
++	 * the panic reason carries the raw fault context (user PC/LR/SP, ESR, FAR,
++	 * the faulting instruction and every general register) so the effective
++	 * address of the faulting access can be recomputed off-device.
++	 * This sits after the recovery path has failed: recoverable faults never
++	 * reach it, so nothing here consumes the normal fault accounting.
++	 */
++	if (proc_selfpid() == 1 &&
++	    is_saved_state64(state) &&
++	    ESR_EC(esr) == ESR_EC_DABORT_EL0 &&
++	    fault_addr == 0x80080000ULL) {
++		const arm_saved_state64_t *ss = const_saved_state64(state);
++		uint32_t insn = 0;
++		int fetch_error = copyin((user_addr_t)ss->pc, &insn, sizeof(insn));
++
++		panic("NABU-PID1-FAULT "
++		    "UPC=%llx ULR=%llx USP=%llx "
++		    "UESR=%llx UFAR=%llx VMERR=%llx "
++		    "INSN=%08x FETCH=%d "
++		    "X0=%llx X1=%llx X2=%llx X3=%llx "
++		    "X4=%llx X5=%llx X6=%llx X7=%llx "
++		    "X8=%llx X9=%llx X10=%llx X11=%llx "
++		    "X12=%llx X13=%llx X14=%llx X15=%llx "
++		    "X16=%llx X17=%llx X18=%llx X19=%llx "
++		    "X20=%llx X21=%llx X22=%llx X23=%llx "
++		    "X24=%llx X25=%llx X26=%llx X27=%llx "
++		    "X28=%llx FP=%llx",
++		    ss->pc, ss->lr, ss->sp,
++		    esr, (uint64_t)fault_addr, (uint64_t)codes[0],
++		    insn, fetch_error,
++		    ss->x[0], ss->x[1], ss->x[2], ss->x[3],
++		    ss->x[4], ss->x[5], ss->x[6], ss->x[7],
++		    ss->x[8], ss->x[9], ss->x[10], ss->x[11],
++		    ss->x[12], ss->x[13], ss->x[14], ss->x[15],
++		    ss->x[16], ss->x[17], ss->x[18], ss->x[19],
++		    ss->x[20], ss->x[21], ss->x[22], ss->x[23],
++		    ss->x[24], ss->x[25], ss->x[26], ss->x[27],
++		    ss->x[28], ss->fp);
++	}
+ 
+ 	exception_triage(exc, codes, numcodes);
+ 	__builtin_unreachable();
