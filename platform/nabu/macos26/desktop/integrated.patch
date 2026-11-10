@@ -78,16 +78,15 @@
  bsdinit_task(void)
 --- a/bsd/kern/kern_exec.c
 +++ b/bsd/kern/kern_exec.c
-@@ -187,7 +187,7 @@
- 
+@@ -188,6 +188,7 @@
  #include "kern_exec_internal.h"
  
--#include <CodeSignature/Entitlements.h>
+ #include <CodeSignature/Entitlements.h>
 +#include <CoreEntitlements/CoreEntitlements.h>
  
  #include <mach/exclaves.h>
  
-@@ -7944,8 +7944,1335 @@
+@@ -7944,8 +7945,1335 @@
   *		word width of the kernel. Once the self-exec completes, the
   *		initproc might be different.
   */
@@ -1424,7 +1423,7 @@
  {
  	int retval[2];
  	int error;
-@@ -8017,7 +9344,7 @@
+@@ -8017,7 +9345,7 @@
  	 */
  	init_exec_args.fname = argv0;
  	init_exec_args.argp = scratch_addr;
@@ -1433,7 +1432,7 @@
  
  	/*
  	 * So that init task is set with uid,gid 0 token
-@@ -8039,6 +9366,8 @@
+@@ -8039,6 +9367,8 @@
  #endif
  	"/sbin/launchd",
  };
@@ -1442,7 +1441,7 @@
  
  /*
   * load_init_program
-@@ -8108,11 +9437,28 @@
+@@ -8108,11 +9438,28 @@
  	exec_log_handle = os_log_create("com.apple.xnu.bsd", "exec");
  #endif /* DEVELOPMENT || DEBUG */
  
@@ -1472,7 +1471,7 @@
  
  #if DEBUG || DEVELOPMENT
  	/* Check for boot-arg suffix first */
-@@ -8124,7 +9470,7 @@
+@@ -8124,7 +9471,7 @@
  
  		if (is_release_suffix) {
  			printf("load_init_program: attempting to load /sbin/launchd\n");
@@ -1481,7 +1480,7 @@
  			if (!error) {
  				return;
  			}
-@@ -8135,7 +9481,7 @@
+@@ -8135,7 +9482,7 @@
  			strlcat(launchd_path, launchd_suffix, sizeof(launchd_path));
  
  			printf("load_init_program: attempting to load %s\n", launchd_path);
@@ -1490,7 +1489,7 @@
  			if (!error) {
  				return;
  			} else if (error != ENOENT) {
-@@ -8148,7 +9494,7 @@
+@@ -8148,7 +9495,7 @@
  	error = ENOENT;
  	for (i = 0; i < sizeof(init_programs) / sizeof(init_programs[0]); i++) {
  		printf("load_init_program: attempting to load %s\n", init_programs[i]);

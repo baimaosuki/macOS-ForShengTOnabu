@@ -690,6 +690,8 @@ def compile_sources(args, record: dict) -> None:
                 command.append(value)
             index += 1
         command += ['-Werror']
+        # compile_record already carries the same desktop CFLAGS_EXTRA; make
+        # the required configuration visible in the audit object itself.
         try:
             run(command, 'nabu-root-authorization', record, cwd=Path(compile_record['directory']), env=env)
             record['root_authorization_object'] = dict(source_sha256=sha(original), **audit_object(obj))
@@ -815,6 +817,9 @@ def link_kernel(args, record, common, sdk, source, env):
             systemos_union=True, data_mount='/System/Volumes/Data', firmlinks=True,
             app_cryptex=True, ram_data_volatile=True, runtime_qualified=False)
         record['desktop_kernel']['source_audit'] = audit_desktop_source(source)
+        record['desktop_kernel']['configuration_compile_assertions'] = [
+            'XNU_TARGET_OS_OSX', 'CONFIG_FIRMLINKS', 'CONFIG_UNION_MOUNTS', 'BINDFS',
+            'XNU_OWNER_ROOT_TRUST', 'XNU_OWNER_CACHE_MOUNT', 'XNU_OWNER_DATA_MOUNT', 'XNU_NATIVE_RAM_BLOCK']
     save(record)
 
 

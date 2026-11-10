@@ -167,7 +167,7 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
                                                          '-xc++', '--driver-mode=g++',
                                                          '-fsized-deallocation', '-fc++-static-destructors=none')
                         and not arg.startswith(('-std=', '-stdlib='))]
-            ccommand += ['-x', 'c', '-std=gnu11']
+            ccommand += ['-std=gnu11']
             # -x must precede the input for Clang to select C on inherited recipes.
             ccommand[1:1] = ['-x', 'c']
             run(ccommand, directory + '-' + name, record,

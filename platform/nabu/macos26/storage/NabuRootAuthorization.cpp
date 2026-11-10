@@ -2,6 +2,7 @@
 // Kernel-side owner queries, usable before any dynamically prelinked transport
 // exists. Only the UFS runtime supplies the callback; absent registration denies.
 #include <IOKit/IOService.h>
+#include <IOKit/IOLib.h>
 #include <IOKit/IOBSD.h>
 #include <libkern/c++/OSData.h>
 #include <libkern/c++/OSDictionary.h>
@@ -12,9 +13,24 @@
 #include <libkern/libkern.h>
 #include <sys/param.h>
 
+#if !XNU_TARGET_OS_OSX || !CONFIG_FIRMLINKS || !CONFIG_UNION_MOUNTS || !BINDFS
+#error NABU desktop owner root requires actual macOS, firmlink, union and bindfs configuration
+#endif
+#if !XNU_OWNER_ROOT_TRUST || !XNU_OWNER_CACHE_MOUNT || !XNU_OWNER_DATA_MOUNT || !XNU_NATIVE_RAM_BLOCK
+#error NABU desktop owner root/cache/Data code must be compiled into this kernel
+#endif
+
 using NabuRootAuthenticator = int (*)(IOService *, const char *, uint8_t *);
-static NabuRootAuthenticator gAuthenticator;
 using NabuRamSeed = int (*)(const char *, dev_t *, char *, size_t, uint64_t *, uint64_t *, uint8_t *);
+extern "C" {
+int nabu_register_ram_seed(NabuRamSeed);
+int native_ram_block_volume_seed(const char *, dev_t *, char *, size_t, uint64_t *, uint64_t *, uint8_t *);
+int nabu_register_root_authenticator(NabuRootAuthenticator);
+int native_verified_block_root_authorized(dev_t);
+int native_verified_block_manifest_sha384(dev_t, const char *, uint8_t[48]);
+int native_verified_block_volume_device(const char *, dev_t *, char *, size_t);
+}
+static NabuRootAuthenticator gAuthenticator;
 static NabuRamSeed gRamSeed;
 
 extern "C" int nabu_register_ram_seed(NabuRamSeed callback)
@@ -32,7 +48,16 @@ extern "C" int native_ram_block_volume_seed(const char *uuid, dev_t *device, cha
   if (!uuid || strcmp(uuid, "0A5EED00-0000-4000-8000-000000000001") ||
       !device || !path || !base || !bytes || !digest) return 0;
   auto callback = __atomic_load_n(&gRamSeed, __ATOMIC_ACQUIRE);
-  return callback ? callback(uuid, device, path, size, base, bytes, digest) : 0;
+  // APFS matches RAM Data asynchronously. Wait on the real UUID/provider
+  // condition; a fixed boot delay cannot establish that media is ready.
+  for (unsigned elapsed = 0; elapsed <= 180000; elapsed += 100) {
+    callback = __atomic_load_n(&gRamSeed, __ATOMIC_ACQUIRE);
+    if (callback && callback(uuid, device, path, size, base, bytes, digest)) return 1;
+    if (elapsed == 180000) break;
+    if (elapsed % 10000 == 0) IOLog("NABU RAM Data: waiting for UUID %s elapsed=%u ms\n", uuid, elapsed);
+    IOSleep(100);
+  }
+  return 0;
 }
 
 extern "C" int nabu_register_root_authenticator(NabuRootAuthenticator callback)

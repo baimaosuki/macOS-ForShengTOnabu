@@ -7,7 +7,7 @@ struct NabuUfsResources {
   uint32_t stream, blockBytes;
 };
 
-static bool nabuUfsResourcesMatch(const NabuUfsResources &r)
+static inline bool nabuUfsResourcesMatch(const NabuUfsResources &r)
 {
   const auto &b = nabu_ufs::kBoard;
   return r.hc[0] == b.hcBase && r.hc[1] == b.hcBytes &&
@@ -16,16 +16,27 @@ static bool nabuUfsResourcesMatch(const NabuUfsResources &r)
          r.stream == b.streamId && r.blockBytes == b.logicalBlockBytes;
 }
 
-static bool nabuUfsClocksReady(uint32_t gdsc, uint32_t axi, uint32_t ahb)
+static inline bool nabuUfsBranchReady(uint32_t cbcr)
 {
-  return gdsc != UINT32_MAX && axi != UINT32_MAX && ahb != UINT32_MAX &&
-         (gdsc & 0x80000000U) && !(axi & 0x80000000U) && !(ahb & 0x80000000U);
+  // Linux v6.17 gcc-sm8150.c gives both UFS PHY AXI/AHB enable_mask=BIT(0),
+  // hwcg_bit=1. clk-branch.c skips CLK_OFF polling when HWCG is set: an idle
+  // hardware-gated branch may report bit31 even though its enable is asserted.
+  // No vote/enable and no HW gate is never enough, even if CLK_OFF reads zero.
+  return cbcr != UINT32_MAX && (cbcr & 3U) &&
+         (!(cbcr & 0x80000000U) || (cbcr & 2U));
+}
+
+static inline bool nabuUfsClocksReady(uint32_t gdsc, uint32_t axi, uint32_t ahb)
+{
+  return gdsc != UINT32_MAX && (gdsc & 0x80000000U) &&
+         nabuUfsBranchReady(axi) && nabuUfsBranchReady(ahb);
 }
 
 // A read request expressed in bytes, resolved once into the device's own units.
 //
 // The controller moves whole 4096-byte blocks (NabuBoard.h logicalBlockBytes), a
-// GPT or an APFS container is addressed in 512-byte sectors, and a caller may ask
+// the device GPT uses 4096-byte LBAs; each published image window presents
+// 512-byte media sectors, and a caller may ask
 // for any byte range inside a window.  So a request is never a block number plus
 // a guessed unit: it carries the byte offset and length, and this resolves the
 // aligned device read that covers it plus the head and tail bytes that fall
@@ -47,7 +58,7 @@ struct NabuUfsWindow {
   uint64_t tailSlack;     // bytes inside the last block after the request
 };
 
-static bool nabuUfsWindowFromBytes(uint64_t offsetBytes, uint64_t lengthBytes,
+static inline bool nabuUfsWindowFromBytes(uint64_t offsetBytes, uint64_t lengthBytes,
                                    uint64_t capacityBytes, uint64_t maxBlocks,
                                    NabuUfsWindow &out)
 {

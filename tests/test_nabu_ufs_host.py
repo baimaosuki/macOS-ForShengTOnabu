@@ -77,6 +77,10 @@ class NabuUfsNativeContract(unittest.TestCase):
         out = self._compile_and_run('nabu_ufs_windowplan.cpp')
         self.assertIn('root-window gate checks passed', out)
 
+    def test_clock_gate_and_idle_status(self) -> None:
+        out = self._compile_and_run('nabu_ufs_clocks.cpp')
+        self.assertIn('clock combinations and power/idle refusal checks passed', out)
+
 
 class Macos27Components(unittest.TestCase):
     def test_component_resolver(self) -> None:
