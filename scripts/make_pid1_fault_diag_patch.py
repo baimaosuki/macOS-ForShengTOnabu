@@ -13,9 +13,6 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / 'sources/macos26/xnu/osfmk/arm64/sleh.c'
 OUTPUT = ROOT / 'platform/nabu/macos26/patches/zzz-nabu-pid1-fault-diag.patch'
 
-INCLUDE_ANCHOR = '#include <kern/task.h>\n'
-INCLUDE_NEW = '#include <kern/task.h>\n#include <sys/proc.h>\n'
-
 TRIAGE_ANCHOR = (
     '\texception_triage(exc, codes, numcodes);\n'
     '\t__builtin_unreachable();\n'
@@ -39,7 +36,7 @@ BLOCK = '''\t/*
 \t    fault_addr == 0x80080000ULL) {
 \t\tconst arm_saved_state64_t *ss = const_saved_state64(state);
 \t\tuint32_t insn = 0;
-\t\tint fetch_error = copyin((user_addr_t)ss->pc, &insn, sizeof(insn));
+\t\tint fetch_error = copyin((user_addr_t)ss->pc, (char *)&insn, sizeof(insn));
 
 \t\tpanic("NABU-PID1-FAULT "
 \t\t    "UPC=%llx ULR=%llx USP=%llx "
@@ -71,11 +68,9 @@ BLOCK = '''\t/*
 
 def main() -> int:
     text = SOURCE.read_text()
-    if text.count(INCLUDE_ANCHOR) != 1:
-        raise SystemExit('include anchor is not unique')
     if text.count(TRIAGE_ANCHOR) != 1:
         raise SystemExit('triage anchor is not unique')
-    patched = text.replace(INCLUDE_ANCHOR, INCLUDE_NEW, 1)
+    patched = text
     patched = patched.replace(TRIAGE_ANCHOR, BLOCK + TRIAGE_ANCHOR, 1)
     diff = unified_diff(text.splitlines(keepends=True),
                         patched.splitlines(keepends=True),

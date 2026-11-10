@@ -1,15 +1,7 @@
 diff --git a/osfmk/arm64/sleh.c b/osfmk/arm64/sleh.c
 --- a/osfmk/arm64/sleh.c
 +++ b/osfmk/arm64/sleh.c
-@@ -43,6 +43,7 @@
- #include <kern/restartable.h>
- #include <kern/socd_client.h>
- #include <kern/task.h>
-+#include <sys/proc.h>
- #include <kern/thread.h>
- #include <kern/zalloc_internal.h>
- #include <mach/exception.h>
-@@ -2151,6 +2152,47 @@
+@@ -2151,6 +2151,47 @@
  		__builtin_unreachable();
  	}
  #endif /* HAS_MTE */
@@ -28,7 +20,7 @@ diff --git a/osfmk/arm64/sleh.c b/osfmk/arm64/sleh.c
 +	    fault_addr == 0x80080000ULL) {
 +		const arm_saved_state64_t *ss = const_saved_state64(state);
 +		uint32_t insn = 0;
-+		int fetch_error = copyin((user_addr_t)ss->pc, &insn, sizeof(insn));
++		int fetch_error = copyin((user_addr_t)ss->pc, (char *)&insn, sizeof(insn));
 +
 +		panic("NABU-PID1-FAULT "
 +		    "UPC=%llx ULR=%llx USP=%llx "
