@@ -8,7 +8,7 @@
  
  static UfsRootDiagnostics gRootDiagnostic;
  static bool gRootDiagnosticEnabled;
-@@ -1872,6 +1873,32 @@
+@@ -1964,6 +1965,32 @@
      IOFree (layout, sizeof (RootLayout));
      return false;
    }
@@ -40,4 +40,4 @@
 +  }
    gStoreGeometry = { true, layout->userdataFirst, layout->userdataLast, layout->imageBytes, layout->gptEntriesLba,
                       layout->gptHeaderCrc, layout->gptEntriesCrc, layout->gptEntryCount };
-   const char *names[4] = {};
+ #if defined(NATIVE_UFS_RECOVERY_ROOT) && NATIVE_UFS_RECOVERY_ROOT
