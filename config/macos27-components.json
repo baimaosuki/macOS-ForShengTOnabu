@@ -1,7 +1,7 @@
 {
   "schema": "nabu-macos27-components-v1",
   "build": "26C5035r",
-  "product_version": null,
+  "product_version": "27.3",
   "device_class": "j180dap",
   "variant": "Customer Erase Install (IPSW)",
   "content_encoding": "aea",

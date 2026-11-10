@@ -212,7 +212,8 @@ def resolve(manifest_path: Path, ipsw_url: str, device_class: str, build: str,
     return {
         'schema': 'nabu-macos27-components-v1',
         'build': build,
-        'product_version': info.get('ProductMarketingVersion') or info.get('ProductVersion'),
+        'product_version': (identity.get('ProductMarketingVersion')
+                            or info.get('ProductVersion')),
         'device_class': device_class,
         'variant': info.get('Variant'),
         'content_encoding': info.get('ContentEncoding'),
