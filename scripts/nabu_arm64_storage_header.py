@@ -17,8 +17,30 @@ def write(driver, output, at):
     # The sparse kalloc index must point inside __PRELINK_TEXT. Only this header
     # is placed there; the original source module's code remains contiguous at
     # its linked location, preserving its PC-relative instructions.
-    commands.append(struct.pack('<II16s4Q4I', 0x19, 72, b'__TEXT', header_va, 0x4000,
-                                at(header_va, 1), 0x4000, 1, 1, 0, 0))
+    constructors = []
+    # lld's modern chained output stores 32-bit initializer offsets. XNU
+    # OSRuntime consumes S_MOD_INIT_FUNC_POINTERS, so publish actual pointers
+    # in this reserved header page, outside all source code and load commands.
+    for segment in image['segments']:
+        for section in segment['sections']:
+            if section['name'] == '__init_offsets':
+                if section['size'] % 4: raise ValueError('misaligned initializer offsets')
+                for offset in range(0, section['size'], 4):
+                    target = struct.unpack_from('<I', data, section['fileoff'] + offset)[0]
+                    if not any(s['initprot'] & 4 and s['va'] <= target < s['va'] + s['filesize']
+                               for s in image['segments']):
+                        raise ValueError('initializer offset is not actual source code')
+                    constructors.append(base + target)
+    if len(constructors) != 2:
+        raise ValueError('requires the two real UFS and RAM Data translation-unit constructors')
+    init_va = header_va + 0x3000
+    commands.append(struct.pack('<II16s4Q4I', 0x19, 152, b'__TEXT', header_va, 0x4000,
+                                at(header_va, 1), 0x4000, 1, 1, 1, 0) +
+                    struct.pack('<16s16sQQ8I', b'__mod_init_func', b'__TEXT', init_va,
+                                8 * len(constructors), at(init_va, 1), 3, 0, 0, 9, 0, 0, 0))
+    struct.pack_into('<%dQ' % len(constructors), output, at(init_va, 8 * len(constructors)), *constructors)
+    driver['constructors'] = dict(section=hex(init_va), targets=[hex(v) for v in constructors],
+                                  source='actual __init_offsets converted for XNU OSRuntime')
     for cmd, pos, length in image['commands']:
         raw = bytearray(data[pos:pos + length])
         if cmd == 0x19:
@@ -56,7 +78,7 @@ def write(driver, output, at):
     if not any(c == 0x1e for c, _, _ in image['commands']):
         commands.append(struct.pack('<4I', 0x1e, 16, 0, 0))
     rebuilt = b''.join(commands)
-    if len(rebuilt) + 32 > 0x4000:
+    if len(rebuilt) + 32 > 0x3000:
         raise ValueError('UFS Mach-O header exceeds its reserved text page')
     header = bytearray(data[:32])
     flags, = struct.unpack_from('<I', header, 24)

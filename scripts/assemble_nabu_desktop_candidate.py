@@ -12,7 +12,7 @@ from native_macho import macho
 from prepare_nabu_desktop_policy import validate
 
 
-def assemble(kernel, prelink_report, policy, data, root, output):
+def assemble(kernel, prelink_report, policy, data, root, loader_build, output):
     report = json.loads(prelink_report.read_text())
     raw = kernel.read_bytes()
     image = macho(raw, 'arm64')
@@ -47,7 +47,19 @@ def assemble(kernel, prelink_report, policy, data, root, output):
     # bounded nonzero extents into volatile pages. Do not allocate 3 GiB here.
     if extent + len(seed) + (2 << 20) > owned: raise ValueError('loader owned window too small')
     output.mkdir(parents=True, exist_ok=False)
-    payload = output / 'Payloads'; payload.mkdir()
+    entry = output / 'EFI/UniXNU'; entry.mkdir(parents=True)
+    payload = entry / 'Payloads'; payload.mkdir()
+    existing = Path(__file__).resolve().parents[1] / 'platform/nabu/macos26/esp/EFI/UniXNU'
+    driver = loader_build / 'build/RELEASE_CLANGPDB/AARCH64/DarwinBoot.efi'
+    loader = driver.read_bytes()
+    loader_record = json.loads((loader_build / 'build.json').read_text())
+    if loader_record['efi_sha256'] != hashlib.sha256(loader).hexdigest():
+        raise ValueError('loader binary differs from actual build evidence')
+    if not all(marker in loader for marker in (b'PackedRAMDisk', b'DBRDISK1')):
+        raise ValueError('loader lacks the actual packed Data contract')
+    (entry / 'Drivers').mkdir()
+    shutil.copy2(driver, entry / 'Drivers/DarwinBoot.efi')
+    shutil.copy2(existing / 'UniXNU.efi', entry / 'UniXNU.efi')
     shutil.copy2(kernel, payload / 'kernel.macho')
     shutil.copy2(data, payload / 'data.dbr')
     shutil.copy2(policy / 'owner-public.pem', output / 'owner-public.pem')
@@ -73,11 +85,15 @@ def assemble(kernel, prelink_report, policy, data, root, output):
             '[[entry]]\nid = "nabu-ufs-root-test"\ntitle = "NABU 25F71 UFS/root test"\n'
             'type = "xnu"\npath = "Payloads/kernel.macho"\nadt = "Payloads/kernel.macho.adt"\n'
             'initrd = "Payloads/data.dbr"\nargs = "' + args + '"\n')
-    (output / 'unixnu.toml').write_text(menu)
+    (entry / 'unixnu.toml').write_text(menu)
     files = {str(p.relative_to(output)):dict(bytes=p.stat().st_size,sha256=hashlib.sha256(p.read_bytes()).hexdigest())
              for p in output.rglob('*') if p.is_file() and not p.is_symlink()}
     result = dict(schema='nabu-25F71-ufs-root-test-v1',build='25F71',files=files,
         kernel_span=extent,owned_memory_bytes=owned,packed_seed_bytes=len(seed),data_logical_bytes=logical,
+        loader=loader_record,source_module_pointer_formats=storage['pointer_formats'],
+        ufs_pointer_readback_count=len(storage['pointer_relocations']),
+        external_branch_readback_count=report['branch_relocation_count'],constructors=storage['constructors'],
+        esp_bundle_bytes=sum(p['bytes'] for n,p in files.items() if n.startswith('EFI/')),
         loader_preserves_packed=True,ufs_resource_contract_checked=True,boot_args=args,
         kernel_architecture='arm64',root_image=dict(path=str(root_image.resolve()), **root_record),
         root_uuid='47719F50-5527-44A3-9F59-8170528D8C14',
@@ -85,11 +101,13 @@ def assemble(kernel, prelink_report, policy, data, root, output):
         data_uuid='0A5EED00-0000-4000-8000-000000000001',owner_contract=contract,
         hardware_executed=False,root_mount_verified=False,userspace_verified=False,desktop_verified=False,
         expected_userspace_blocker='Original arm64e launchd is rejected by the ARM64 CPU grade (EBADARCH).',
-        deployment_performed=False,loader_binary_included=False)
+        deployment_performed=False,loader_binary_included=True,
+        packed_slot_fill="DarwinBoot validates zero slot then writes allocated physical base and exact packed file length.",
+        artifact_status="host-validated UFS/root hardware test candidate; expected EL0 EBADARCH stop")
     (output / 'candidate.json').write_text(json.dumps(result,indent=2)+'\n')
     return result
 
 if __name__ == '__main__':
     p=argparse.ArgumentParser(description=__doc__)
-    for n in ('kernel','prelink-report','policy','data','root','output'):p.add_argument('--'+n,type=Path,required=True)
-    a=p.parse_args(); print(json.dumps(assemble(a.kernel,a.prelink_report,a.policy,a.data,a.root,a.output),indent=2))
+    for n in ('kernel','prelink-report','policy','data','root','loader-build','output'):p.add_argument('--'+n,type=Path,required=True)
+    a=p.parse_args(); print(json.dumps(assemble(a.kernel,a.prelink_report,a.policy,a.data,a.root,a.loader_build,a.output),indent=2))

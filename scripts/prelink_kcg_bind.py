@@ -1418,7 +1418,8 @@ def run(args):
     if storage:
         bad = [p for p in storage['relocations']
                if struct.unpack_from('<Q', output, file_position(p['new_site'], 8))[0] != p['new_target']
-               or not inside(out_ranges, p['new_target'])]
+               or not (inside(out_ranges, p['new_target'])
+                       or p['new_target'] == 0 and p['import_name'] == '_boot_progress_poll')]
         check('every UFS import/rebase equals its resolved ordinary ARM64 target', not bad,
               '%d bound pointers' % len(storage['relocations']))
         check('UFS final image fits the real 512 MiB allocation', len(output) <= 0x20000000)
@@ -1591,6 +1592,8 @@ def run(args):
             header=hex(storage['header_va']), base=hex(storage['base']), kmod=hex(storage['kmod']),
             imports=storage['imports'], pointer_formats=storage['pointer_formats'],
             vtable_abi=storage['vtable_abi'], build=storage['evidence'],
+            ram_data_vtable_abi=storage.get('ram_data_vtable_abi'),
+            constructors=storage['constructors'],
             pointer_relocations=storage['relocations'], kernel_integrated=True,
             runtime_qualified=False, hardware_qualified=False)
         report['storage_driver']['source_module'] = str(Path(storage_directory) / 'NativeUfs.macho')

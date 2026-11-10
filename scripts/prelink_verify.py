@@ -368,7 +368,8 @@ def main(argv=None):
     if report.get('storage_driver'):
         storage = report['storage_driver']
         check('UFS final image fits 512 MiB', len(data) <= 0x20000000)
-        check('UFS keeps ordinary ARM64 format-6 bindings', storage['pointer_formats'] == [6])
+        check('UFS keeps ordinary ARM64 64-bit chained bindings',
+              storage['pointer_formats'] in ([2], [6]))
         check('UFS method table was audited', storage['vtable_abi']['ordinary_arm64'] is True
               and storage['vtable_abi']['slots'] > 0)
         code_mismatch = []

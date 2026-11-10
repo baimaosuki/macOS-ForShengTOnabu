@@ -246,9 +246,11 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
          '-no_adhoc_codesign', '-headerpad', '0x1000',
          *objects, '-o', str(binary)], directory + '-link', record, env=env)
     image = macho(binary.read_bytes(), architecture)
+    has_chains = any(c == 0x80000034 for c, _, _ in image['commands'])
+    deferred_classic = architecture == 'arm64' and root_mode == 'desktop' and defer_desktop_policy
     if (image['kind'] != 11 or (architecture == 'arm64e' and not image['subtype'] & 0x40000000)
-            or not any(c == 0x80000034 for c, _, _ in image['commands'])):
-        raise ValueError('standalone transport requires an ARM64E bundle with chained imports')
+            or not has_chains and not deferred_classic):
+        raise ValueError('standalone transport requires the actual architecture and supported chained imports')
     info = dict(CFBundleIdentifier=bundle, CFBundleVersion='1.0.0',
                 CFBundlePackageType='KEXT', CFBundleExecutable=component,
                 OSBundleRequired='Root', OSBundleLibraries={
@@ -311,6 +313,8 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
     if transport == 'ufs' and root_mode == 'desktop':
         evidence.update(desktop_owner_policy=owner_policy,
                         desktop_policy_deferred=defer_desktop_policy,
+                        deferred_native_link_has_chains=has_chains,
+                        requires_local_owner_relink=defer_desktop_policy,
                         authentication='owner-signed-blocks-and-volume-uuid',
                         recovery_root=None, macoslog=None)
         evidence['ram_data'] = ram_evidence

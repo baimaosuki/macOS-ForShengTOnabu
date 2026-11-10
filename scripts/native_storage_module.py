@@ -222,16 +222,24 @@ def prepare(directory: Path, base: int, native: dict, original: bytes,
         name_offset = raw >> (32 if fmt == 3 else 9)
         ordinal = signed(raw & (0xffff if fmt == 3 else 0xff), 16 if fmt == 3 else 8)
         weak = bool(raw >> (16 if fmt == 3 else 8) & 1)
-        if ordinal not in (-2, -3) or weak:
-            raise ValueError('transport requires explicit nonweak flat imports')
+        if ordinal not in (-2, -3):
+            raise ValueError('transport requires explicit flat imports')
         p = strings_at + name_offset
         end = blob.find(b'\0', p)
         if not strings_at <= p < end < len(blob):
             raise ValueError('unterminated transport import')
         name = blob[p:end].decode()
+        # Upstream guards this optional UI poll with `if (boot_progress_poll)`.
+        # Preserve the ordinary Mach-O weak-undefined/null contract when the
+        # NABU kernel has no such UI function. No storage/auth import may vanish.
+        absent_poll = weak and name == '_boot_progress_poll' and name not in native and name not in imported
+        if weak and not absent_poll:
+            raise ValueError('unreviewed weak transport import: ' + name)
         addend = 0 if fmt == 1 else struct.unpack_from('<q' if fmt == 3 else '<i', blob,
                                                        imports_at + i * stride + stride // 2)[0]
-        imports.append((name, resolve(name) + addend))
+        if absent_poll and addend:
+            raise ValueError('optional poll must not carry an addend')
+        imports.append((name, 0 if absent_poll else resolve(name) + addend))
     if starts + 4 > len(blob):
         raise ValueError('transport chain starts exceed fixups')
     segments, = struct.unpack_from('<I', blob, starts)
@@ -246,7 +254,10 @@ def prepare(directory: Path, base: int, native: dict, original: bytes,
         if p + 22 > len(blob):
             raise ValueError('transport segment chain header exceeds fixups')
         length, page_size, pointer_format, segment_offset, _, pages = struct.unpack_from('<IHHQIH', blob, p)
-        allowed_formats = (6,) if architecture == 'arm64' else (1, 7, 9, 12)
+        # ld64.lld emits DYLD_CHAINED_PTR_64 (2), Apple dylibs may emit its
+        # image-relative variant (6). This standalone bundle links at VA zero,
+        # so their untagged rebase targets have the same translation here.
+        allowed_formats = (2, 6) if architecture == 'arm64' else (1, 7, 9, 12)
         if (pointer_format not in allowed_formats or page_size not in (4096, PAGE)
                 or segment_offset != seg['va'] or length < 22 + pages * 2
                 or p + length > len(blob) or pages * page_size > seg['size']):
@@ -266,7 +277,7 @@ def prepare(directory: Path, base: int, native: dict, original: bytes,
                 seen.add(site)
                 at = backed_offset(image['segments'], site, 8, len(data))
                 word, = struct.unpack_from('<Q', data, at)
-                if pointer_format == 6:
+                if pointer_format in (2, 6):
                     bind = bool(word >> 63)
                     if bind:
                         index = word & 0xffffff
