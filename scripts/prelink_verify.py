@@ -445,11 +445,21 @@ def main(argv=None):
         check('UFS has exactly one actual prelink registration', len(own_entry) == 1)
         if len(own_entry) == 1:
             check('UFS prelink registration uses actual kmod', own_entry[0]['_PrelinkKmodInfo'] == int(storage['kmod'], 16))
-            personality = own_entry[0]['IOKitPersonalities'].get('NativeUfs', {})
-            check('UFS personality matches NABU resource nub',
-                  personality.get('IOClass') == 'NativeUfs'
-                  and personality.get('IOProviderClass') == 'IOPlatformDevice'
-                  and 'qcom,sm8150-ufshc' in personality.get('IONameMatch', []))
+            personalities = own_entry[0]['IOKitPersonalities']
+            if storage['build'].get('late_storage_start') is True:
+                check('late storage has no automatic UFS or RAM Data instance',
+                      storage['build'].get('automatic_storage_personalities') is False
+                      and not any(p.get('IOClass') in ('NativeUfs', 'NativeRamBlock')
+                                  for p in personalities.values()))
+                bridge = native_symbols.get('_nabu_register_storage_start')
+                check('late storage callback binds the compiled native bridge',
+                      bridge is not None and storage['imports'].get('_nabu_register_storage_start') == bridge)
+            else:
+                personality = personalities.get('NativeUfs', {})
+                check('UFS personality matches NABU resource nub',
+                      personality.get('IOClass') == 'NativeUfs'
+                      and personality.get('IOProviderClass') == 'IOPlatformDevice'
+                      and 'qcom,sm8150-ufshc' in personality.get('IONameMatch', []))
 
     print('== 9. determinism fingerprint')
     print('   image sha256 %s' % hashlib.sha256(data).hexdigest())
