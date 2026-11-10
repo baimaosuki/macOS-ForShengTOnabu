@@ -1,0 +1,29 @@
+--- a/drivers/NativeUfs/NativeUfs.cpp
++++ b/drivers/NativeUfs/NativeUfs.cpp
+@@ -64,6 +64,11 @@
+ volatile uint32_t native_ufs_uic_status = 0;
+ volatile uint32_t native_ufs_uic_result = 0;
+ }
++
++#if defined(NATIVE_UFS_DESKTOP_ROOT) && NATIVE_UFS_DESKTOP_ROOT
++extern "C" int native_ufs_block_authenticates (IOService *, const char *, uint8_t *);
++extern "C" int nabu_register_root_authenticator (int (*)(IOService *, const char *, uint8_t *));
++#endif
+ 
+ class NativeUfs : public IOService {
+   OSDeclareDefaultStructors (NativeUfs)
+@@ -2083,6 +2088,14 @@
+     IOFree (layout, sizeof (RootLayout));
+     return false;
+   }
++#if defined(NATIVE_UFS_DESKTOP_ROOT) && NATIVE_UFS_DESKTOP_ROOT
++  if (!nabu_register_root_authenticator (native_ufs_block_authenticates)) {
++    rootDiagnosticFailure ("owner root authenticator registration refused");
++    IOFree (layout, sizeof (RootLayout));
++    IOService::stop (provider);
++    return false;
++  }
++#endif
+   // Prepare all windows or publish none. Diagnostics never decide policy.
+   gPending = 0;
+   gPendingProvider = this;

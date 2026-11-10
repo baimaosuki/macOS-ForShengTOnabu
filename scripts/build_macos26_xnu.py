@@ -22,6 +22,7 @@ KERNEL_NAME = f'kernel.development.{BOARD}'
 BASE_PLATFORM = ROOT / 'platform/sheng/macos26'
 OUT = ROOT / ('out/macos26-xnu' if BOARD == 'sheng' else f'out/macos26-xnu-{BOARD}')
 ARCH = 'arm64'
+DESKTOP_CFLAGS = ''
 PATCHES = [
     BASE_PLATFORM / 'patches/0001-native-sheng-target.patch',
     BASE_PLATFORM / 'patches/0002-non-apple-machine-paths.patch',
@@ -143,6 +144,9 @@ def apply_series(tree: Path, patch: Path) -> None:
                             capture_output=True)
     if strict.returncode == 0:
         return
+    if patch.name == 'integrated.patch' and patch.parent.name == 'desktop':
+        raise ValueError('desktop filesystem integration preimage changed; refuse fuzzy placement: '
+                         + strict.stderr.decode(errors='replace')[:500])
     fuzzed = subprocess.run(['patch', '-p1', '-N', '-s', '--fuzz=3', '-r', '-', '-i', str(patch)],
                             cwd=str(tree), capture_output=True)
     if fuzzed.returncode != 0:
@@ -543,7 +547,7 @@ def compile_sources(args, record: dict) -> None:
                       'OTHER_CFLAGS=-DSHENG=1',
                       'CFLAGS_EXTRA=-DXNU_NATIVE_ARCH_TIMER=1 -DXNU_DT_PANIC_REGION=1 -DSHENG=1 '
                       '-Xclang -target-feature -Xclang -sha3 -Xclang -target-feature -Xclang -sm4 ' +
-                      ' '.join('-Wno-error=' + warning for warning in UPSTREAM_WARNINGS)],
+                      DESKTOP_CFLAGS + ' '.join('-Wno-error=' + warning for warning in UPSTREAM_WARNINGS)],
             'source-archive', record, env=env)
     except subprocess.CalledProcessError:
         failures.append('source-archive: compilation failed; see logs/source-archive.log')
@@ -641,6 +645,28 @@ def compile_sources(args, record: dict) -> None:
             failures.append(f'nabu-link-shim: {error}')
         save(record)
     record['platform_objects_built'] = len(record['platform_objects']) == 2
+    if args.ufs_root_mode == 'desktop':
+        original = PLATFORM / 'storage/NabuRootAuthorization.cpp'
+        obj = OUT / 'NabuRootAuthorization.o'
+        command, index = [], 0
+        arguments = compile_record['arguments']
+        while index < len(arguments):
+            value = arguments[index]
+            if value == compile_record['file']:
+                command.append(str(original))
+            elif value in ('-o', '-MF', '-MT', '-MQ', '-MJ'):
+                if value == '-o':
+                    command += ['-o', str(obj)]
+                index += 1
+            elif value not in ('-MMD', '-MD', '-MP'):
+                command.append(value)
+            index += 1
+        command += ['-Werror']
+        try:
+            run(command, 'nabu-root-authorization', record, cwd=Path(compile_record['directory']), env=env)
+            record['root_authorization_object'] = dict(source_sha256=sha(original), **audit_object(obj))
+        except (subprocess.CalledProcessError, ValueError) as error:
+            failures.append(f'nabu-root-authorization: {error}')
     record['build_failures'] = failures
     save(record)
     if failures:
@@ -699,6 +725,8 @@ def link_kernel(args, record, common, sdk, source, env):
     archives = [crypto_input, str(OUT / 'ArmDTPlatform.o'), str(OUT / 'ArmCpu.o'), str(firehose)]
     if (OUT / 'nabu_link_stubs.o').is_file():
         archives.append(str(OUT / 'nabu_link_stubs.o'))
+    if args.ufs_root_mode == 'desktop':
+        archives.append(str(OUT / 'NabuRootAuthorization.o'))
     native_link_flags = ('-Wl,-headerpad,0x2000 -Wl,-map,'
                          + str(OUT / (KERNEL_NAME + '.map')))
     run(common + ['build', 'BUILD_STATIC_LINK=1', 'BUILD_XNU_LIBRARY=0',
@@ -706,7 +734,7 @@ def link_kernel(args, record, common, sdk, source, env):
                   'OTHER_CFLAGS=-DSHENG=1',
                   'CFLAGS_EXTRA=-DXNU_NATIVE_ARCH_TIMER=1 -DXNU_DT_PANIC_REGION=1 -DSHENG=1 '
                       '-Xclang -target-feature -Xclang -sha3 -Xclang -target-feature -Xclang -sm4 ' +
-                  ' '.join('-Wno-error=' + w for w in UPSTREAM_WARNINGS),
+                  DESKTOP_CFLAGS + ' '.join('-Wno-error=' + w for w in UPSTREAM_WARNINGS),
                   'LD_KERNEL_LIBS=' + str(runtimes[0]),
                   'LD_KERNEL_ARCHIVES=' + ' '.join(archives),
                   'NATIVE_KERNEL_LINK_FLAGS=' + native_link_flags,
@@ -742,11 +770,27 @@ def link_kernel(args, record, common, sdk, source, env):
                                    str(OUT / (KERNEL_NAME + '.dSYM'))),
                   link_map_sha256=sha(OUT / (KERNEL_NAME + '.map')),
                   purpose='Native executable link; runtime and userland ABI remain unqualified')
+    if args.ufs_root_mode == 'desktop':
+        from native_macho import symbols
+        actual = symbols(destination)
+        required = ('_native_verified_block_root_authorized', '_native_verified_block_manifest_sha384',
+                    '_native_verified_block_volume_device', '_nabu_register_root_authenticator',
+                    '_nabu_register_ram_seed', '_native_ram_block_volume_seed',
+                    '_native_owner_root_accepted', '_native_owner_cache_status',
+                    '_native_owner_data_stage', '_native_owner_firmlink_count',
+                    '_native_owner_app_cryptex_stage')
+        missing = [name for name in required if name not in actual]
+        if missing:
+            raise ValueError('linked desktop kernel omitted owner/root/Data code: ' + ', '.join(missing))
+        record['desktop_kernel'] = dict(build='25F71', owner_callback_bridges=True,
+            required_symbols={name: hex(actual[name]) for name in required},
+            systemos_union=True, data_mount='/System/Volumes/Data', firmlinks=True,
+            app_cryptex=True, ram_data_volatile=True, runtime_qualified=False)
     save(record)
 
 
 def main() -> None:
-    global OUT, ARCH
+    global OUT, ARCH, DESKTOP_CFLAGS
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--board', default=None,
                         help='board layer to build (default: MACOS26_BOARD or sheng)')
@@ -790,6 +834,24 @@ def main() -> None:
     if args.build_recovery_input and not args.build_gop_display:
         parser.error('--build-recovery-input requires --build-gop-display')
     ARCH = args.arch
+    if args.ufs_root_mode == 'desktop':
+        desktop = PLATFORM / 'desktop'
+        manifest = json.loads((desktop / 'upstream.json').read_text())
+        for item in manifest['patches']:
+            path = ROOT / item['path']
+            if sha(path) != item['sha256']:
+                raise ValueError('pinned desktop filesystem patch changed: ' + item['path'])
+        integrated = ROOT / manifest['integrated_patch']
+        if sha(integrated) != manifest['integrated_sha256']:
+            raise ValueError('desktop integrated filesystem patch changed')
+        PATCHES.append(integrated)
+        DESKTOP_CFLAGS = (' -DXNU_OWNER_ROOT_AUDIT=1 -DXNU_OWNER_ROOT_TRUST=1 '
+            '-DXNU_OWNER_CACHE_MOUNT=1 -DXNU_OWNER_CACHE_STARTUP=1 -DXNU_OWNER_BOOT_MANIFEST=1 '
+            '-DXNU_OWNER_UNION_SYSTEMOS=1 -DXNU_OWNER_DATA_MOUNT=1 -DXNU_NATIVE_RAM_BLOCK=1 '
+            '-DXNU_OWNER_OS_VOLUME_UUID=\\"47719F50-5527-44A3-9F59-8170528D8C14\\" '
+            '-DXNU_OWNER_CACHE_VOLUME_UUID=\\"C7DFE43C-0A23-43F5-B3E2-471BEAC4539D\\" '
+            '-DXNU_OWNER_APP_VOLUME_UUID=\\"F894E20A-CE25-41F4-ABE2-C00E9E922B83\\" '
+            '-DXNU_OWNER_DATA_VOLUME_UUID=\\"0A5EED00-0000-4000-8000-000000000001\\" ')
     if ARCH == 'arm64e':
         OUT = ROOT / ('out/macos26-xnu-arm64e' if BOARD == 'sheng' else f'out/macos26-xnu-{BOARD}-arm64e')
         before = PATCHES.index(PLATFORM / 'patches/0040-native-prelink-structor-signing.patch')

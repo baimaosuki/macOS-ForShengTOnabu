@@ -29,7 +29,7 @@ def stage(root: Path, destination: Path, *, board: str) -> tuple[Path, dict]:
     for patch in sorted((root / 'patches/UniXNU').glob('*.patch')):
         if 'a/drivers/NativeUfs/' not in patch.read_text():
             continue
-        if patch.name.startswith(('0040-', '0041-', '0042-')) and board != 'nabu':
+        if patch.name.startswith(('0040-', '0041-', '0042-', '0043-')) and board != 'nabu':
             continue
         subprocess.run(['git', 'apply', '--include=drivers/NativeUfs/*', str(patch.resolve())],
                        cwd=destination, check=True, capture_output=True,

@@ -107,7 +107,14 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
         f'#include "{upstream}"\n' +
         (f'#include "{display["source"]}"\n' if display else '') +
         '#include <mach/kmod.h>\n'
-        f'extern "C" kern_return_t {entry_prefix}_start(kmod_info_t *, void *) {{ return KERN_SUCCESS; }}\n'
+        + ('#include <sys/types.h>\n'
+           'extern "C" int nabu_register_ram_seed(int (*)(const char *, dev_t *, char *, size_t, uint64_t *, uint64_t *, uint8_t *));\n'
+           'extern "C" int nabu_ram_data_volume_seed(const char *, dev_t *, char *, size_t, uint64_t *, uint64_t *, uint8_t *);\n'
+           if transport == 'ufs' and root_mode == 'desktop' else '') +
+        f'extern "C" kern_return_t {entry_prefix}_start(kmod_info_t *, void *) {{ '
+        + ('if (!nabu_register_ram_seed(nabu_ram_data_volume_seed)) return KERN_FAILURE; '
+           if transport == 'ufs' and root_mode == 'desktop' else '') +
+        'return KERN_SUCCESS; }\n'
         f'extern "C" kern_return_t {entry_prefix}_stop(kmod_info_t *, void *) {{ return KERN_FAILURE; }}\n'
         f'KMOD_EXPLICIT_DECL({bundle}, "1.0.0", {entry_prefix}_start, {entry_prefix}_stop)\n')
     obj = destination / (component + '.o')
@@ -166,6 +173,29 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
             run(ccommand, directory + '-' + name, record,
                 cwd=Path(compile_record['directory']), env=env)
             objects.append(str(target))
+        # RAM Data is a separate C++ translation unit in the same prelinked
+        # module, so its real metaclass/constructor and root query are present.
+        ram_checkout = root / 'UniXNU/drivers/NativeRamBlock'
+        ram_source = integration / 'drivers/NativeRamBlock/NativeRamBlock.cpp'
+        ram_revision = subprocess.check_output(['git', '-C', ram_checkout, 'rev-parse', 'HEAD'], text=True).strip()
+        ram_text = subprocess.check_output(['git', '-C', ram_checkout, 'show', ram_revision + ':NativeRamBlock.cpp'], text=True)
+        marker = '    if(logical>0x80000000ULL){'
+        if ram_text.count(marker) != 1:
+            raise ValueError('unreviewed RAM Data capacity-selection source')
+        ram_text = ram_text.replace(marker, '''    // NABU uses bounded volatile sparse Data, including the 3 GiB seed.
+    // The large direct/store-backed implementation must never activate here.
+    if (logical > (4ULL << 30)) return false;
+    if(false){''')
+        ram_source.write_text(ram_text)
+        ram_object = destination / 'NativeRamBlock.o'
+        ram_command = [str(ram_source) if arg == str(wrapper) else str(ram_object) if arg == str(obj) else arg
+                       for arg in command]
+        ram_command[1:1] = ['-Dnative_ram_block_volume_seed=nabu_ram_data_volume_seed']
+        run(ram_command, directory + '-ram-data', record,
+            cwd=Path(compile_record['directory']), env=env)
+        objects.append(str(ram_object))
+        ram_evidence = dict(revision=ram_revision, source_sha256=hashlib.sha256(ram_text.encode()).hexdigest(),
+                            logical_limit_bytes=4 << 30, volatile=True, persistent_store_used=False)
     if input_driver:
         input_object = destination / 'recovery-input/NativeRecoveryInput.o'
         input_command = [str(input_object) if arg == str(obj) else
@@ -212,6 +242,10 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
             info['IOKitPersonalities']['NativeUfs']['IONameMatch'] = ['qcom,sm8150-ufshc', 'qcom,ufshc']
             # The root personality has no UFS register resources on NABU.
             del info['IOKitPersonalities']['NativeUfsRoot']
+        if root_mode == 'desktop':
+            info['IOKitPersonalities']['NativeRamData'] = dict(CFBundleIdentifier=bundle,
+                IOClass='NativeRamBlock', IOProviderClass='IOPlatformExpertDevice',
+                IOMatchCategory='NativeRamBlock', IOProbeScore=500)
     if display:
         info['IOKitPersonalities']['NativeGOPDisplay'] = dict(
             CFBundleIdentifier=bundle, IOClass='NativeGOPDisplay',
@@ -250,6 +284,7 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
                         desktop_policy_deferred=defer_desktop_policy,
                         authentication='owner-signed-blocks-and-volume-uuid',
                         recovery_root=None, macoslog=None)
+        evidence['ram_data'] = ram_evidence
     if transport == 'ufs' and root_mode == 'recovery':
         evidence['macoslog'] = dict(contract=log, default_off=True,
             boot_argument='native-ufs-macoslog', read_only_mode=1, write_mode=2,

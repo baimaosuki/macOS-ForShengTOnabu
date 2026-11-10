@@ -1,0 +1,95 @@
+{
+  "repository": "UniXNU/UniXNU",
+  "revision": "95e9feeb5dba4ddd8d47b897381550b5fa802567",
+  "target_build": "25F71",
+  "note": "Only OS-independent owner and macOS filesystem semantics are reused; no Darwin26 binary/ABI inputs.",
+  "patches": [
+    {
+      "path": "platform/nabu/macos26/desktop/patches/01-native-union-getattrlistbulk.patch",
+      "upstream": "patches/xnu/native-union-getattrlistbulk.patch",
+      "sha256": "f5d665fd7250717cfacced8408a0b94f282eb2764e514f61a378f7d085c7a03b"
+    },
+    {
+      "path": "platform/nabu/macos26/desktop/patches/02-native-union-lower-directory.patch",
+      "upstream": "patches/xnu/native-union-lower-directory.patch",
+      "sha256": "b39e077b190134caae1842d07758795bf15b408eb637701a41b603825e5d563b"
+    },
+    {
+      "path": "platform/nabu/macos26/desktop/patches/03-offline-owner-boot-manifest.patch",
+      "upstream": "patches/xnu/offline-owner-boot-manifest.patch",
+      "sha256": "840a73448459b0ddad1ad7d8525ffb3bd0826d58a7e732f8283a4222c2df175e"
+    },
+    {
+      "path": "platform/nabu/macos26/desktop/patches/04-offline-owner-root-binding-audit.patch",
+      "upstream": "patches/xnu/offline-owner-root-binding-audit.patch",
+      "sha256": "f77d07af625d8cf2404185717e58738841ff453735f260fd7dc3c4e8526a4e69"
+    },
+    {
+      "path": "platform/nabu/macos26/desktop/patches/05-offline-owner-systemos-mount.patch",
+      "upstream": "patches/xnu/offline-owner-systemos-mount.patch",
+      "sha256": "42d5642e103d25955db2864ef4cb63a2c14ae94a43b71ac2418b1e587f8de46c"
+    },
+    {
+      "path": "platform/nabu/macos26/desktop/patches/06-zzy-native-gpu-addon-mount.patch",
+      "upstream": "patches/xnu/zzy-native-gpu-addon-mount.patch",
+      "sha256": "16cac9052e1bd78728649697cf6c8a248d784dba0355f6d8e16f462b81bef161"
+    },
+    {
+      "path": "platform/nabu/macos26/desktop/patches/07-zzy-staged-system-apps.patch",
+      "upstream": "patches/xnu/zzy-staged-system-apps.patch",
+      "sha256": "66ebb3560de7be02e391a5a93c7d84edcf08e508e2c1b005445538c11d09f373"
+    },
+    {
+      "path": "platform/nabu/macos26/desktop/patches/08-zzyb-native-cryptex-os-view.patch",
+      "upstream": "patches/xnu/zzyb-native-cryptex-os-view.patch",
+      "sha256": "299b2c9b2e25168512e95340864b7ae728103164b942f18bb700285267e4836a"
+    },
+    {
+      "path": "platform/nabu/macos26/desktop/patches/09-macos-owner-data-firmlinks.patch",
+      "upstream": "profiles/os/macos-27.3-26C5035r/patches/xnu-12377/macos-owner-data-firmlinks.patch",
+      "sha256": "b286c46973a87a78ca297fae195ea173ce707bb38290993d385c76c733f7abda"
+    },
+    {
+      "path": "platform/nabu/macos26/desktop/patches/10-macos-union-one-volume.patch",
+      "upstream": "profiles/os/macos-27.3-26C5035r/patches/xnu-12377/macos-union-one-volume.patch",
+      "sha256": "a399d5b712a9aa383d539f9ad116a86c7a8e93922c1bb230c4c0d2690c288cec"
+    },
+    {
+      "path": "platform/nabu/macos26/desktop/patches/11-macos-read-only-system-volume.patch",
+      "upstream": "profiles/os/macos-27.3-26C5035r/patches/xnu-12377/macos-read-only-system-volume.patch",
+      "sha256": "e902f4eccd55e174674ba19accafe06680d8456d75ed2a160b61d0e022f65867"
+    },
+    {
+      "path": "platform/nabu/macos26/desktop/patches/12-macos-owner-root-authenticated-open.patch",
+      "upstream": "profiles/os/macos-27.3-26C5035r/patches/xnu-12377/macos-owner-root-authenticated-open.patch",
+      "sha256": "957d750a135537a82efbce283f5e6c6ef08105b3e4e371ce8663283820a56b5b"
+    },
+    {
+      "path": "platform/nabu/macos26/desktop/patches/13-macos-app-cryptex.patch",
+      "upstream": "profiles/os/macos-27.3-26C5035r/patches/xnu-12377/macos-app-cryptex.patch",
+      "sha256": "9d7d516c15e06ff9674ef2a840333f96136eef0bc4abe54cb050e85face9c343"
+    }
+  ],
+  "integrated_patch": "platform/nabu/macos26/desktop/integrated.patch",
+  "integrated_sha256": "a2b7f3d1d8268174fc6041307696f2fd7769f4e3bb766bddf8896d9eba4d646c",
+  "preimage_sha256": {
+    "bsd/kern/bsd_init.c": "c777eb136d9d8de4083225dc3313646d72e6609edd1509d10135f36ab4de058b",
+    "bsd/kern/kern_exec.c": "da6ec882873d6071bd18e17cc7038215eb73c071ee0ee772daa87a56775a313d",
+    "bsd/kern/kern_newsysctl.c": "0ef65bc8a7648216d3120f5b8c74863d99a0ce82e4365411c06393046f101a4f",
+    "bsd/miscfs/bindfs/bind_vfsops.c": "8075b3ef4451dbe0b01973690063c4417f55e7a8a6d09ee4c41d0248782d6b04",
+    "bsd/miscfs/bindfs/bind_vnops.c": "c7d15e5a504dd724f8768ee3e5aa8676907e2145c9b28c15dd629b453a292aae",
+    "bsd/miscfs/bindfs/bindfs.h": "d27a2a6c27e0e0176fe1e5c74db570256ec374e8fc1b49c547c5d4f8609c2af1",
+    "bsd/vfs/vfs_attrlist.c": "735c2fe5f55f9cd3cddcd371b9c3afaef02660e7e2a5600c1fc4957a2ae44ca4",
+    "bsd/vfs/vfs_lookup.c": "c48a7f79a1f23fc4f74f0d9d7a35af5d4a880bbcf4be98532f88033e6121a12d",
+    "bsd/vfs/vfs_subr.c": "75ffa35def63c2f3a4d815dce2c147717f90e5ca6518a1970058c380aa192738",
+    "bsd/vfs/vfs_syscalls.c": "67cfe165523ac4375504241a418d3cebbb46a4a10b77b22c5d590a31ebd0235d",
+    "bsd/vfs/vfs_vnops.c": "d45d4bf1d4e1e8079e1fb6c7275eb73e211833619c0b3f08ed3d637dc3d3e05a",
+    "iokit/bsddev/IOKitBSDInit.cpp": "bff16a3c2396b25dbcbc4ec11840370fd3a14390a567fcf0d77794f4d59e2b40"
+  },
+  "adaptations": [
+    "Place owner cache/Data preparation after allocation of the actual user scratch page.",
+    "Place App cryptex helper before its caller and invoke it from macOS Data preparation.",
+    "Bind owner boot manifest to this candidate OS UUID, never the iPadOS reference UUID.",
+    "Preserve pinned filesystem/owner semantics with ordinary ARM64 callback bridges; no Darwin26 syscall/KPI changes."
+  ]
+}
