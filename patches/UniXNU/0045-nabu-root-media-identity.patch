@@ -1,0 +1,80 @@
+--- a/drivers/NativeUfs/NativeUfs.cpp
++++ b/drivers/NativeUfs/NativeUfs.cpp
+@@ -1543,32 +1543,46 @@
+ static UfsRootPlan gPublicationPlan;
+ static NativeUfs *gPendingProvider;
+ 
++// The manifest is the authority for a window's volume identity. IOMedia for
++// these windows is created by IOBlockStorageDriver after start(), so nothing in
++// the storage stack can learn the UUID on its own: the matcher below looks it
++// up by property, and diskarbitration/APFS look the volume up by the same
++// string. Stamp it from the verified window instead of waiting for an identity
++// that no layer ever publishes.
++static void stampVolumeUuid (IOService *service, const char *uuid)
++{
++  if (!service || !uuid || !uuid[0]) return;
++  if (service->getProperty ("UUID")) return;   // someone else already owns it
++  OSString *value = OSString::withCString (uuid);
++  if (!value) return;
++  service->setProperty ("UUID", value);
++  value->release ();
++}
++
++// A media counts as the window's volume when its parent traversal reaches that
++// exact verified window. Identity comes from the manifest: a descending media
++// without a UUID is stamped with it, and a media carrying a different UUID is
++// left untouched so the mismatch stays visible instead of being papered over.
+ static bool mediaWithUuidExists (const char *uuid, NativeUfsBlock *window)
+ {
++  if (!window || !uuid || !uuid[0]) return false;
+   OSDictionary *matching = IOService::serviceMatching ("IOMedia");
+-  OSDictionary *properties = OSDictionary::withCapacity (1);
+-  OSString *wanted = OSString::withCString (uuid);
++  OSIterator *iterator = matching ? IOService::getMatchingServices (matching) : nullptr;
+   bool found = false;
+-  if (matching && properties && wanted && properties->setObject ("UUID", wanted) &&
+-      matching->setObject ("IOPropertyMatch", properties)) {
+-    OSIterator *iterator = IOService::getMatchingServices (matching);
+-    if (iterator) {
+-      for (unsigned matches = 0; matches < 64 && !found; ++matches) {
+-        IORegistryEntry *media = OSDynamicCast (IORegistryEntry, iterator->getNextObject ());
+-        if (!media) break;
+-        IORegistryIterator *parents = IORegistryIterator::iterateOver (
+-          media, gIOServicePlane, kIORegistryIterateRecursively | kIORegistryIterateParents);
+-        if (parents) {
+-          found = ufsMediaHasAncestor (*parents, window);
+-          parents->release ();
+-        }
+-      }
+-      iterator->release ();
+-    }
++  for (unsigned examined = 0; iterator && !found && examined < 64; ++examined) {
++    IOService *media = OSDynamicCast (IOService, iterator->getNextObject ());
++    if (!media) break;
++    IORegistryIterator *parents = IORegistryIterator::iterateOver (
++      media, gIOServicePlane, kIORegistryIterateRecursively | kIORegistryIterateParents);
++    bool ours = parents && ufsMediaHasAncestor (*parents, window);
++    if (parents) parents->release ();
++    if (!ours) continue;
++    stampVolumeUuid (media, uuid);
++    OSString *identity = OSDynamicCast (OSString, media->getProperty ("UUID"));
++    if (identity && !strcmp (identity->getCStringNoCopy (), uuid)) found = true;
+   }
+-  OSSafeReleaseNULL (wanted);
+-  OSSafeReleaseNULL (properties);
+-  OSSafeReleaseNULL (matching);
++  if (iterator) iterator->release ();
++  if (matching) matching->release ();
+   return found;
+ }
+ 
+@@ -1613,6 +1627,9 @@
+       gRootDiagnostic.stage = "root window service start";
+       gRootDiagnostic.publicationPhase = static_cast<unsigned> (UfsRootPhase::Start);
+       gRootDiagnostic.publicationWindow = index;
++      // Publish the manifest identity together with the service, before any
++      // consumer can start matching on it.
++      stampVolumeUuid (device, gPendingUuid[index]);
+       if (!device->start (gPendingProvider)) return false;
+       native_ufs_blocks_published = native_ufs_blocks_published + 1;
+       IOLog ("NativeUfs: published %s\n", device->windowLabel ());
