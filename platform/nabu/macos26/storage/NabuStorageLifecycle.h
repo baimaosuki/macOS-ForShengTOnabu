@@ -8,7 +8,7 @@ enum class NabuStorageProviders { Ready, Retry, Ambiguous };
 // arrival. Retry bounded snapshots, dropping every failed snapshot's retains.
 // This waits for providers only, never IOBSD or derived APFS volume media.
 template <class Ops>
-static const char *nabuFindStorageProviders(Ops &ops)
+static inline const char *nabuFindStorageProviders(Ops &ops)
 {
   for (unsigned elapsed = 0; elapsed <= 5000; elapsed += 100) {
     NabuStorageProviders result = ops.scanProviders();
@@ -34,7 +34,7 @@ static inline bool nabuRegisterStorageStart(NabuStorageStart &slot, NabuStorageS
 // callback: starting storage inside OSKext's module/class initialization locks
 // would change both its lock order and the normal metaclass lifecycle.
 template <class Ops>
-static const char *nabuStartStorageOnce(unsigned &state, NabuStorageStart &slot, Ops &ops)
+static inline const char *nabuStartStorageOnce(unsigned &state, NabuStorageStart &slot, Ops &ops)
 {
   unsigned idle = 0;
   if (!__atomic_compare_exchange_n(&state, &idle, 1U, false,
@@ -62,7 +62,7 @@ static const char *nabuStartStorageOnce(unsigned &state, NabuStorageStart &slot,
 // Keep the allocation's owner reference after start succeeds. Asynchronous
 // media matching and the UFS publisher can already hold/use this object.
 template <class Ops, class Device, class Provider>
-static const char *nabuStartStorageDevice(Ops &ops, const char *name, Provider *provider, Device *&live)
+static inline const char *nabuStartStorageDevice(Ops &ops, const char *name, Provider *provider, Device *&live)
 {
   Device *device = ops.allocate(name);
   if (!device) return "allocation";
@@ -78,7 +78,7 @@ static const char *nabuStartStorageDevice(Ops &ops, const char *name, Provider *
 }
 
 template <class Ops>
-static const char *nabuStartStorageModuleOnce(unsigned &state, Ops &ops)
+static inline const char *nabuStartStorageModuleOnce(unsigned &state, Ops &ops)
 {
   unsigned idle = 0;
   if (!__atomic_compare_exchange_n(&state, &idle, 1U, false,

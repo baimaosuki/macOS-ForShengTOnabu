@@ -15,6 +15,50 @@ from nabu_storage_contract import validate_module, audit_kernel, MODULE_SYMBOL, 
 
 
 class LateStorage(unittest.TestCase):
+    def test_shared_header_with_strict_clang_kernel_only_usage(self):
+        compiler = shutil.which('clang++-17') or shutil.which('clang++')
+        if not compiler:
+            self.skipTest('Clang required for -Wunused-template regression')
+        # The native kernel uses only the registration/start entry; provider
+        # and device templates belong to the module TU. Keep -Weverything and
+        # -Werror so unused shared templates cannot break the real build again.
+        kernel = '''#include "NabuStorageLifecycle.h"
+int main() {
+  struct Operations {
+    void stage(const char *) {}
+    bool load(const char *) { return true; }
+  } operations;
+  unsigned state = 0;
+  NabuStorageStart callback = nullptr;
+  return nabuStartStorageOnce(state, callback, operations) ? 0 : 1;
+}
+'''
+        module = '''#include "NabuStorageLifecycle.h"
+int main() {
+  struct Operations {
+    const char *checkAbi() { return nullptr; }
+    const char *findProviders() { return nullptr; }
+    const char *startUfs() { return nullptr; }
+    const char *startData() { return nullptr; }
+    void stage(const char *) {}
+    void releaseProviders() {}
+  } operations;
+  unsigned state = 0;
+  return nabuStartStorageModuleOnce(state, operations) ? 1 : 0;
+}
+'''
+        with tempfile.TemporaryDirectory(dir=ROOT / 'out') as temp:
+            folder = Path(temp)
+            for name, source in [('kernel-only', kernel), ('module-only', module),
+                                 ('empty', '#include "NabuStorageLifecycle.h"\n')]:
+                unit = folder / (name + '.cpp')
+                unit.write_text(source)
+                result = subprocess.run([compiler, '-std=c++17', '-Weverything', '-Werror',
+                    '-Wunused-template', '-Wno-c++98-compat',
+                    '-I', str(ROOT / 'platform/nabu/macos26/storage'),
+                    '-c', str(unit), '-o', str(folder / (name + '.o'))], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_actual_staged_lifecycle_and_module_adapter(self):
         compiler = shutil.which('g++') or shutil.which('clang++')
         if not compiler:
