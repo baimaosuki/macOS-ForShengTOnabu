@@ -154,7 +154,9 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
                                ('verified-crypto', root / 'UniXNU/kits/VerifiedRoot/adapters/xnu_crypto.c')):
             target = destination / (name + '.o')
             ccommand = [str(original) if arg == str(wrapper) else str(target) if arg == str(obj) else arg
-                        for arg in command if arg not in ('-fapple-kext', '-fno-rtti', '-fno-exceptions')
+                        for arg in command if arg not in ('-fapple-kext', '-fno-rtti', '-fno-exceptions',
+                                                         '-xc++', '--driver-mode=g++',
+                                                         '-fsized-deallocation', '-fc++-static-destructors=none')
                         and not arg.startswith(('-std=', '-stdlib='))]
             ccommand += ['-x', 'c', '-std=gnu11']
             # -x must precede the input for Clang to select C on inherited recipes.
