@@ -385,7 +385,7 @@
 +volatile int native_gpu_addon_failed = 0;
 +volatile int native_gpu_addon_error = 0;
 +static int
-+native_gpu_addon_equal(vnode_t vp, const uint8_t *data, uint64_t size, uint32_t mode, vfs_context_t ctx)
++native_gpu_addon_equal(vnode_t vp, const uint8_t *data, uint64_t size, mode_t mode, vfs_context_t ctx)
 +{
 +	struct vnode_attr va;
 +	VATTR_INIT(&va);
@@ -411,7 +411,7 @@
 +	return equal;
 +}
 +static int
-+native_gpu_addon_write(const char *path, const uint8_t *data, uint64_t size, uint32_t mode, vfs_context_t ctx)
++native_gpu_addon_write(const char *path, const uint8_t *data, uint64_t size, mode_t mode, vfs_context_t ctx)
 +{
 +	vnode_t vp = NULLVP;
 +	int error = vnode_open(path, FREAD | O_NOFOLLOW, 0, 0, &vp, ctx);
@@ -481,14 +481,14 @@
 +		return;
 +	}
 +	uint32_t count = 0;
-+	uint64_t total = 0;
++	uint64_t addon_total = 0;
 +	if (bytes < 24 || memcmp(addon, "NGPUADD2", 8)) {
 +		native_gpu_addon_error = EINVAL;
 +		return;
 +	}
 +	memcpy(&count, addon + 8, 4);
-+	memcpy(&total, addon + 16, 8);
-+	if (total != bytes || !count || count > 4096) {
++	memcpy(&addon_total, addon + 16, 8);
++	if (addon_total != bytes || !count || count > 4096) {
 +		native_gpu_addon_error = EINVAL;
 +		return;
 +	}
@@ -543,9 +543,9 @@
 +		uint8_t *data = kalloc_data(size ? size : 1, Z_WAITOK);
 +		int error = data ? native_gpu_addon_inflate(addon + at, packed, data, size) : ENOMEM;
 +		if (!error) {
-+			error = native_gpu_addon_write(path, data, size, mode, ctx);
++			error = native_gpu_addon_write(path, data, size, (mode_t)mode, ctx);
 +			if (error == ENOENT && !(error = native_gpu_addon_parents(p, scratch, path))) {
-+				error = native_gpu_addon_write(path, data, size, mode, ctx);
++				error = native_gpu_addon_write(path, data, size, (mode_t)mode, ctx);
 +			}
 +		}
 +		if (data) {
@@ -802,15 +802,15 @@
 +}
 +/* Reads to the end of the source rather than trusting a size: most of these files are compressed on the OS volume. */
 +static int
-+native_staged_apps_file(vnode_t source, const char *path, int mode, uint8_t *buffer, uint32_t chunk, vfs_context_t ctx)
++native_staged_apps_file(vnode_t source, const char *path, mode_t mode, uint8_t *buffer, uint32_t chunk, vfs_context_t ctx)
 +{
 +	int error = VNOP_OPEN(source, FREAD, ctx);
 +	if (error) {
 +		return error;
 +	}
 +	vnode_t vp = NULLVP;
-+	size_t length = strlen(path);
-+	strlcpy(native_staged_apps_path, path + (length > sizeof(native_staged_apps_path) - 1 ? length - (sizeof(native_staged_apps_path) - 1) : 0),
++	size_t path_length = strlen(path);
++	strlcpy(native_staged_apps_path, path + (path_length > sizeof(native_staged_apps_path) - 1 ? path_length - (sizeof(native_staged_apps_path) - 1) : 0),
 +	    sizeof(native_staged_apps_path));
 +	error = vnode_open(path, O_CREAT | O_TRUNC | FWRITE | O_NOFOLLOW, mode, 0, &vp, ctx);
 +	for (off_t at = 0; !error;) {
@@ -911,7 +911,7 @@
 +				VATTR_INIT(&va);
 +				VATTR_WANTED(&va, va_mode);
 +				child_error = vnode_getattr(child, &va, ctx);
-+				int mode = VATTR_IS_SUPPORTED(&va, va_mode) ? (int)(va.va_mode & 0777) : 0644;
++				mode_t mode = VATTR_IS_SUPPORTED(&va, va_mode) ? (mode_t)(va.va_mode & 0777) : 0644;
 +				if (child_error) {
 +				} else if (vnode_vtype(child) == VDIR) {
 +					child_error = native_staged_apps_mkdir(p, scratch, path);
