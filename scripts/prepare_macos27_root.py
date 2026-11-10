@@ -38,16 +38,22 @@ MANIFEST_BLOCK_BYTES = UFS_BLOCK_BYTES
 ENTRY_BYTES = 128
 ENTRY_LIMIT = 4
 CHUNK = 1 << 20
+DESKTOP_PROFILES = {'26C5035r': 'macos-27.3-26C5035r', '25F71': 'macos-26.5-25F71'}
 
 
 class RootImageError(ValueError):
     """The requested root image cannot be expressed as a kernel manifest."""
 
 
+def source_digest(path: Path) -> str:
+    with path.open('rb') as stream:
+        return hashlib.file_digest(stream, 'sha256').hexdigest()
+
+
 def _sources(spec: dict) -> list[tuple[str, Path, int]]:
     windows = spec.get('windows')
-    if not isinstance(windows, list) or not 2 <= len(windows) <= ENTRY_LIMIT:
-        raise RootImageError('spec needs 2..%d windows, got %r' % (ENTRY_LIMIT, windows))
+    if not isinstance(windows, list) or len(windows) != 3:
+        raise RootImageError('desktop spec needs exactly three windows: OS, SystemOS, App')
     resolved: list[tuple[str, Path, int]] = []
     for item in windows:
         name = item.get('name')
@@ -68,7 +74,9 @@ def _sources(spec: dict) -> list[tuple[str, Path, int]]:
     names = [name for name, _, _ in resolved]
     if len(set(names)) != len(names):
         raise RootImageError('window names must be distinct: %r' % names)
-    return resolved
+    if set(names) != {'OS', 'SystemOS', 'App'}:
+        raise RootImageError('desktop spec requires exactly OS, SystemOS, App')
+    return sorted(resolved, key=lambda item: item[2])
 
 
 def plan(spec: dict) -> tuple[list[tuple[str, Path, int, int]], int]:
@@ -88,7 +96,9 @@ def plan(spec: dict) -> tuple[list[tuple[str, Path, int, int]], int]:
     image_bytes = max(window.end.value for window in windows)
     within(image_bytes, *windows)
     expected = spec.get('image_bytes')
-    if expected is not None and expected != image_bytes:
+    if image_bytes > (1 << 64) - 1:
+        raise RootImageError('image exceeds the unsigned 64-bit manifest geometry')
+    if expected is not None and (type(expected) is not int or expected != image_bytes):
         raise RootImageError('image_bytes %r differs from the laid-out %d'
                              % (expected, image_bytes))
     return entries, image_bytes
@@ -112,12 +122,13 @@ def assemble(entries: list[tuple[str, Path, int, int]], image_bytes: int,
     """Copy each window to its offset and hash the bytes actually written."""
     image = destination / 'root_image.bin'
     digests: dict[str, str] = {}
-    with image.open('wb') as out:
+    with image.open('xb') as out:
+        out.truncate(image_bytes)
         cursor = 0
         for name, path, offset, size in entries:
             if offset < cursor:
                 raise RootImageError('%s: offset %#x is behind the last window' % (name, offset))
-            out.write(b'\x00' * (offset - cursor))
+            out.seek(offset)
             cursor = offset
             digest = hashlib.sha256()
             copied = 0
@@ -141,16 +152,44 @@ def assemble(entries: list[tuple[str, Path, int, int]], image_bytes: int,
     return digests
 
 
-def prepare(spec_path: Path, destination: Path, *, assemble_image: bool = True) -> dict:
+def prepare_desktop(spec_path: Path, destination: Path, *, build: str,
+                    assemble_image: bool = True) -> dict:
     spec = json.loads(spec_path.read_text())
+    if (build not in DESKTOP_PROFILES or spec.get('build') != build
+            or spec.get('os_profile') != DESKTOP_PROFILES[build]
+            or spec.get('variant', 'desktop') != 'desktop'):
+        raise RootImageError('requires the paired %s desktop OS profile' % build)
     entries, image_bytes = plan(spec)
-    destination.mkdir(parents=True, exist_ok=True)
+    destination.mkdir(parents=True, exist_ok=False)
     if assemble_image:
         digests = assemble(entries, image_bytes, destination)
     else:
-        digests = {name: hashlib.sha256(path.read_bytes()).hexdigest()
+        digests = {name: source_digest(path)
                    for name, path, _, _ in entries}
+    for window in spec['windows']:
+        if window.get('sha256') is not None and window['sha256'] != digests[window['name']]:
+            raise RootImageError(window['name'] + ': source digest differs from the declared paired input')
     manifest = build_manifest(entries, image_bytes, digests)
+    if assemble_image:
+        # Commit the header to the actual boot medium, then validate the bytes
+        # the driver will read, including every window's final copied extent.
+        image = destination / 'root_image.bin'
+        with image.open('r+b') as stream:
+            stream.write(manifest)
+        with image.open('rb') as stream:
+            if stream.read(MANIFEST_BLOCK_BYTES) != manifest or image.stat().st_size != image_bytes:
+                raise RootImageError('final image header or length differs from the manifest')
+            for name, _, offset, size in entries:
+                stream.seek(offset)
+                digest, remaining = hashlib.sha256(), size
+                while remaining:
+                    chunk = stream.read(min(CHUNK, remaining))
+                    if not chunk:
+                        raise RootImageError('%s: final image became short' % name)
+                    digest.update(chunk)
+                    remaining -= len(chunk)
+                if digest.hexdigest() != digests[name]:
+                    raise RootImageError('%s: final image readback digest differs' % name)
     (destination / 'manifest.bin').write_bytes(manifest)
     record = {
         'schema': 'nabu-root-image-v1',
@@ -166,9 +205,18 @@ def prepare(spec_path: Path, destination: Path, *, assemble_image: bool = True) 
             for name, path, offset, size in entries
         ],
         'assemble_image': assemble_image,
+        'final_image_readback_verified': assemble_image,
+        'root_mode': 'desktop',
+        'partition': 'macosroot',
+        'root_lun': 0,
     }
     (destination / 'build.json').write_text(json.dumps(record, indent=2) + '\n')
     return record
+
+
+def prepare(spec_path: Path, destination: Path, *, assemble_image: bool = True) -> dict:
+    """Strict 27.3 entry point; the 26.5 desktop wrapper uses prepare_desktop."""
+    return prepare_desktop(spec_path, destination, build='26C5035r', assemble_image=assemble_image)
 
 
 def main() -> int:

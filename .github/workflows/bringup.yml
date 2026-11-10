@@ -11,6 +11,10 @@ on:
         description: Compile the default-off UFS companion; no hardware deployment
         type: boolean
         default: false
+      native_ufs_desktop:
+        description: Compile NABU desktop owner-verified UFS objects; policies are linked locally
+        type: boolean
+        default: false
       native_gop:
         description: Compile the default-off CPU GOP display; requires native_ufs and arm64e
         type: boolean
@@ -236,7 +240,7 @@ jobs:
     timeout-minutes: 90
     env:
       NATIVE_ARCH: ${{ inputs.native_arch || 'arm64' }}
-      NATIVE_OUT: ${{ inputs.board == 'nabu' && 'out/macos26-xnu-nabu' || (inputs.native_arch == 'arm64e' && 'out/macos26-xnu-arm64e' || 'out/macos26-xnu') }}
+      NATIVE_OUT: ${{ inputs.board == 'nabu' && (inputs.native_arch == 'arm64e' && 'out/macos26-xnu-nabu-arm64e' || 'out/macos26-xnu-nabu') || (inputs.native_arch == 'arm64e' && 'out/macos26-xnu-arm64e' || 'out/macos26-xnu') }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -320,7 +324,7 @@ jobs:
         run: python3 scripts/build_macos26_xnu.py --board "${{ inputs.board }}" --arch "$NATIVE_ARCH" --kdk-root "$SHENG_KDK_EXPANDED/KDK.pkg/Payload" -j 4
       - name: Link native macOS 26 SHENG kernel
         if: inputs.target == 'macos26-kernel'
-        run: python3 scripts/build_macos26_xnu.py --board "${{ inputs.board }}" --arch "$NATIVE_ARCH" --link-kernel ${{ inputs.native_ufs && '--build-ufs-driver' || '' }} ${{ inputs.native_gop && '--build-gop-display' || '' }} ${{ inputs.native_input && '--build-recovery-input' || '' }} --kdk-root "$SHENG_KDK_EXPANDED/KDK.pkg/Payload" -j 4
+        run: python3 scripts/build_macos26_xnu.py --board "${{ inputs.board }}" --arch "$NATIVE_ARCH" --link-kernel ${{ (inputs.native_ufs || inputs.native_ufs_desktop) && '--build-ufs-driver' || '' }} ${{ inputs.native_ufs_desktop && '--ufs-root-mode desktop --ufs-defer-desktop-policy' || '' }} ${{ inputs.native_gop && '--build-gop-display' || '' }} ${{ inputs.native_input && '--build-recovery-input' || '' }} --kdk-root "$SHENG_KDK_EXPANDED/KDK.pkg/Payload" -j 4
       - uses: actions/cache/save@v4
         if: always() && steps.native-cache.outputs.cache-hit != 'true'
         with:

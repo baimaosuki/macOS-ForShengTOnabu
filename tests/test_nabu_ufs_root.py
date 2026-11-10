@@ -57,7 +57,11 @@ def test_manifest_matches_the_kernel_parser() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
         record = prepare(_spec(tmp), tmp / 'out')
-        parsed = read_manifest((tmp / 'out' / 'manifest.bin').read_bytes())
+        image = (tmp / 'out' / 'root_image.bin').read_bytes()
+        assert image[:4096] == (tmp / 'out' / 'manifest.bin').read_bytes()
+        parsed = read_manifest(image[:4096])
+        assert len(image) == parsed['image_bytes']
+        assert record['final_image_readback_verified']
         assert parsed['count'] == 3, parsed
         assert [w['name'] for w in parsed['windows']] == ['OS', 'SystemOS', 'App']
         assert parsed['windows'][0]['offset'] == 0x1000
@@ -126,15 +130,18 @@ def test_overlap_is_refused() -> None:
         raise AssertionError('overlapping windows were accepted')
 
 
-def test_two_windows_is_allowed_but_a_recovery_pair_is_not_the_goal() -> None:
+def test_two_windows_is_refused() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
         spec = json.loads(_spec(tmp).read_text())
         spec['windows'] = spec['windows'][:2]
         path = tmp / 'pair.json'
         path.write_text(json.dumps(spec))
-        record = prepare(path, tmp / 'out')
-        assert len(record['windows']) == 2
+        try:
+            prepare(path, tmp / 'out')
+        except RootImageError:
+            return
+        raise AssertionError('an incomplete desktop root was accepted')
 
 
 def test_duplicate_names_are_refused() -> None:
@@ -167,26 +174,66 @@ def test_image_bytes_mismatch_is_refused() -> None:
         raise AssertionError('a wrong image_bytes claim was accepted')
 
 
-def test_four_window_limit() -> None:
+def test_extra_or_wrong_window_is_refused() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        for names in [('OS', 'SystemOS', 'ISC'), ('OS', 'SystemOS', 'App', 'Extra')]:
+            spec = json.loads(_spec(tmp).read_text())
+            if len(names) == 4:
+                spec['windows'].append(dict(spec['windows'][-1], name='Extra', offset_bytes=0x4000))
+            else:
+                spec['windows'][-1]['name'] = names[-1]
+            path = tmp / 'bad.json'
+            path.write_text(json.dumps(spec))
+            try:
+                prepare(path, tmp / 'out')
+            except RootImageError:
+                continue
+            raise AssertionError('an unexpected desktop window was accepted')
+
+
+def test_wrong_profile_and_recovery_are_refused() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        for change in ({'build': '25F71'}, {'os_profile': 'recovery'}, {'variant': 'recoveryos'}):
+            spec = json.loads(_spec(tmp).read_text())
+            spec.update(change)
+            path = tmp / 'wrong.json'
+            path.write_text(json.dumps(spec))
+            try:
+                prepare(path, tmp / 'out')
+            except RootImageError:
+                continue
+            raise AssertionError('a mismatched OS profile was accepted')
+
+
+def test_265_desktop_has_a_separate_paired_entrypoint() -> None:
+    from prepare_macos26_desktop_root import prepare as prepare_265
     with tempfile.TemporaryDirectory() as tmp:
         tmp = Path(tmp)
         spec = json.loads(_spec(tmp).read_text())
-        extra = tmp / 'Extra.bin'
-        extra.write_bytes(b'\x00' * 0x200)
-        spec['windows'].append({'name': 'Extra', 'source': str(extra),
-                                'offset_bytes': 0x4000})
-        path = tmp / 'four.json'
+        spec.update(build='25F71', os_profile='macos-26.5-25F71')
+        path = tmp / 'desktop265.json'
         path.write_text(json.dumps(spec))
-        assert len(prepare(path, tmp / 'out')['windows']) == 4
-        spec['windows'].append({'name': 'Fifth', 'source': str(extra),
-                                'offset_bytes': 0x5000})
+        record = prepare_265(path, tmp / 'out')
+        assert record['build'] == '25F71' and record['root_mode'] == 'desktop'
+        image = (tmp / 'out/root_image.bin').read_bytes()
+        assert read_manifest(image[:4096])['count'] == 3
+
+
+def test_no_image_and_unordered_windows() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        spec = json.loads(_spec(tmp).read_text())
+        spec['windows'].reverse()
+        path = tmp / 'unordered.json'
         path.write_text(json.dumps(spec))
-        try:
-            prepare(path, tmp / 'out2')
-        except RootImageError as exc:
-            assert '2..4 windows' in str(exc), exc
-            return
-        raise AssertionError('a fifth window was accepted')
+        record = prepare(path, tmp / 'out')
+        assert record['final_image_readback_verified']
+        dry = prepare(path, tmp / 'dry', assemble_image=False)
+        assert not dry['final_image_readback_verified']
+        assert not (tmp / 'dry/root_image.bin').exists()
+        assert dry['manifest_sha256'] == record['manifest_sha256']
 
 
 def main() -> int:

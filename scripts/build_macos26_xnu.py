@@ -647,13 +647,17 @@ def compile_sources(args, record: dict) -> None:
         raise ValueError('; '.join(failures))
     if args.link_kernel:
         link_kernel(args, record, common, sdk, source, env)
-        if ARCH == 'arm64e':
+        if ARCH == 'arm64e' or args.build_ufs_driver:
             from build_macos26_storage import build as build_storage
-            build_storage(ROOT, OUT, compile_record, source, run, record, env)
+            if ARCH == 'arm64e':
+                build_storage(ROOT, OUT, compile_record, source, run, record, env)
             if args.build_ufs_driver:
                 build_storage(ROOT, OUT, compile_record, source, run, record, env,
                               transport='ufs', gop_display=args.build_gop_display,
-                              recovery_input=args.build_recovery_input)
+                              recovery_input=args.build_recovery_input,
+                              root_mode=args.ufs_root_mode, desktop_policy=args.ufs_desktop_policy,
+                              board=BOARD, defer_desktop_policy=args.ufs_defer_desktop_policy)
+            record['storage_kernel_integration'] = 'separate bundles; requires explicit prelink and verification'
             save(record)
 
 
@@ -752,6 +756,11 @@ def main() -> None:
     parser.add_argument('--link-kernel', action='store_true', help='build runtime and attempt the native executable link')
     parser.add_argument('--build-ufs-driver', action='store_true',
                         help='compile the default-off sheng UFS transport with the paired ARM64E ABI')
+    parser.add_argument('--ufs-root-mode', choices=('recovery', 'desktop'), default='recovery')
+    parser.add_argument('--ufs-desktop-policy', type=Path,
+                        help='owner-signed OS/SystemOS/App policies for the paired desktop build')
+    parser.add_argument('--ufs-defer-desktop-policy', action='store_true',
+                        help='compile desktop driver/runtime objects; final local link must supply signed policies')
     parser.add_argument('--build-gop-display', action='store_true',
                         help='include the default-off paired CPU GOP display in the UFS companion')
     parser.add_argument('--build-recovery-input', action='store_true',
@@ -770,15 +779,19 @@ def main() -> None:
         for item in PATCHES:
             print(' ', item.relative_to(ROOT), 'OK' if item.exists() else 'MISSING')
         return 0
-    if args.build_ufs_driver and (not args.link_kernel or args.arch != 'arm64e'):
-        parser.error('--build-ufs-driver requires --link-kernel --arch arm64e')
+    if args.build_ufs_driver and not args.link_kernel:
+        parser.error('--build-ufs-driver requires --link-kernel')
+    if args.ufs_defer_desktop_policy and args.ufs_root_mode != 'desktop':
+        parser.error('--ufs-defer-desktop-policy requires --ufs-root-mode desktop')
+    if args.ufs_root_mode == 'desktop' and (not args.build_ufs_driver or (not args.ufs_desktop_policy and not args.ufs_defer_desktop_policy) or BOARD != 'nabu'):
+        parser.error('desktop root requires --board nabu --build-ufs-driver --ufs-desktop-policy')
     if args.build_gop_display and not args.build_ufs_driver:
         parser.error('--build-gop-display requires --build-ufs-driver')
     if args.build_recovery_input and not args.build_gop_display:
         parser.error('--build-recovery-input requires --build-gop-display')
     ARCH = args.arch
     if ARCH == 'arm64e':
-        OUT = ROOT / 'out/macos26-xnu-arm64e'
+        OUT = ROOT / ('out/macos26-xnu-arm64e' if BOARD == 'sheng' else f'out/macos26-xnu-{BOARD}-arm64e')
         before = PATCHES.index(PLATFORM / 'patches/0040-native-prelink-structor-signing.patch')
         PATCHES[before:before] = [PLATFORM / 'pac/0001-native-el1-pac-abi.patch',
                                  PLATFORM / 'pac/0002-native-arm64e-chained-startup.patch']

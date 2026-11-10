@@ -19,7 +19,14 @@ PROTOCOL_CHARACTERISTICS = {
 
 
 def build(root, out, compile_record, source, run, record, env, *, transport='virtio', gop_display=False,
-          recovery_input=False):
+          recovery_input=False, root_mode='recovery', desktop_policy=None, board=None,
+          defer_desktop_policy=False):
+    board = board or record.get('board', 'sheng')
+    architecture = record.get('architecture', 'arm64e')
+    if root_mode not in ('recovery', 'desktop'):
+        raise ValueError('UFS root mode must be recovery or desktop')
+    if root_mode == 'desktop' and (transport != 'ufs' or (desktop_policy is None and not defer_desktop_policy) or board != 'nabu'):
+        raise ValueError('desktop root requires NABU UFS and an explicit owner policy directory')
     if transport not in ('virtio', 'ufs'):
         raise ValueError('unsupported native storage transport')
     if gop_display and transport != 'ufs':
@@ -40,6 +47,10 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
         from prepare_macos26_input import prepare
         input_driver = prepare(root, destination / 'recovery-input')
     upstream = root / 'UniXNU/drivers' / component / (component + '.cpp')
+    source_evidence = None
+    if transport == 'ufs':
+        from nabu_storage_source import stage
+        upstream, source_evidence = stage(root, destination / 'source', board=board)
     include = destination / 'include/IOKit/storage'
     include.mkdir(parents=True, exist_ok=True)
     for header in (root / 'sources/macos26/IOStorageFamily').glob('*.h'):
@@ -48,7 +59,14 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
     entry_prefix = 'sheng_virtio' if transport == 'virtio' else 'sheng_ufs'
     recovery_prefix = ''
     recovery_root = None
-    if transport == 'ufs':
+    if transport == 'ufs' and root_mode == 'desktop':
+        from prepare_nabu_desktop_policy import validate
+        owner_policy = None
+        if not defer_desktop_policy:
+            desktop_policy = Path(desktop_policy).resolve(strict=True)
+            owner_policy = validate(desktop_policy, record['build'])
+        recovery_prefix = '#define NATIVE_UFS_DESKTOP_ROOT 1\n#define NATIVE_VERIFIED_BLOCK 1\n'
+    if transport == 'ufs' and root_mode == 'recovery':
         recovery_root = json.loads((root / 'config/macos26-recovery-root.json').read_text())
         digest = bytes.fromhex(recovery_root['sha256'])
         identity = str(uuid.UUID(recovery_root['volume_uuid'])).upper()
@@ -109,6 +127,9 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
             command.append(arg)
         index += 1
     command[1:1] = ['-I', str(destination / 'include')]
+    if root_mode == 'desktop':
+        command[1:1] = ['-I', str(root / 'UniXNU/kits/VerifiedRoot/include'),
+                        '-I', str(root / 'UniXNU/drivers/NativeVirtioBlock')]
     if transport == 'virtio':
         command[1:1] = ['-DNATIVE_QEMU_SCRATCH_BLOCK=1']
     else:
@@ -120,6 +141,27 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
                 '-Wno-deprecated-enum-enum-conversion', '-Wno-unnecessary-virtual-specifier']
     run(command, directory + '-compile', record, cwd=Path(compile_record['directory']), env=env)
     objects = [str(obj)]
+    if transport == 'ufs' and root_mode == 'desktop':
+        from prepare_nabu_desktop_policy import assembly
+        if not defer_desktop_policy:
+            policy_source = destination / 'owner-policies.S'
+            policy_source.write_text(assembly(desktop_policy))
+            policy_object = destination / 'owner-policies.o'
+            run(['xcrun', 'clang', '-target', architecture + '-apple-macos26.5', '-isysroot', sdk,
+                 '-c', policy_source, '-o', policy_object], directory + '-owner-policy', record, env=env)
+            objects.append(str(policy_object))
+        for name, original in (('verified-root', root / 'UniXNU/kits/VerifiedRoot/src/verified_root.c'),
+                               ('verified-crypto', root / 'UniXNU/kits/VerifiedRoot/adapters/xnu_crypto.c')):
+            target = destination / (name + '.o')
+            ccommand = [str(original) if arg == str(wrapper) else str(target) if arg == str(obj) else arg
+                        for arg in command if arg not in ('-fapple-kext', '-fno-rtti', '-fno-exceptions')
+                        and not arg.startswith(('-std=', '-stdlib='))]
+            ccommand += ['-x', 'c', '-std=gnu11']
+            # -x must precede the input for Clang to select C on inherited recipes.
+            ccommand[1:1] = ['-x', 'c']
+            run(ccommand, directory + '-' + name, record,
+                cwd=Path(compile_record['directory']), env=env)
+            objects.append(str(target))
     if input_driver:
         input_object = destination / 'recovery-input/NativeRecoveryInput.o'
         input_command = [str(input_object) if arg == str(obj) else
@@ -135,13 +177,13 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
             cwd=Path(compile_record['directory']), env=env)
         objects.append(str(input_object))
     binary = destination / (component + '.macho')
-    run(['xcrun', 'ld', '-arch', 'arm64e', '-kext', '-kexts_use_stubs',
+    run(['xcrun', 'ld', '-arch', architecture, '-kext', '-kexts_use_stubs',
          '-platform_version', 'macos', '26.5', '26.5',
          '-undefined', 'dynamic_lookup', '-fixup_chains',
          '-no_adhoc_codesign', '-headerpad', '0x1000',
          *objects, '-o', str(binary)], directory + '-link', record, env=env)
-    image = macho(binary.read_bytes(), 'arm64e')
-    if (image['kind'] != 11 or not image['subtype'] & 0x40000000
+    image = macho(binary.read_bytes(), architecture)
+    if (image['kind'] != 11 or (architecture == 'arm64e' and not image['subtype'] & 0x40000000)
             or not any(c == 0x80000034 for c, _, _ in image['commands'])):
         raise ValueError('standalone transport requires an ARM64E bundle with chained imports')
     info = dict(CFBundleIdentifier=bundle, CFBundleVersion='1.0.0',
@@ -162,6 +204,10 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
                                   IOProviderClass='IOPlatformExpertDevice',
                                   IOMatchCategory='NativeUfsRoot', IOProbeScore=500),
         }
+        if board == 'nabu':
+            info['IOKitPersonalities']['NativeUfs']['IONameMatch'] = ['qcom,sm8150-ufshc', 'qcom,ufshc']
+            # The root personality has no UFS register resources on NABU.
+            del info['IOKitPersonalities']['NativeUfsRoot']
     if display:
         info['IOKitPersonalities']['NativeGOPDisplay'] = dict(
             CFBundleIdentifier=bundle, IOClass='NativeGOPDisplay',
@@ -182,7 +228,7 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
     (destination / 'Info.plist').write_bytes(plistlib.dumps(info))
     evidence = dict(bundle=bundle, upstream_source_sha256=hashlib.sha256(upstream.read_bytes()).hexdigest(),
                     binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
-                    architecture='arm64e', deployment='macOS 26.5', read_only_transport=transport == 'ufs',
+                    architecture=architecture, deployment='macOS 26.5', read_only_transport=transport == 'ufs',
                     explicit_qemu_scratch_writes=transport == 'virtio',
                     hardware_enable_required=transport == 'ufs', root_transport_read_only=True,
                     original_storage_runtime_qualified=False, hardware_admitted=False)
@@ -191,6 +237,16 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
     if input_driver:
         evidence['native_recovery_input'] = input_driver
     if transport == 'ufs':
+        evidence.update(board=board, root_mode=root_mode, source_integration=source_evidence,
+                        kernel_integrated=False, root_partition='macosroot', root_lun=0,
+                        android_userdata_used=False, root_media_layout_qualified=False,
+                        root_publication_sha256=hashlib.sha256((upstream.parent / 'RootPublication.h').read_bytes()).hexdigest())
+    if transport == 'ufs' and root_mode == 'desktop':
+        evidence.update(desktop_owner_policy=owner_policy,
+                        desktop_policy_deferred=defer_desktop_policy,
+                        authentication='owner-signed-blocks-and-volume-uuid',
+                        recovery_root=None, macoslog=None)
+    if transport == 'ufs' and root_mode == 'recovery':
         evidence['macoslog'] = dict(contract=log, default_off=True,
             boot_argument='native-ufs-macoslog', read_only_mode=1, write_mode=2,
             writes_confined_to_preallocated_file=True, filesystem_metadata_writes=False,
@@ -210,6 +266,7 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
                 sparse_disk_header_sha256=hashlib.sha256((upstream.parent.parent / 'NativeRamBlock/SparseDisk.h').read_bytes()).hexdigest())
     (destination / 'build.json').write_text(json.dumps(evidence, indent=2) + '\n')
     record['storage_driver' if transport == 'virtio' else 'ufs_driver'] = evidence
+    return destination
 
 
 def nabu_ufs_contract(root: Path | None = None) -> dict:
@@ -266,4 +323,3 @@ def nabu_ufs_contract(root: Path | None = None) -> dict:
             (base / 'patches/ShengUfs/nabu-nativeufs-board.patch').read_bytes()
         ).hexdigest(),
     )
-
