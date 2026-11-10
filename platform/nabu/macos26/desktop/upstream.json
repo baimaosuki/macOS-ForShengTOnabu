@@ -71,7 +71,7 @@
     }
   ],
   "integrated_patch": "platform/nabu/macos26/desktop/integrated.patch",
-  "integrated_sha256": "44cbc6be8e11eb1c872e993aa28cde15241327f4a94676c0fdba7df32088b15a",
+  "integrated_sha256": "b683515406079bb815925d65a68eddeef4365ab796eb7a55c2b2d583bf091020",
   "preimage_sha256": {
     "bsd/kern/bsd_init.c": "c777eb136d9d8de4083225dc3313646d72e6609edd1509d10135f36ab4de058b",
     "bsd/kern/kern_exec.c": "da6ec882873d6071bd18e17cc7038215eb73c071ee0ee772daa87a56775a313d",
