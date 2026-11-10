@@ -5,7 +5,7 @@
  #include <vm/vm_kern.h>
  #include <vm/vm_map.h>
 +#include <vm/vm_kern_xnu.h>
-+#include <vm/vm_map_internal.h>
++#include <mach/mach_vm.h>
  #include <sys/param.h>
  #if defined(NATIVE_VERIFIED_BLOCK) && NATIVE_VERIFIED_BLOCK
  #include "verified_root.h"
@@ -77,9 +77,10 @@
 @@ -1438,7 +1456,7 @@
    memcpy (key, verified_root_key, VR_KEY_BYTES);
    gRootDiagnostic.stage = "policy read-only protection";
-   if (vm_map_protect (kernel_map, verifiedStorage, verifiedStorage + verifiedStorageBytes,
+-  if (vm_map_protect (kernel_map, verifiedStorage, verifiedStorage + verifiedStorageBytes,
 -                      VM_PROT_READ, TRUE) != KERN_SUCCESS) {
-+                      TRUE, VM_PROT_READ) != KERN_SUCCESS) {
++  if (mach_vm_protect (kernel_map, verifiedStorage, verifiedStorageBytes,
++                       TRUE, VM_PROT_READ) != KERN_SUCCESS) {
      return false;
    }
    gRootDiagnostic.stage = "owner signature and hash table";
