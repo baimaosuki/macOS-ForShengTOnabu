@@ -1,0 +1,209 @@
+--- a/drivers/NativeUfs/NativeUfs.cpp
++++ b/drivers/NativeUfs/NativeUfs.cpp
+@@ -21,6 +21,7 @@
+ }
+ #endif
+ #include <libkern/c++/OSNumber.h>
++#include <libkern/c++/OSBoolean.h>
+ #include <libkern/c++/OSIterator.h>
+ #include <IOKit/IOBSD.h>
+ #include <kern/thread.h>
+@@ -39,6 +40,7 @@
+ #include "TransferPoll.h"
+ #include "SmmuTakeover.h"
+ #include "NabuUfsWindowPlan.h"
++#include "NabuRootMedia.h"
+ 
+ static UfsRootDiagnostics gRootDiagnostic;
+ static bool gRootDiagnosticEnabled;
+@@ -1276,6 +1278,7 @@
+   bool recoveryVolumeUuid (char out[37]) const { return ufsRecoveryRootUuid (label, bytes, out); }
+ #endif
+   const char *windowLabel () const { return label; }
++  uint64_t windowSize () const { return bytes; }
+   bool configure (const char *name, uint64_t absoluteOffset, uint64_t size);
+   bool start (IOService *provider) override;
+   void free () override;
+@@ -1667,56 +1670,111 @@
+ static UfsRootPlan gPublicationPlan;
+ static NativeUfs *gPendingProvider;
+ 
++// Registry traversal sees attached services even while their matching thread
++// is running. Identity comes exclusively from existing APFS volume properties.
++struct NabuRootMediaRegistry {
++  IORegistryIterator *iterator;
++  const char *uuid;
++  IORegistryEntry *next () { return iterator->getNextObject (); }
++  bool valid () { return iterator->isValid (); }
++  NabuRootMediaView view (IORegistryEntry *entry) {
++    NabuRootMediaView value;
++    IOService *media = OSDynamicCast (IOService, entry);
++    if (!media || !media->metaCast ("IOMedia")) return value;
++    value.media = value.inWindow = true; // Iterator is rooted at this window.
++    const IOOptionBits state = media->getState ();
++    value.registered = state & kIOServiceRegisteredState;
++    value.inactive = state & kIOServiceInactiveState;
++    // 25F71 AppleAPFSVolume::MetaClass::alloc calls IOMediaC2 directly;
++    // vfs_exclave_fs_helper.cpp also names this class as APFS_VOLUME_OBJECT.
++    // A container/scheme alone must never satisfy this volume gate.
++    value.volume = media->metaCast ("AppleAPFSVolume") != nullptr;
++    OSObject *whole = media->copyProperty ("Whole");
++    value.whole = whole != kOSBooleanFalse; // Missing/type-invalid fails closed.
++    OSSafeReleaseNULL (whole);
++    OSObject *identity = media->copyProperty ("UUID");
++    OSString *id = OSDynamicCast (OSString, identity);
++    value.uuidMatches = id && id->isEqualTo (uuid);
++    OSSafeReleaseNULL (identity);
++    OSObject *name = media->copyProperty (kIOBSDNameKey);
++    OSString *bsd = OSDynamicCast (OSString, name);
++    value.bsdName = bsd && bsd->getLength ();
++    OSSafeReleaseNULL (name);
++    OSObject *major = media->copyProperty (kIOBSDMajorKey);
++    OSObject *minor = media->copyProperty (kIOBSDMinorKey);
++    value.bsdMajor = OSDynamicCast (OSNumber, major) != nullptr;
++    value.bsdMinor = OSDynamicCast (OSNumber, minor) != nullptr;
++    OSSafeReleaseNULL (major);
++    OSSafeReleaseNULL (minor);
++    return value;
++  }
++};
++
+ static bool mediaWithUuidExists (const char *uuid, NativeUfsBlock *window)
+ {
+-  OSDictionary *matching = IOService::serviceMatching ("IOMedia");
+-  OSDictionary *properties = OSDictionary::withCapacity (1);
+-  OSString *wanted = OSString::withCString (uuid);
+-  bool found = false;
+-  if (matching && properties && wanted && properties->setObject ("UUID", wanted) &&
+-      matching->setObject ("IOPropertyMatch", properties)) {
+-    OSIterator *iterator = IOService::getMatchingServices (matching);
+-    if (iterator) {
+-      for (unsigned matches = 0; matches < 64 && !found; ++matches) {
+-        IORegistryEntry *media = OSDynamicCast (IORegistryEntry, iterator->getNextObject ());
+-        if (!media) break;
+-        IORegistryIterator *parents = IORegistryIterator::iterateOver (
+-          media, gIOServicePlane, kIORegistryIterateRecursively | kIORegistryIterateParents);
+-        if (parents) {
+-          found = ufsMediaHasAncestor (*parents, window);
+-          parents->release ();
+-        }
++  if (!window || !uuid || !uuid[0]) return false;
++  IORegistryIterator *iterator = IORegistryIterator::iterateOver (
++    window, gIOServicePlane, kIORegistryIterateRecursively);
++  if (!iterator) return false;
++  NabuRootMediaRegistry registry = { iterator, uuid };
++  const NabuRootMediaScan result = nabuScanRootMedia (registry);
++  iterator->release ();
++  return result.ready ();
++}
++
++static void captureMissingMedia (const char *uuid, NativeUfsBlock *window)
++{
++  IOService *resources = IOService::getResourceService ();
++  OSObject *ioBSD = resources ? resources->copyProperty ("IOBSD") : nullptr;
++  int used = snprintf (gRootMediaText, sizeof (gRootMediaText),
++    "Waiting for %.36s IOBSD=%u state=%x busy=%u\n", uuid, ioBSD ? 1U : 0U,
++    resources ? resources->getState () : 0U, resources ? resources->getBusyState () : 0U);
++  OSSafeReleaseNULL (ioBSD);
++  IORegistryIterator *iterator = IORegistryIterator::iterateOver (
++    window, gIOServicePlane, kIORegistryIterateRecursively);
++  unsigned count = 0;
++  bool complete = false;
++  while (iterator) {
++    IORegistryEntry *entry = iterator->getNextObject ();
++    if (!entry) { complete = true; break; }
++    if (count == 64) break;
++    ++count;
++    IOService *service = OSDynamicCast (IOService, entry);
++    IOService *provider = service ? service->getProvider () : nullptr;
++    OSObject *identity = entry->copyProperty ("UUID");
++    OSObject *name = entry->copyProperty (kIOBSDNameKey);
++    OSObject *contents = entry->copyProperty ("Content");
++    OSString *id = OSDynamicCast (OSString, identity);
++    OSString *bsd = OSDynamicCast (OSString, name);
++    OSString *content = OSDynamicCast (OSString, contents);
++    const char *className = entry->getMetaClass ()->getClassName ();
++    const char *parentClass = provider ? provider->getMetaClass ()->getClassName () : "-";
++    IOLog ("NativeUfs tree: id=%llx name=%.32s class=%.40s parent=%llx/%.40s state=%x busy=%u uuid=%.36s bsd=%.24s content=%.40s\n",
++      static_cast<unsigned long long> (entry->getRegistryEntryID ()), entry->getName (), className,
++      provider ? static_cast<unsigned long long> (provider->getRegistryEntryID ()) : 0ULL, parentClass,
++      service ? service->getState () : 0U, service ? service->getBusyState () : 0U,
++      id ? id->getCStringNoCopy () : "-", bsd ? bsd->getCStringNoCopy () : "-",
++      content ? content->getCStringNoCopy () : "-");
++    // Keep the panic page bounded; reserve detailed identity rows for media.
++    // Non-media services still identify where an unfinished driver is attached.
++    if (used < int (sizeof (gRootMediaText)) - 180) {
++      used += snprintf (gRootMediaText + used, sizeof (gRootMediaText) - used,
++        "%.28s state=%x busy=%u\n", className,
++        service ? service->getState () : 0U, service ? service->getBusyState () : 0U);
++      if (service && service->metaCast ("IOMedia")) {
++        used += snprintf (gRootMediaText + used, sizeof (gRootMediaText) - used,
++          " bsd=%.16s uuid=%.36s\n content=%.36s\n",
++          bsd ? bsd->getCStringNoCopy () : "-", id ? id->getCStringNoCopy () : "-",
++          content ? content->getCStringNoCopy () : "-");
+       }
+-      iterator->release ();
+-    }
+-  }
+-  OSSafeReleaseNULL (wanted);
+-  OSSafeReleaseNULL (properties);
+-  OSSafeReleaseNULL (matching);
+-  return found;
+-}
+-
+-static void captureMissingMedia (const char *uuid)
+-{
+-  int used = snprintf (gRootMediaText, sizeof (gRootMediaText), "Waiting for root UUID %s\n", uuid);
+-  OSDictionary *matching = IOService::serviceMatching ("IOMedia");
+-  OSIterator *iterator = matching ? IOService::getMatchingServices (matching) : nullptr;
+-  unsigned count = 0;
+-  while (iterator && used < int (sizeof (gRootMediaText)) - 180 && count++ < 8) {
+-    IOService *media = OSDynamicCast (IOService, iterator->getNextObject ());
+-    if (!media) break;
+-    OSString *id = OSDynamicCast (OSString, media->getProperty ("UUID"));
+-    OSString *bsd = OSDynamicCast (OSString, media->getProperty (kIOBSDNameKey));
+-    OSNumber *size = OSDynamicCast (OSNumber, media->getProperty ("Size"));
+-    OSString *content = OSDynamicCast (OSString, media->getProperty ("Content"));
+-    used += snprintf (gRootMediaText + used, sizeof (gRootMediaText) - used,
+-                      "media %.24s bytes=%llx uuid=%.36s\n content=%.36s busy=%u class=%.32s\n",
+-                      bsd ? bsd->getCStringNoCopy () : "-", size ? size->unsigned64BitValue () : 0ULL,
+-                      id ? id->getCStringNoCopy () : "-", content ? content->getCStringNoCopy () : "-",
+-                      media->getBusyState (), media->getMetaClass ()->getClassName ());
+-  }
++    }
++    OSSafeReleaseNULL (identity);
++    OSSafeReleaseNULL (name);
++    OSSafeReleaseNULL (contents);
++  }
++  IOLog ("NativeUfs tree: entries=%u complete=%u valid=%u\n", count,
++    complete ? 1U : 0U, iterator && iterator->isValid () ? 1U : 0U);
+   OSSafeReleaseNULL (iterator);
+-  OSSafeReleaseNULL (matching);
+ }
+ 
+ // Used only for objects that were never started/published. Started objects
+@@ -1739,6 +1797,7 @@
+       gRootDiagnostic.stage = "root window service start";
+       gRootDiagnostic.publicationPhase = static_cast<unsigned> (UfsRootPhase::Start);
+       gRootDiagnostic.publicationWindow = index;
++      gRootDiagnostic.windowBytes = device->windowSize ();
+       if (!device->start (gPendingProvider)) return false;
+       native_ufs_blocks_published = native_ufs_blocks_published + 1;
+       IOLog ("NativeUfs: published %s\n", device->windowLabel ());
+@@ -1750,6 +1809,7 @@
+       gRootDiagnostic.stage = "media publication";
+       gRootDiagnostic.publicationPhase = static_cast<unsigned> (UfsRootPhase::Media);
+       gRootDiagnostic.publicationWindow = index;
++      gRootDiagnostic.windowBytes = device->windowSize ();
+       struct MediaWait {
+         const char *uuid;
+         NativeUfsBlock *device;
+@@ -1765,7 +1825,7 @@
+       // Root publication precedes APFS and crypto worker initialization; 30 seconds can interrupt active matching.
+       bool ready = ufsWaitForRootMedia (wait);
+       IOLog ("NativeUfs: %s volume %s %s\n", device->windowLabel (), uuid, ready ? "ready" : "not ready");
+-      if (!ready) captureMissingMedia (uuid);
++      if (!ready) captureMissingMedia (uuid, device);
+       return ready;
+     }
+     void discard (unsigned index) { discardPendingWindow (index); }
