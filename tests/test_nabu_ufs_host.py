@@ -46,6 +46,13 @@ class NabuUfsHostContract(unittest.TestCase):
                 case()
 
 
+class NabuUfsRootImageContract(unittest.TestCase):
+    def test_root_image_contract(self) -> None:
+        for case in _cases(_load('test_nabu_ufs_root')):
+            with self.subTest(case=case.__name__):
+                case()
+
+
 class NabuUfsNativeContract(unittest.TestCase):
     def _compile_and_run(self, source: str, standard: str = 'c++17') -> str:
         compiler = shutil.which('g++') or shutil.which('clang++')
