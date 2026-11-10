@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import plistlib
 import subprocess
+import tempfile
 import uuid
 
 from native_macho import macho
@@ -50,7 +51,8 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
     source_evidence = None
     if transport == 'ufs':
         from nabu_storage_source import stage
-        upstream, source_evidence = stage(root, destination / 'source', board=board)
+        integration = Path(tempfile.mkdtemp(prefix='source-', dir=destination))
+        upstream, source_evidence = stage(root, integration, board=board)
     include = destination / 'include/IOKit/storage'
     include.mkdir(parents=True, exist_ok=True)
     for header in (root / 'sources/macos26/IOStorageFamily').glob('*.h'):
