@@ -22,7 +22,10 @@
 
 using NabuRootAuthenticator = int (*)(IOService *, const char *, uint8_t *);
 using NabuRamSeed = int (*)(const char *, dev_t *, char *, size_t, uint64_t *, uint64_t *, uint8_t *);
+using NabuRamAddon = int (*)(const uint8_t **, uint64_t *);
 extern "C" {
+int nabu_register_ram_addon(NabuRamAddon);
+int native_ram_block_gpu_addon(const uint8_t **, uint64_t *);
 int nabu_register_ram_seed(NabuRamSeed);
 int native_ram_block_volume_seed(const char *, dev_t *, char *, size_t, uint64_t *, uint64_t *, uint8_t *);
 int nabu_register_root_authenticator(NabuRootAuthenticator);
@@ -32,6 +35,24 @@ int native_verified_block_volume_device(const char *, dev_t *, char *, size_t);
 }
 static NabuRootAuthenticator gAuthenticator;
 static NabuRamSeed gRamSeed;
+static NabuRamAddon gRamAddon;
+
+extern "C" int nabu_register_ram_addon(NabuRamAddon callback)
+{
+  if (!callback) return 0;
+  NabuRamAddon empty = nullptr;
+  if (__atomic_compare_exchange_n(&gRamAddon, &empty, callback, false,
+                                  __ATOMIC_RELEASE, __ATOMIC_ACQUIRE)) return 1;
+  return empty == callback;
+}
+
+extern "C" int native_ram_block_gpu_addon(const uint8_t **data, uint64_t *bytes)
+{
+  if (!data || !bytes) return 0;
+  *data = nullptr; *bytes = 0;
+  auto callback = __atomic_load_n(&gRamAddon, __ATOMIC_ACQUIRE);
+  return callback ? callback(data, bytes) : 0;
+}
 
 extern "C" int nabu_register_ram_seed(NabuRamSeed callback)
 {
@@ -124,7 +145,7 @@ extern "C" int native_verified_block_manifest_sha384(dev_t device, const char *u
   return uuid && strlen(uuid) == 36 && digest ? nabuQueryDevice(device, uuid, digest) : 0;
 }
 
-extern "C" int native_verified_block_volume_device(const char *uuid, dev_t *device, char *path, size_t size)
+static int nabuFindAuthenticatedVolume(const char *uuid, dev_t *device, char *path, size_t size)
 {
   if (!uuid || strlen(uuid) != 36 || !device || !path || size < 6) return 0;
   *device = NODEV;
@@ -160,4 +181,19 @@ extern "C" int native_verified_block_volume_device(const char *uuid, dev_t *devi
   *device = candidate;
   strlcpy(path, candidatePath, size);
   return 1;
+}
+
+extern "C" int native_verified_block_volume_device(const char *uuid, dev_t *device, char *path, size_t size)
+{
+  if (!uuid || strlen(uuid) != 36 || !device || !path || size < 6) return 0;
+  // Publication of all three containers precedes OS publication, but APFS
+  // creates their volume media asynchronously. Wait for the authenticated
+  // UUID/device condition, including the real immutable provider callback.
+  for (unsigned elapsed = 0; elapsed <= 180000; elapsed += 100) {
+    if (nabuFindAuthenticatedVolume(uuid, device, path, size)) return 1;
+    if (elapsed == 180000) break;
+    if (elapsed % 10000 == 0) IOLog("NABU owner volume: waiting for UUID %s elapsed=%u ms\n", uuid, elapsed);
+    IOSleep(100);
+  }
+  return 0;
 }

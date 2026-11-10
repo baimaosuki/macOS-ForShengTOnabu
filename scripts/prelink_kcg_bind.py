@@ -137,7 +137,8 @@ def read_segments(data, image):
             sectname, segname, addr, size, file_offset = struct.unpack_from(
                 '<16s16sQQI', data, cursor)
             sections.append(dict(name=cstr(sectname), segment=cstr(segname), addr=addr,
-                                 size=size, offset=file_offset, command_offset=cursor))
+                                 size=size, offset=file_offset, command_offset=cursor,
+                                 flags=struct.unpack_from('<I', data, cursor + 64)[0]))
             cursor += 80
         result.append(dict(name=cstr(name), vmaddr=vmaddr, vmsize=vmsize, fileoff=fileoff,
                            filesize=filesize, initprot=initprot, maxprot=maxprot,
@@ -200,9 +201,84 @@ def read_fileset(data, image):
             continue
         vmaddr, fileoff = struct.unpack_from('<QQ', data, offset + 8)
         entry_offset = struct.unpack_from('<I', data, offset + 24)[0]
-        result.append(dict(entry_id=cstr(data[offset + entry_offset:]),
+        start = offset + entry_offset
+        end = data.find(b'\0', start, offset + _)
+        if end < 0:
+            raise ValueError('unterminated fileset identifier')
+        result.append(dict(entry_id=data[start:end].decode('utf-8'),
                            vmaddr=vmaddr, fileoff=fileoff))
     return result
+
+
+def reachable_instructions(data, segments, seeds):
+    """Walk code from declared functions; never interpret literal pools as code.
+
+    Resolve every VA through its owning segment. Fileset segments do not have
+    a common VA-to-file delta, so a header-relative lookup is incorrect here.
+    """
+    from prelink_fileset_kernel import (code_spans, instruction_class,
+                                       relative_target, NON_RETURNING_BRANCHES)
+    spans = code_spans(segments)
+    excluded, switches = [], []
+    # Apple's function-start table also indexes these assembler literals.
+    # Identify all 64 standard SHA-256 constants by their complete digest,
+    # rather than accepting/rejecting bytes according to their opcode shape.
+    for segment in segments:
+        for section in segment['sections']:
+            if not section['flags'] & 0x80000400:
+                continue
+            start, end = section['offset'], section['offset'] + section['size']
+            at = data.find(SHA256_K_PROLOGUE, start, end)
+            while at >= 0:
+                if at + 256 <= end and hashlib.sha256(data[at:at + 256]).hexdigest() == SHA256_K_TABLE:
+                    va = section['addr'] + at - start
+                    excluded.append(dict(start=va, end=va + 256, section=section['name'],
+                                         sha256=SHA256_K_TABLE, kind='complete-standard-sha256-constants'))
+                at = data.find(SHA256_K_PROLOGUE, at + 4, end)
+    def inside(va):
+        return (any(lo <= va and va + 4 <= hi for lo, hi in spans)
+                and not any(e['start'] <= va < e['end'] for e in excluded))
+    def position(va):
+        for segment in segments:
+            if segment['vmaddr'] <= va and va + 4 <= segment['vmaddr'] + segment['filesize']:
+                return segment['fileoff'] + va - segment['vmaddr']
+        raise Refused('code VA has no file bytes: %#x' % va)
+    seen, pending = set(), [va for va in seeds if inside(va)]
+    while pending:
+        va = pending.pop()
+        while inside(va) and va not in seen:
+            word = struct.unpack_from('<I', data, position(va))[0]
+            seen.add(va)
+            target = relative_target(word, va)
+            if target is not None and inside(target) and target not in seen:
+                pending.append(target)
+            if word == 0xd61f0200 and all(va - i * 4 in seen for i in range(1, 8)):
+                # Apple's bounded relative switch: cmp/csneg, table address,
+                # ldrsw, PC anchor, add, br. The range guard and all registers
+                # are checked; every entry must land on an actual BTI j pad.
+                words = [struct.unpack_from('<I', data, position(va - i * 4))[0]
+                         for i in range(7, -1, -1)]
+                if (words[0] & 0xffc003ff == 0xf100021f and words[1] in (0xda9f9610, 0x9a9f9210)
+                        and words[2] & 0x9f00001f == 0x90000011
+                        and words[3] & 0xffc003ff == 0x91000231
+                        and words[4:] == [0xb8b07a30, 0x10000011, 0x8b100230, 0xd61f0200]):
+                    count = ((words[0] >> 10) & 0xfff) + 1
+                    table = decode_pc_relative(words[2], va - 20)['target'] + ((words[3] >> 10) & 0xfff)
+                    anchor = va - 8
+                    targets = []
+                    for index in range(count):
+                        dest = anchor + struct.unpack_from('<i', data, position(table + index * 4))[0]
+                        if not inside(dest) or struct.unpack_from('<I', data, position(dest))[0] != 0xd503249f:
+                            raise Refused('bounded switch entry lacks an executable BTI j landing pad')
+                        targets.append(dest)
+                    pending.extend(dest for dest in targets if dest not in seen)
+                    switches.append(dict(site=hex(va), table=hex(table), count=count,
+                                         anchor=hex(anchor), targets=[hex(t) for t in targets],
+                                         pattern_words=[hex(w) for w in words]))
+            if instruction_class(word) in NON_RETURNING_BRANCHES:
+                break
+            va += 4
+    return seen, spans, position, dict(switches=switches, excluded_data=excluded)
 
 
 def read_plist_section(data, segments, segment_name, section_name):
@@ -359,9 +435,7 @@ def decode_pc_relative(word, address):
     if (word & 0x7E000000) == 0x34000000:                 # CBZ / CBNZ
         return dict(kind='cbz', target=address + sign_extend((word >> 5) & 0x7FFFF, 19) * 4)
     if (word & 0x7E000000) == 0x36000000:                 # TBZ / TBNZ
-        # imm14 (bits 18:5) is a raw byte offset, not word scaled: unlike
-        # B.cond/CBZ the immediate is not multiplied by 4.
-        return dict(kind='tbz', target=address + sign_extend((word >> 5) & 0x3FFF, 14))
+        return dict(kind='tbz', target=address + sign_extend((word >> 5) & 0x3FFF, 14) * 4)
     if (word & 0x1F000000) == 0x10000000:                 # ADR / ADRP
         immediate = sign_extend(((word >> 5) & 0x7FFFF) << 2 | ((word >> 29) & 3), 21)
         if word >> 31:
@@ -642,7 +716,9 @@ def run(args):
     if slide % 4096:
         raise ValueError('slide must be 4096-aligned: %#x' % slide)
 
-    table_size = 8 * len([i for i in selected if components[i]['text'] is not None])
+    storage_directory = getattr(args, 'storage_driver', None)
+    table_size = 8 * (len([i for i in selected if components[i]['text'] is not None])
+                      + bool(storage_directory))
     placed_groups = {}
     placed_parts = []
 
@@ -702,11 +778,50 @@ def run(args):
             parts=[link_part], fileoff=None, table_offset=None)
         globals()['GROUPS'] = GROUPS + (('__PLK_LINKEDIT', '__LINKEDIT', 1),)
 
+    storage = None
+    if storage_directory:
+        if kernel_image['cpusubtype'] != 0:
+            raise Refused('NABU storage prelink requires an actual ordinary ARM64 kernel')
+        from native_storage_module import prepare as prepare_storage
+        from inspect_macos26_security import macho as storage_macho
+        driver_base = align_up(max(g['vmaddr'] + g['vmsize'] for g in placed_groups.values()), PART_ALIGN)
+        storage = prepare_storage(Path(storage_directory), driver_base, kernel_symbols.by_name,
+                                  kc, storage_macho(kc), {n: True for n in selected}, slide,
+                                  architecture='arm64')
+        text = placed_groups['__PRELINK_TEXT']
+        occupied = sorted((p['new_vmaddr'], p['new_vmaddr'] + p['filesize']) for p in text['parts'])
+        cursor = text['vmaddr']
+        header_va = None
+        # Find a whole unused page inside the existing text segment. The table
+        # itself is reserved at its tail and cannot overlap this header.
+        for lo, hi in occupied + [(text['vmaddr'] + text['table_offset'], text['vmaddr'] + text['filesize'])]:
+            candidate = align_up(cursor, PART_ALIGN)
+            if candidate + PART_ALIGN <= lo:
+                header_va = candidate
+                break
+            cursor = max(cursor, hi)
+        if header_va is None:
+            raise Refused('no bounded unused text page for the split UFS header')
+        storage['header_va'] = header_va
+        if any(text['blob'][header_va - text['vmaddr']:header_va - text['vmaddr'] + PART_ALIGN]):
+            raise Refused('reserved UFS header page contains bytes')
+        for index, segment in enumerate(storage['image']['segments']):
+            if not segment['size']:
+                continue
+            name = '__NUFS_' + str(index)
+            blob = bytearray(storage['data'][segment['fileoff']:segment['fileoff'] + segment['filesize']])
+            blob.extend(bytes(segment['size'] - len(blob)))
+            placed_groups[name] = dict(name=name, old_low=0,
+                vmaddr=driver_base + segment['va'], vmsize=segment['size'],
+                filesize=len(blob), text_span=len(blob), prot=segment['initprot'],
+                blob=blob, parts=[], fileoff=None, table_offset=None)
     veneer_va = max(g['vmaddr'] + g['vmsize'] for g in placed_groups.values())
     veneer_va = align_up(veneer_va, PART_ALIGN)
     info_va = align_up(veneer_va + VENEER_RESERVE, 0x4000)
     band_base = min(g['vmaddr'] for g in placed_groups.values())
     band_end = info_va + 0x4000
+    if storage and band_end - img_base > 0x20000000:
+        raise Refused('UFS runtime and owner tables exceed the actual 512 MiB boot allocation')
 
     placed_parts.sort()
     _part_lo = [entry[0] for entry in placed_parts]
@@ -723,10 +838,7 @@ def run(args):
         return va
 
     output = bytearray(native_data)
-    for group_name, _component_name, _prot in GROUPS:
-        group = placed_groups.get(group_name)
-        if group is None:
-            continue
+    for group in sorted(placed_groups.values(), key=lambda item: item['vmaddr']):
         group['fileoff'] = group['vmaddr'] - img_base
         if group['fileoff'] < len(output):
             raise SystemExit('band file offset %#x overlaps the kernel image (%#x)'
@@ -758,12 +870,8 @@ def run(args):
         return (kernel_symbols.by_name[present[0]] + (apple_va - nearest),
                 present[0], False)
 
-    # ---- uniform slide: zero code mutations -----------------------------
-    # Under uniform slide (va = source_va + slide), all kext code segments
-    # are translated by the exact same slide. All intra-closure PC-relative
-    # distances are identically preserved:
-    #   (target + slide) - (site + slide) == target - site.
-    # Instruction rewriting (branch, ADRP, veneer) is completely bypassed.
+    # Uniform slide preserves intra-closure distances, but calls into the
+    # separately built kernel must be bound to that kernel's actual symbols.
     branch_relocations, veneers, unresolved = [], [], {}
     approximate = 0
     adrp_seen = 0
@@ -775,12 +883,61 @@ def run(args):
     def fail(name, entry):
         unresolved.setdefault(name or 'unknown', []).append(entry)
 
+    instruction_provenance = []
+    for identifier in selected:
+        component = components[identifier]
+        seeds = component['functions'] + [value for _name, kind, value in component['symbols']
+                                          if kind & 0x0e == 0x0e]
+        sites, spans, source_position, provenance = reachable_instructions(kc, component['segments'], seeds)
+        unproven = []
+        for lo, hi in spans:
+            for old_site in range(lo, hi, 4):
+                word = struct.unpack_from('<I', kc, source_position(old_site))[0]
+                decoded = decode_pc_relative(word, old_site)
+                if not decoded or not any(lo <= decoded['target'] < hi for lo, hi in kernel_ranges):
+                    continue
+                target, kind = decoded['target'], decoded['kind']
+                entry = dict(component=identifier, old_site=hex(old_site), site=hex(mv(old_site)),
+                             old_target=hex(target), kind=kind, original_word=hex(word))
+                if old_site not in sites:
+                    # A branch-shaped constant is not a license to modify data.
+                    # Record this ambiguity and refuse the candidate for review.
+                    if kind in ('b', 'bl') and not any(e['start'] <= old_site < e['end']
+                                                       for e in provenance['excluded_data']):
+                        unproven.append(entry)
+                        fail('unproven-external-instruction', entry)
+                    continue
+                native_target, name, exact = bind(target)
+                entry.update(symbol=name, exact=exact, provenance='reachable-from-function')
+                if kind not in ('b', 'bl') or native_target is None or not exact:
+                    entry['reason'] = 'requires exact B/BL kernel symbol binding'
+                    fail(name or 'unsupported-external-reference', entry)
+                    continue
+                replacement = encode_branch(kind, native_target - mv(old_site))
+                if replacement is None:
+                    entry['reason'] = 'native kernel target exceeds immediate branch range'
+                    fail(name, entry)
+                    continue
+                for group in placed_groups.values():
+                    if group['vmaddr'] <= mv(old_site) < group['vmaddr'] + group['filesize']:
+                        struct.pack_into('<I', group['blob'], mv(old_site) - group['vmaddr'], replacement)
+                        break
+                else:
+                    raise Refused('proven branch has no output segment')
+                entry.update(new_target=hex(native_target), category='c', word=hex(replacement))
+                branch_relocations.append(entry)
+        instruction_provenance.append(dict(component=identifier, seeds=len(seeds),
+                                           reachable_instructions=len(sites), unproven_external=len(unproven),
+                                           **provenance))
+
     # ---- __macho_list (sparse header index) ------------------------------
     # Done before the blobs are published: appending the table grows the
     # __PRELINK_TEXT blob, and publishing afterwards would undo the per-kext
     # header surgery performed below.
     headers = sorted(mv(components[i]['text']['vmaddr']) for i in selected
                      if components[i]['text'] is not None)
+    if storage:
+        headers = sorted([*headers, storage['header_va']])
     table = struct.pack('<%dQ' % len(headers), *headers)
     text_group = placed_groups['__PRELINK_TEXT']
     index_offset = text_group['table_offset']
@@ -1057,6 +1214,14 @@ def run(args):
                                 symbol=symbol, exact=exact, segment=host_name,
                                 component=host_identifier))
 
+    if storage:
+        for pointer in storage['relocations']:
+            if pointer['authenticated']:
+                raise Refused('ordinary ARM64 UFS requires plain runtime pointers')
+            struct.pack_into('<Q', output, file_position(pointer['new_site'], 8), pointer['new_target'])
+        from nabu_arm64_storage_header import write as write_storage_header
+        write_storage_header(storage, output, file_position)
+
     # ---- __PRELINK_INFO ---------------------------------------------------
     info_entries = []
     for identifier in selected:
@@ -1094,6 +1259,15 @@ def run(args):
         info_entries.append(entry)
     for identifier in interfaces:
         info_entries.append(dict(interfaces[identifier]))
+    if storage:
+        entry = dict(storage['info'])
+        extent = max(storage['base'] + s['va'] + s['size'] for s in storage['image']['segments'])
+        entry.update(_PrelinkBundlePath='/System/Library/Extensions/NativeUfs.kext',
+                     _PrelinkExecutableLoadAddr=storage['header_va'],
+                     _PrelinkExecutableSourceAddr=storage['header_va'],
+                     _PrelinkExecutableSize=extent - storage['header_va'],
+                     _PrelinkKmodInfo=storage['kmod'], _NativePrelinkPrimary=True)
+        info_entries.append(entry)
     info_plist = dict(metadata)
     info_plist['_PrelinkInfoDictionary'] = info_entries
     info_plist.pop('_PrelinkLinkKASLROffsets', None)
@@ -1166,14 +1340,20 @@ def run(args):
         info_sections)
 
     rebuilt = bytearray()
+    existing_names = set()
     for cmd, offset, cmdsize in kernel_image['commands']:
         raw = bytes(native_data[offset:offset + cmdsize])
         if cmd == LC_SEGMENT_64:
             name = cstr(native_data[offset + 8:offset + 24])
+            existing_names.add(name)
             if name in replacements:
                 raw = replacements[name]
         rebuilt.extend(raw)
-    struct.pack_into('<II', output, 16, kernel_image['ncmds'], len(rebuilt))
+    extras = [raw for name, raw in replacements.items() if name not in existing_names]
+    rebuilt.extend(b''.join(extras))
+    if 32 + len(rebuilt) > first_section_off:
+        raise Refused('UFS final image exceeds native load-command padding')
+    struct.pack_into('<II', output, 16, kernel_image['ncmds'] + len(extras), len(rebuilt))
     output[32:32 + len(rebuilt)] = rebuilt
 
     if struct.unpack_from('<i', output, 4)[0] != CPU_TYPE_ARM64:
@@ -1235,6 +1415,13 @@ def run(args):
                 and not inside(kernel_ranges_out, int(r['new_target'], 16))]
     check('every written pointer lands in the image or our kernel', not dangling,
           '%d dangling' % len(dangling))
+    if storage:
+        bad = [p for p in storage['relocations']
+               if struct.unpack_from('<Q', output, file_position(p['new_site'], 8))[0] != p['new_target']
+               or not inside(out_ranges, p['new_target'])]
+        check('every UFS import/rebase equals its resolved ordinary ARM64 target', not bad,
+              '%d bound pointers' % len(storage['relocations']))
+        check('UFS final image fits the real 512 MiB allocation', len(output) <= 0x20000000)
 
     sample = [r for r in relocations if r['category'] in ('a', 'b')]
     step = max(1, len(sample) // 500)
@@ -1259,8 +1446,9 @@ def run(args):
                   part['new_vmaddr'] + part['filesize'] <= group['vmaddr'] + group['filesize']
                   for group in placed_groups.values() for part in group['parts'])
     check('every repacked part lands inside its group', part_ok)
-    check('band starts above the kernel and on an L2 granule',
-          band_base % L2_GRANULE == 0 and band_base >= kernel_end,
+    kernel_end = max(s['vmaddr'] + s['vmsize'] for s in kernel_segments if s['vmsize'])
+    check('uniform band starts above the kernel on a 4 KiB page',
+          band_base % 4096 == 0 and band_base >= kernel_end,
           '%#x (kernel end %#x)' % (band_base, kernel_end))
 
     bind_ok = all(r['symbol'] in kernel_symbols.by_name
@@ -1335,7 +1523,8 @@ def run(args):
         collection_sha256=hashlib.sha256(kc).hexdigest(),
         fileset=str(fileset_path) if fileset_path.is_file() else None,
         roots=roots,
-        layout='repacked',
+        layout='uniform',
+        slide=hex(slide),
         header_rewrite=header_rewrite,
         crypto_hmac=crypto_hmac,
         part_align=hex(PART_ALIGN),
@@ -1379,6 +1568,7 @@ def run(args):
         pointer_relocation_count=len(relocations),
         branch_relocations=branch_relocations,
         branch_relocation_count=len(branch_relocations),
+        instruction_provenance=instruction_provenance,
         adrp_user_rewrite_count=adrp_user_rewrites,
         veneers=veneers,
         veneer_count=len(veneers),
@@ -1394,6 +1584,22 @@ def run(args):
         output_bytes=len(output),
         output_sha256=hashlib.sha256(output).hexdigest(),
     )
+    if storage:
+        report['prelink_text_layout'].append(dict(component=storage['info']['CFBundleIdentifier'],
+            header=hex(storage['header_va']), size=0x4000))
+        report['storage_driver'] = dict(bundle=storage['info']['CFBundleIdentifier'],
+            header=hex(storage['header_va']), base=hex(storage['base']), kmod=hex(storage['kmod']),
+            imports=storage['imports'], pointer_formats=storage['pointer_formats'],
+            vtable_abi=storage['vtable_abi'], build=storage['evidence'],
+            pointer_relocations=storage['relocations'], kernel_integrated=True,
+            runtime_qualified=False, hardware_qualified=False)
+        report['storage_driver']['source_module'] = str(Path(storage_directory) / 'NativeUfs.macho')
+        report['storage_driver']['source_sections'] = [dict(name=section['name'],
+            source_offset=section['fileoff'], output_va=storage['base'] + section['va'],
+            size=section['size'], sha256=hashlib.sha256(storage['data'][
+                section['fileoff']:section['fileoff'] + section['size']]).hexdigest())
+            for segment in storage['image']['segments'] if segment['initprot'] & 4
+            for section in segment['sections'] if section['size'] and section['fileoff']]
     args.report.parent.mkdir(parents=True, exist_ok=True)
     args.report.write_text(json.dumps(report, indent=2) + '\n')
 
@@ -1423,7 +1629,7 @@ def decoder_self_test():
         checks.append(kind)
     # TBZ/TBNZ: build the encoding by hand and require the exact target back.
     for bit, delta in ((31, 0x100), (5, -0x40), (0, 0x1FFC), (63, -0x2000)):
-        immediate = delta & 0x3FFF
+        immediate = (delta >> 2) & 0x3FFF
         word = (0x36000000 | (bit >> 5) << 31 | ((bit & 0x1F) << 19)
                 | (immediate << 5) | 0)
         decoded = decode_pc_relative(word, base)
@@ -1458,6 +1664,8 @@ def main(argv=None):
                         help='per-entry fileset JSON (default: %s)' % DEFAULT_FILESET)
     parser.add_argument('--root', action='append', default=[],
                         help='bundle id to prelink (repeatable)')
+    parser.add_argument('--storage-driver', type=Path,
+                        help='ordinary ARM64 NABU UFS module with actual linked owner policies')
     parser.add_argument('--output', required=True, type=Path)
     parser.add_argument('--report', required=True, type=Path)
     parser.add_argument('--debug', action='store_true',

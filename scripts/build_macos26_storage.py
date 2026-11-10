@@ -110,9 +110,11 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
         + ('#include <sys/types.h>\n'
            'extern "C" int nabu_register_ram_seed(int (*)(const char *, dev_t *, char *, size_t, uint64_t *, uint64_t *, uint8_t *));\n'
            'extern "C" int nabu_ram_data_volume_seed(const char *, dev_t *, char *, size_t, uint64_t *, uint64_t *, uint8_t *);\n'
+           'extern "C" int nabu_register_ram_addon(int (*)(const uint8_t **, uint64_t *));\n'
+           'extern "C" int nabu_ram_gpu_addon(const uint8_t **, uint64_t *);\n'
            if transport == 'ufs' and root_mode == 'desktop' else '') +
         f'extern "C" kern_return_t {entry_prefix}_start(kmod_info_t *, void *) {{ '
-        + ('if (!nabu_register_ram_seed(nabu_ram_data_volume_seed)) return KERN_FAILURE; '
+        + ('if (!nabu_register_ram_seed(nabu_ram_data_volume_seed) || !nabu_register_ram_addon(nabu_ram_gpu_addon)) return KERN_FAILURE; '
            if transport == 'ufs' and root_mode == 'desktop' else '') +
         'return KERN_SUCCESS; }\n'
         f'extern "C" kern_return_t {entry_prefix}_stop(kmod_info_t *, void *) {{ return KERN_FAILURE; }}\n'
@@ -148,7 +150,13 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
                 '-Wall', '-Wextra', '-Werror', '-Wno-unused-parameter',
                 '-Wno-c99-designator', '-Wno-reorder-init-list',
                 '-Wno-deprecated-enum-enum-conversion', '-Wno-unnecessary-virtual-specifier']
-    run(command, directory + '-compile', record, cwd=Path(compile_record['directory']), env=env)
+    compile_failures = []
+    def compile_unit(recipe, label):
+        try:
+            run(recipe, label, record, cwd=Path(compile_record['directory']), env=env)
+        except (subprocess.CalledProcessError, ValueError) as error:
+            compile_failures.append(label + ': ' + str(error))
+    compile_unit(command, directory + '-compile')
     objects = [str(obj)]
     if transport == 'ufs' and root_mode == 'desktop':
         from prepare_nabu_desktop_policy import assembly
@@ -170,8 +178,7 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
             ccommand += ['-std=gnu11']
             # -x must precede the input for Clang to select C on inherited recipes.
             ccommand[1:1] = ['-x', 'c']
-            run(ccommand, directory + '-' + name, record,
-                cwd=Path(compile_record['directory']), env=env)
+            compile_unit(ccommand, directory + '-' + name)
             objects.append(str(target))
         # RAM Data is a separate C++ translation unit in the same prelinked
         # module, so its real metaclass/constructor and root query are present.
@@ -209,9 +216,9 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
         ram_object = destination / 'NativeRamBlock.o'
         ram_command = [str(ram_source) if arg == str(wrapper) else str(ram_object) if arg == str(obj) else arg
                        for arg in command]
-        ram_command[1:1] = ['-Dnative_ram_block_volume_seed=nabu_ram_data_volume_seed']
-        run(ram_command, directory + '-ram-data', record,
-            cwd=Path(compile_record['directory']), env=env)
+        ram_command[1:1] = ['-Dnative_ram_block_volume_seed=nabu_ram_data_volume_seed',
+                            '-Dnative_ram_block_gpu_addon=nabu_ram_gpu_addon']
+        compile_unit(ram_command, directory + '-ram-data')
         objects.append(str(ram_object))
         ram_evidence = dict(revision=ram_revision, source_sha256=hashlib.sha256(ram_text.encode()).hexdigest(),
                             logical_limit_bytes=4 << 30, volatile=True, persistent_store_used=False,
@@ -230,6 +237,8 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
         run(input_command, directory + '-input-compile', record,
             cwd=Path(compile_record['directory']), env=env)
         objects.append(str(input_object))
+    if compile_failures:
+        raise ValueError('; '.join(compile_failures))
     binary = destination / (component + '.macho')
     run(['xcrun', 'ld', '-arch', architecture, '-kext', '-kexts_use_stubs',
          '-platform_version', 'macos', '26.5', '26.5',

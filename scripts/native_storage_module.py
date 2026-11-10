@@ -73,7 +73,7 @@ def validate_private_slot(item, allowed):
 
 
 def prepare(directory: Path, base: int, native: dict, original: bytes,
-            kc: dict, selected: dict, slide: int) -> dict:
+            kc: dict, selected: dict, slide: int, *, architecture='arm64e') -> dict:
     evidence = json.loads((directory / 'build.json').read_text())
     components = {
         'org.unixnu.driver.NativeVirtioBlock': ('NativeVirtioBlock', 'NativeVirtioBlock'),
@@ -86,8 +86,8 @@ def prepare(directory: Path, base: int, native: dict, original: bytes,
     data = binary.read_bytes()
     if evidence['binary_sha256'] != hashlib.sha256(data).hexdigest():
         raise ValueError('transport differs from its actual build record')
-    image = macho(data, 'arm64e')
-    if (image['kind'] != 11 or not image['subtype'] & 0x40000000
+    image = macho(data, architecture)
+    if (image['kind'] != 11 or (architecture == 'arm64e' and not image['subtype'] & 0x40000000)
             or any(s['va'] % PAGE or s['size'] % PAGE for s in image['segments'])):
         raise ValueError('requires a page-aligned standalone ARM64E bundle')
     text = next(s for s in image['segments'] if s['name'] == '__TEXT')
@@ -110,9 +110,16 @@ def prepare(directory: Path, base: int, native: dict, original: bytes,
                 or evidence.get('read_only_transport') is not True
                 or evidence.get('hardware_enable_required') is not True):
             raise ValueError('UFS transport must restrict its read-only root to macosroot on LUN0')
+        if evidence.get('root_mode') == 'desktop':
+            if (evidence.get('desktop_policy_deferred') is not False
+                    or not evidence.get('desktop_owner_policy')
+                    or evidence.get('authentication') != 'owner-signed-blocks-and-volume-uuid'):
+                raise ValueError('desktop UFS requires actual linked owner policies; deferred CI bundle cannot boot')
         display = evidence.get('native_gop_display')
         input_driver = evidence.get('native_recovery_input')
         allowed = {component, 'NativeGOPDisplay'} if display else {component}
+        if evidence.get('root_mode') == 'desktop':
+            allowed.add('NativeRamBlock')
         if input_driver:
             allowed |= {'NativeRecoveryInput', 'IOHIDEventDriver'}
         if info['CFBundleExecutable'] != component or any(
@@ -239,7 +246,8 @@ def prepare(directory: Path, base: int, native: dict, original: bytes,
         if p + 22 > len(blob):
             raise ValueError('transport segment chain header exceeds fixups')
         length, page_size, pointer_format, segment_offset, _, pages = struct.unpack_from('<IHHQIH', blob, p)
-        if (pointer_format not in (1, 7, 9, 12) or page_size not in (4096, PAGE)
+        allowed_formats = (6,) if architecture == 'arm64' else (1, 7, 9, 12)
+        if (pointer_format not in allowed_formats or page_size not in (4096, PAGE)
                 or segment_offset != seg['va'] or length < 22 + pages * 2
                 or p + length > len(blob) or pages * page_size > seg['size']):
             raise ValueError('unsupported transport pointer chain layout')
@@ -258,6 +266,32 @@ def prepare(directory: Path, base: int, native: dict, original: bytes,
                 seen.add(site)
                 at = backed_offset(image['segments'], site, 8, len(data))
                 word, = struct.unpack_from('<Q', data, at)
+                if pointer_format == 6:
+                    bind = bool(word >> 63)
+                    if bind:
+                        index = word & 0xffffff
+                        if index >= len(imports) or (word >> 32) & 0x7ffff:
+                            raise ValueError('invalid format-6 transport bind')
+                        name, target = imports[index]
+                        # dyld_chained_ptr_64_bind.addend is unsigned, unlike
+                        # arm64e's signed 19-bit inline addend.
+                        target += (word >> 24) & 0xff
+                    else:
+                        name = None
+                        if (word >> 36) & 0x7fff:
+                            raise ValueError('tagged or reserved format-6 transport rebase')
+                        target = base + (word & ((1 << 36) - 1))
+                        if not any(base + s['va'] <= target <= base + s['va'] + s['size']
+                                   for s in image['segments']):
+                            raise ValueError('format-6 rebase target is outside the transport')
+                    relocations.append(dict(new_site=base + site, new_target=target,
+                        authenticated=False, key=0, address_diversity=False, diversity=0,
+                        import_name=name))
+                    following = (word >> 51) & 0xfff
+                    if not following:
+                        break
+                    site += following * 4
+                    continue
                 auth, bind = bool(word >> 63), bool(word >> 62 & 1)
                 name = None
                 if bind:
@@ -305,7 +339,11 @@ def prepare(directory: Path, base: int, native: dict, original: bytes,
                 kmod=base + own['_kmod_info'], symbols={n: a + base for n, a in own.items()},
                 relocations=relocations, imports=dict(imports), pointer_formats=sorted(formats),
                 evidence=evidence, compatibility=compatibility, component=component, block_class=block_class)
-    driver['vtable_abi'] = audit_storage_vtable(driver, original, kc, native, slide)
+    driver['vtable_abi'] = audit_storage_vtable(driver, original, kc, native, slide,
+                                              require_pac=architecture == 'arm64e')
+    if evidence.get('root_mode') == 'desktop':
+        driver['ram_data_vtable_abi'] = audit_storage_vtable(driver, original, kc, native, slide,
+            own_class='NativeRamBlock', require_pac=architecture == 'arm64e')
     if evidence.get('native_gop_display'):
         audit = audit_storage_vtable(driver, original, kc, native, slide,
             family_bundle='com.apple.iokit.IOMobileGraphicsFamily',
@@ -328,7 +366,7 @@ def prepare(directory: Path, base: int, native: dict, original: bytes,
 def audit_storage_vtable(driver: dict, original: bytes, kc: dict, native: dict, slide: int, *,
                          family_bundle='com.apple.iokit.IOStorageFamily',
                          base_class='IOBlockStorageDevice', own_class=None, additional_names=None,
-                         pure_declaration_class=None) -> dict:
+                         pure_declaration_class=None, require_pac=True) -> dict:
     family = kc_macho(original, kc['entries'][family_bundle][1])
     kernel = kc_macho(original, kc['entries']['com.apple.kernel'][1])
     old_names = exports(original, kernel)
@@ -395,15 +433,19 @@ def audit_storage_vtable(driver: dict, original: bytes, kc: dict, native: dict, 
             if pac['target'] != old['target']:
                 raise ValueError('framebuffer pure override does not share the original introducing pure stub')
             declaration = pure_declaration_class
-        for key in ('authenticated', 'key', 'diversity', 'address_diversity'):
-            if own[key] != pac[key]:
-                raise ValueError(f'transport vtable PAC contract differs at slot {index}: {key}')
+        if require_pac:
+            for key in ('authenticated', 'key', 'diversity', 'address_diversity'):
+                if own[key] != pac[key]:
+                    raise ValueError(f'transport vtable PAC contract differs at slot {index}: {key}')
+        elif own['authenticated']:
+            raise ValueError('ordinary ARM64 transport carries an authenticated vtable pointer')
         slots.append(dict(slot=index, original_names=names, own_names=own_names.get(own['new_target']),
                           target=hex(own['new_target']), override=override, pac_declaration=declaration))
     else:
         raise ValueError('unbounded transport vtable')
     return dict(block_class=block_class, base_class=base_class, family_bundle=family_bundle,
-                slots=len(slots), overrides=overrides, pac_metadata_matches=True, methods=slots)
+                slots=len(slots), overrides=overrides, pac_metadata_matches=require_pac,
+                ordinary_arm64=not require_pac, methods=slots)
 
 
 def rewrite_header(driver, output, at):

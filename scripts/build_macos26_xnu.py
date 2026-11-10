@@ -702,7 +702,11 @@ def compile_sources(args, record: dict) -> None:
     if failures:
         raise ValueError('; '.join(failures))
     if args.link_kernel:
-        link_kernel(args, record, common, sdk, source, env)
+        link_error = None
+        try:
+            link_kernel(args, record, common, sdk, source, env)
+        except (subprocess.CalledProcessError, ValueError) as error:
+            link_error = error
         if ARCH == 'arm64e' or args.build_ufs_driver:
             from build_macos26_storage import build as build_storage
             if ARCH == 'arm64e':
@@ -715,6 +719,8 @@ def compile_sources(args, record: dict) -> None:
                               board=BOARD, defer_desktop_policy=args.ufs_defer_desktop_policy)
             record['storage_kernel_integration'] = 'separate bundles; requires explicit prelink and verification'
             save(record)
+        if link_error:
+            raise link_error
 
 
 def link_kernel(args, record, common, sdk, source, env):
@@ -895,6 +901,10 @@ def main() -> None:
         PATCHES.append(PLATFORM / 'pac/0004-native-signing-window-failure.patch')
         PATCHES.append(PLATFORM / 'pac/0005-native-user-a-key-policy.patch')
         PATCHES.append(PLATFORM / 'pac/0006-native-smp-key-bootstrap.patch')
+    # Build trees are caller-owned outputs. An explicit new directory allows
+    # revising desktop integration without touching an older recorded tree.
+    if os.environ.get('MACOS26_OUT'):
+        OUT = Path(os.environ['MACOS26_OUT']).expanduser().resolve()
     # Keep helpers on this configured module when invoked as a script.
     sys.modules['build_macos26_xnu'] = sys.modules[__name__]
     record = prepare()

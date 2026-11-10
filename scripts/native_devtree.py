@@ -264,7 +264,9 @@ def make_nabu_adt(path: Path, *, dram_base: int = 0xc0000000,
                   owned_memory_size: int = 0x40000000,
                   os_environment: str | None = None,
                   panic_log: bool = True,
-                  native_gop_display: bool = False) -> None:
+                  native_gop_display: bool = False,
+                  native_ufs: bool = False,
+                  packed_ramdisk: bool = False) -> None:
     """Emit the Xiaomi Pad 5 (nabu / SM8150) Apple DeviceTree (.adt)."""
     # Nabu has 3 physical DRAM banks separated by the TrustZone hole 0xb9900000..0xc0000000.
     # XNU owns the upper contiguous 5 GiB window [0xc0000000, 0x200000000), while stock UEFI GOP
@@ -348,6 +350,8 @@ def make_nabu_adt(path: Path, *, dram_base: int = 0xc0000000,
     # First boot stays off the storage and GPU blocks: the strict ADT contract
     # forbids ufs/gpu/adreno/kgsl nodes until their drivers are qualified.
     arm_io_children = [intc]
+    if native_ufs:
+        arm_io_children.extend([ufs, ufs_smmu])
     if native_gop_display:
         arm_io_children.append(_adt_node('native-gop', (
             ('device_type', b'display-subsystem\0'),
@@ -376,7 +380,8 @@ def make_nabu_adt(path: Path, *, dram_base: int = 0xc0000000,
         # looks up first; without it start() panics with "failed to get manifest
         # properties" before it ever reaches the crypto hash method check.
         _adt_node('chosen', tuple(chosen_props),
-                  (_adt_node('memory-map'), _adt_node('manifest-properties'))),
+                  (_adt_node('memory-map', (('PackedRAMDisk', bytes(16)),) if packed_ramdisk else ()),
+                   _adt_node('manifest-properties'))),
         _adt_node('defaults', (('model', b'Xiaomi Pad 5\0'), ('target-type', b'Mac\0'))),
         _adt_node('options'),
         _adt_node('product', (
@@ -395,4 +400,3 @@ def make_nabu_adt(path: Path, *, dram_base: int = 0xc0000000,
         arm_io,
     ))
     path.write_bytes(tree)
-

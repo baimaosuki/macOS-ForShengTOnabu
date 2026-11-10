@@ -182,6 +182,21 @@ def main(argv=None):
     split_missing, containment = [], []
     layout = report['prelink_text_layout']
     for entry in layout:
+        if entry['component'] == report.get('storage_driver', {}).get('bundle'):
+            # UFS is emitted with final addresses in independent outer
+            # segments. Its header alone lives inside __PRELINK_TEXT.
+            header = int(entry['header'], 16)
+            position = header - text_seg['vmaddr'] + text_seg['fileoff']
+            check('UFS split header carries LC_SEGMENT_SPLIT_INFO',
+                  any(c == LC_SEGMENT_SPLIT_INFO for c, _, _ in commands(data, position)['commands']))
+            for inner in segments(data, commands(data, position)):
+                if inner['filesize']:
+                    matches = [s for s in segs if s['vmaddr'] <= inner['vmaddr']
+                               and inner['vmaddr'] + inner['filesize'] <= s['vmaddr'] + s['filesize']
+                               and inner['fileoff'] == s['fileoff'] + inner['vmaddr'] - s['vmaddr']]
+                    if len(matches) != 1:
+                        containment.append((entry['component'], inner['name'], hex(inner['vmaddr'])))
+            continue
         header = int(entry['header'], 16)
         position = header - text_seg['vmaddr'] + text_seg['fileoff']
         ncmds, sizeofcmds = struct.unpack_from('<II', data, position + 16)
@@ -201,8 +216,10 @@ def main(argv=None):
     # (unslid) vmaddrs on purpose: the loader derives the per-kext slide from
     # kmod_info.address - header vmaddr, which is the same constant for every
     # segment.  So containment must be checked at va + slide.
-    slide = int(report['slide'], 16)
+    slide = int(report.get('slide', '0'), 16) if report.get('layout') != 'uniform' else 0
     for entry in layout:
+        if entry['component'] == report.get('storage_driver', {}).get('bundle'):
+            continue
         header = int(entry['header'], 16)
         position = header - text_seg['vmaddr'] + text_seg['fileoff']
         ncmds, _sc = struct.unpack_from('<II', data, position + 16)
@@ -258,7 +275,9 @@ def main(argv=None):
 
     print('== 6. branch bindings re-decoded')
     branches = report['branch_relocations']
-    branch_sample = random.sample(branches, min(args.samples, len(branches)))
+    # This is cheap compared with building the image: check every rewritten
+    # instruction, including its actual kernel symbol, rather than sampling.
+    branch_sample = branches
     mismatched, undecodable = [], []
     for record in branch_sample:
         site = int(record['site'], 16)
@@ -282,6 +301,15 @@ def main(argv=None):
     native = open(args.native, 'rb').read()
     native_image = commands(native, 0)
     native_symbols = symtab(native, native_image)
+    branch_symbol_mismatch = []
+    for record in branches:
+        if record.get('category') != 'c':
+            continue
+        if (not record.get('exact') or record.get('symbol') not in native_symbols
+                or native_symbols[record['symbol']] != int(record['new_target'], 16)):
+            branch_symbol_mismatch.append(record['site'])
+    check('every external branch equals its exact native kernel symbol',
+          not branch_symbol_mismatch, str(branch_symbol_mismatch[:3]))
     kernel_bound = [r for r in pointers if r['category'] == 'c' and r.get('symbol')]
     kernel_sample = random.sample(kernel_bound, min(args.samples, len(kernel_bound)))
     unresolved_names, value_mismatch = [], []
@@ -336,6 +364,44 @@ def main(argv=None):
               addresses <= listed, str(sorted(hex(a) for a in addresses - listed)[:3]))
         check('every kext in __macho_list has an Info.plist entry',
               listed <= addresses | {0}, '')
+
+    if report.get('storage_driver'):
+        storage = report['storage_driver']
+        check('UFS final image fits 512 MiB', len(data) <= 0x20000000)
+        check('UFS keeps ordinary ARM64 format-6 bindings', storage['pointer_formats'] == [6])
+        check('UFS method table was audited', storage['vtable_abi']['ordinary_arm64'] is True
+              and storage['vtable_abi']['slots'] > 0)
+        code_mismatch = []
+        for section in storage['source_sections']:
+            hosts = [s for s in segs if s['vmaddr'] <= section['output_va']
+                     and section['output_va'] + section['size'] <= s['vmaddr'] + s['filesize']]
+            if len(hosts) != 1:
+                code_mismatch.append(section['name'])
+                continue
+            offset = hosts[0]['fileoff'] + section['output_va'] - hosts[0]['vmaddr']
+            if hashlib.sha256(data[offset:offset + section['size']]).hexdigest() != section['sha256']:
+                code_mismatch.append(section['name'])
+        check('all UFS executable sections retain their exact linked bytes', not code_mismatch)
+        mismatches = []
+        for pointer in storage['pointer_relocations']:
+            site, target = pointer['new_site'], pointer['new_target']
+            host = [s for s in segs if s['vmaddr'] <= site and site + 8 <= s['vmaddr'] + s['filesize']]
+            if len(host) != 1 or pointer['authenticated']:
+                mismatches.append(site)
+                continue
+            offset = host[0]['fileoff'] + site - host[0]['vmaddr']
+            if struct.unpack_from('<Q', data, offset)[0] != target:
+                mismatches.append(site)
+        check('every UFS pointer re-read equals its resolved target', not mismatches)
+        own_entry = [e for e in entries if e['CFBundleIdentifier'] == storage['bundle']]
+        check('UFS has exactly one actual prelink registration', len(own_entry) == 1)
+        if len(own_entry) == 1:
+            check('UFS prelink registration uses actual kmod', own_entry[0]['_PrelinkKmodInfo'] == int(storage['kmod'], 16))
+            personality = own_entry[0]['IOKitPersonalities'].get('NativeUfs', {})
+            check('UFS personality matches NABU resource nub',
+                  personality.get('IOClass') == 'NativeUfs'
+                  and personality.get('IOProviderClass') == 'IOPlatformDevice'
+                  and 'qcom,sm8150-ufshc' in personality.get('IONameMatch', []))
 
     print('== 9. determinism fingerprint')
     print('   image sha256 %s' % hashlib.sha256(data).hexdigest())
