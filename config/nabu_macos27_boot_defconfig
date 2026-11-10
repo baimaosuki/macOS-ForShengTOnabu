@@ -1,0 +1,41 @@
+# NABU macOS 27.3 boot target (plan task A2).
+# Only keys whose meaning was read from a reference config are enabled here.
+# Anything not yet traced in the sources stays in the UNVERIFIED block below.
+
+# arch layer - profiles/arch/arm64/configs/common.config (UniXNU 95e9feeb)
+CONFIG_XNU_BUILD_ARCHIVES=y
+CONFIG_XNU_SOURCE_CORECRYPTO14=y
+CONFIG_XNU_SOURCE_PTHREAD=y
+CONFIG_XNU_ARM_DT_PLATFORM=y
+CONFIG_XNU_ARMCPU=y
+CONFIG_XNU_NATIVE_AES=y
+CONFIG_XNU_NATIVE_ARCH_TIMER=y
+CONFIG_XNU_NATIVE_PAN=y
+
+# os layer - profiles/os/macos-27.3-26C5035r/configs/macos.config
+CONFIG_XNU_CRYPTO_BOOTSTRAP="prelinked"
+CONFIG_XNU_NATIVE_CS_HASH_CACHE=y
+
+# kernel/root paths read from UniXNU-sheng/configs/sheng_macos_defconfig
+CONFIG_XNU_DT_PANIC_REGION=y
+CONFIG_XNU_ARMVIRT_PLATFORM=n
+CONFIG_XNU_KERNEL_CHAINED_FIXUPS=y
+CONFIG_XNU_NATIVE_RAM_BLOCK=y
+CONFIG_XNU_OWNER_CACHE_MOUNT=y
+CONFIG_XNU_OWNER_CACHE_STARTUP=y
+CONFIG_XNU_OWNER_BOOT_MANIFEST=y
+CONFIG_XNU_OWNER_DATA_MOUNT=y
+CONFIG_XNU_OWNER_UNION_SYSTEMOS=y
+CONFIG_XNU_NATIVE_LEGACY_DISPLAY=y
+
+# nabu: read-only UFS only, no source-storage tables on the medium,
+# no sheng GPU identity, no sheng partition geometry.
+CONFIG_XNU_SOURCE_STORAGE=n
+CONFIG_XNU_SOURCE_STORAGE_TABLES=""
+CONFIG_XNU_NATIVE_ADRENO=n
+
+# UNVERIFIED - do not enable before the implementation is traced (plan A2):
+# CONFIG_XNU_NATIVE_UFS_READONLY=y      no such key exists in any config read so far
+# CONFIG_XNU_OWNER_ROOT_TRUST=y         needs an owner root policy input for nabu
+# CONFIG_XNU_OWNER_ROOT_AUDIT=y         same
+# CONFIG_XNU_OWNER_DATA_VOLUME_UUID=""  filled from the built RAM Data seed, never copied

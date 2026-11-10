@@ -143,15 +143,15 @@ class NabuBoardMergeTests(unittest.TestCase):
                 '    {0x15000000ULL, 0x100000ULL},\n'
                 '    0x300U, 4096U\n'
                 '  };\n'
-                '  uint64_t lba = 0, count = 0;\n'
+                '  NabuUfsWindow w = {};\n'
                 '  return nabuUfsResourcesMatch(r) &&\n'
                 '         nabuUfsClocksReady(0x80000000U, 0x00000001U, 0x00000001U) &&\n'
                 '         !nabuUfsClocksReady(0x00000000U, 0x00000001U, 0x00000001U) &&\n'
                 '         nabu_ufs::kBoard.hcBase == 0x01d84000ULL &&\n'
                 '         nabu_ufs::kBoard.streamId == 0x0300 &&\n'
                 '         !nabu_ufs::kBoard.writesAllowed &&\n'
-                '         nabuUfsRequestGeometry(true, 4096ULL * 1024, 5, 2, 8192, lba, count) &&\n'
-                '         lba == 40 && count == 16;\n'
+                '         nabuUfsWindowFromBytes(4096ULL * 5, 8192, 4096ULL * 1024, 64, w) &&\n'
+                '         w.firstLba == 5 && w.blocks == 2 && w.headSkip == 0 && w.tailSlack == 0;\n'
                 '}\n'
             )
             subprocess.run([compiler, '-std=c++17', '-Wall', '-Wextra', '-Werror',

@@ -8,6 +8,36 @@ ROOT = Path(__file__).resolve().parents[1]
 CHECKOUTS = {'ShengPreflight': ROOT / 'UniXNU-sheng/drivers/ShengPreflight',
              'VerifiedRoot': ROOT / 'UniXNU/kits/VerifiedRoot',
              'ShengUfs': ROOT / 'sources/unixnu-components/ShengUfs'}
+
+
+def stage_board_headers() -> None:
+    """Copy the board storage headers next to the component they are built with.
+
+    patches/ShengUfs rewrites NativeUfs.cpp to include NabuBoard.h,
+    NabuUfsResources.h and NabuUfsWindowPlan.h, so those headers have to exist in
+    the checkout before the patches are applied. Keeping the single copy in
+    platform/ avoids a second, drifting copy inside a patch body.
+    """
+    source = ROOT / 'platform' / 'nabu' / 'macos26' / 'storage'
+    target = CHECKOUTS['ShengUfs']
+    if not source.is_dir() or not target.is_dir():
+        return
+    # NabuBoard.h is created by patches/ShengUfs/nabu-nativeufs-board.patch itself;
+    # staging it as well would make that hunk fail. Everything else is ours.
+    owned_by_a_patch = {'NabuBoard.h'}
+    for header in sorted(source.glob('Nabu*.h')):
+        if header.name in owned_by_a_patch:
+            continue
+        destination = target / header.name
+        payload = header.read_bytes()
+        if destination.is_file() and destination.read_bytes() == payload:
+            print(f'Header current: {header.name}')
+            continue
+        destination.write_bytes(payload)
+        print(f'Header staged: {header.name}')
+
+
+stage_board_headers()
 for directory in sorted((ROOT / 'patches').iterdir()):
     if not directory.is_dir():
         continue

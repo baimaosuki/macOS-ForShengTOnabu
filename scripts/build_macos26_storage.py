@@ -263,7 +263,7 @@ def nabu_ufs_contract(root: Path | None = None) -> dict:
         storage_headers_sha256={name: hashlib.sha256((storage_dir / name).read_bytes()).hexdigest()
                                 for name in headers},
         board_patch_sha256=hashlib.sha256(
-            (base / 'patches/UniXNU-nabu/nabu-nativeufs-board.patch').read_bytes()
+            (base / 'patches/ShengUfs/nabu-nativeufs-board.patch').read_bytes()
         ).hexdigest(),
     )
 

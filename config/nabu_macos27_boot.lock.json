@@ -1,0 +1,63 @@
+{
+  "schema": "nabu-macos27-boot-lock-v1",
+  "recorded_at": "2026-11-10T16:07:06+08:00",
+  "target": "nabu (Xiaomi Pad 5, SM8150-AC / Snapdragon 860)",
+  "os_profile": "macos-27.3-26C5035r",
+  "pins": {
+    "unixnu": {
+      "repo": "UniXNU/UniXNU",
+      "commit": "95e9feeb5dba4ddd8d47b897381550b5fa802567"
+    },
+    "unixnu_sheng": {
+      "repo": "UniXNU/UniXNU-sheng",
+      "commit": "d97173a402514c009b468dd00c44c3f7aab92ca4"
+    },
+    "soc_sm8550": {
+      "repo": "UniXNU/UniXNU-sm8550-common",
+      "commit": "a9f45dc60c035084b95463781538380f4c3606c9",
+      "note": "reference only; nabu is SM8150 and must not adopt this pin"
+    },
+    "xnu": {
+      "version": "12377.121.6",
+      "revision": "ac9718fb1af618d5ce8678d0dc6e8a58f252216f"
+    },
+    "gop_framebuffer": {
+      "repo": "UniXNU/GopFramebuffer",
+      "commit": "e47c1b8de169cd2bd0b885c7d85e433010e3cdf2"
+    },
+    "local_repo": {
+      "path": "/home/baimao/nabu_macos",
+      "head": "90db20aa35ef27d13b1b56ece1ed59f92a30f68b",
+      "dirty_paths": 159
+    }
+  },
+  "inputs": {
+    "defconfig": "config/nabu_macos27_boot_defconfig",
+    "boot_config": "config/macos27.json",
+    "board": "platform/nabu/macos26/storage/NabuBoard.h",
+    "units": "scripts/nabu_disk_units.py",
+    "image_tool": "scripts/nabu_ufs_image.py"
+  },
+  "not_inherited_from_25F71": [
+    "build",
+    "volume UUIDs",
+    "window LBAs",
+    "ABI tables",
+    "kexts",
+    "dyld",
+    "shared cache",
+    "Recovery ISC seed"
+  ],
+  "verification": {
+    "host_verified": true,
+    "ufs_read_verified": false,
+    "root_boot_verified": false,
+    "userspace_verified": false,
+    "desktop_verified": false
+  },
+  "host_checks": {
+    "unit_contract": "tests/test_nabu_disk_units.py",
+    "image_contract": "tests/test_nabu_ufs_image.py",
+    "boot_config_loader": "scripts/nabu_boot_config.py config/macos27.json --allow-incomplete"
+  }
+}

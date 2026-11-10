@@ -1,0 +1,52 @@
+{
+  "schema": "nabu-boot-config-v1",
+  "os_profile": "macos-27.3-26C5035r",
+  "version": "27.3",
+  "build": "26C5035r",
+  "xnu_version": "12377.121.6",
+  "xnu_revision": "ac9718fb1af618d5ce8678d0dc6e8a58f252216f",
+  "refused_builds": ["25F71"],
+  "refused_variants": ["recoveryos"],
+  "medium": {
+    "block_bytes": 4096,
+    "sector_bytes": 512,
+    "disk_bytes": null,
+    "note": "block_bytes is the controller LBA from NabuBoard.h; sector_bytes is the image/GPT unit; every window below is declared in blocks and converted to bytes once"
+  },
+  "windows": {
+    "OS": {"start_block": null, "blocks": null, "volume_uuid": null},
+    "SystemOS": {"start_block": null, "blocks": null, "volume_uuid": null},
+    "App": {"start_block": null, "blocks": null, "volume_uuid": null}
+  },
+  "data": {
+    "mode": "ram",
+    "seed_bytes": null,
+    "size_bytes": null,
+    "account": {
+      "name": null,
+      "uid": null,
+      "home": null,
+      "auto_login": true,
+      "skip_buddy": true,
+      "apple_setup_done": true
+    }
+  },
+  "root": {
+    "system": "read_only",
+    "mount_by_uuid": true,
+    "data_firmlinks": true,
+    "launchd_source": "ufs_system_volume",
+    "shared_cache": null
+  },
+  "trust_cache": [],
+  "display": {"mode": "existing_gop", "legacy_cpu_present": 1},
+  "unset": [
+    "medium.disk_bytes",
+    "windows.OS.start_block",
+    "windows.SystemOS.start_block",
+    "windows.App.start_block",
+    "data.seed_bytes",
+    "root.shared_cache",
+    "trust_cache"
+  ]
+}
