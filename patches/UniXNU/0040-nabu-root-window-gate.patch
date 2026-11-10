@@ -1,0 +1,43 @@
+--- a/drivers/NativeUfs/NativeUfs.cpp
++++ b/drivers/NativeUfs/NativeUfs.cpp
+@@ -33,6 +33,7 @@
+ #include "RootDiagnostics.h"
+ #include "TransferPoll.h"
+ #include "SmmuTakeover.h"
++#include "NabuUfsWindowPlan.h"
+ 
+ static UfsRootDiagnostics gRootDiagnostic;
+ static bool gRootDiagnosticEnabled;
+@@ -1964,6 +1965,32 @@
+     IOFree (layout, sizeof (RootLayout));
+     return false;
+   }
++  // nabu: a desktop root carries OS, SystemOS and App. A manifest that only has
++  // the recovery pair is refused here instead of being published half-populated.
++  {
++    NabuRootWindowSpec spec[4] = {};
++    NabuRootWindowGate gate = {};
++    for (unsigned index = 0; index < layout->windows && index < 4; ++index) {
++      spec[index].name = layout->window[index].name;
++      spec[index].offsetBytes = layout->window[index].offset;
++      spec[index].sizeBytes = layout->window[index].size;
++    }
++    const char *gateWhy = nabuUfsRootWindowsCheck (spec, layout->windows, layout->imageBytes, 4096, &gate);
++    if (gateWhy) {
++      rootDiagnosticFailure (gateWhy);
++      IOLog ("NativeUfs: root window gate refused the manifest: %s\n", gateWhy);
++      IOFree (layout, sizeof (RootLayout));
++      return false;
++    }
++    for (unsigned want = 0; want < kNabuRootWindowCount; ++want) {
++      const NabuRootWindowSpec &w = spec[gate.order[want]];
++      IOLog ("NativeUfs: root window %s offset=%llx size=%llx firstLba=%llx blocks=%llx\n",
++             w.name, static_cast<unsigned long long> (w.offsetBytes),
++             static_cast<unsigned long long> (w.sizeBytes),
++             static_cast<unsigned long long> (gate.firstLba[want]),
++             static_cast<unsigned long long> (gate.blocks[want]));
++    }
++  }
+   gStoreGeometry = { true, layout->userdataFirst, layout->userdataLast, layout->imageBytes, layout->gptEntriesLba,
+                      layout->gptHeaderCrc, layout->gptEntriesCrc, layout->gptEntryCount };
+ #if defined(NATIVE_UFS_RECOVERY_ROOT) && NATIVE_UFS_RECOVERY_ROOT
