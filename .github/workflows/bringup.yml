@@ -314,6 +314,7 @@ jobs:
           echo "identity=$( { xcodebuild -version; xcrun clang --version; xcrun --sdk macosx --show-sdk-version; } | shasum -a 256 | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
       - uses: actions/cache/restore@v4
         id: native-cache
+        if: inputs.native_ufs_desktop != true
         with:
           path: ${{ env.NATIVE_OUT }}/
           key: macos26-native-v4-${{ env.NATIVE_ARCH }}-${{ runner.arch }}-${{ steps.native-toolchain.outputs.identity }}-${{ hashFiles('config/macos26-sources.json', 'config/macos26.json', 'config/${{ inputs.board }}-baseline.json', 'config/${{ inputs.board }}_defconfig', 'platform/${{ inputs.board }}/macos26/patches/**', 'platform/${{ inputs.board }}/macos26/pac/**', 'platform/${{ inputs.board }}/macos26/log/**', 'platform/${{ inputs.board }}/macos26/crypto/**', 'platform/${{ inputs.board }}/macos26/recovery/**', 'config/macos26-recovery-ui-pages.json', 'scripts/native_recovery_ui.py', 'platform/${{ inputs.board }}/macos26/storage/**', 'config/macos26-recovery-root.json', 'patches/UniXNU/0030-*', 'patches/UniXNU/0031-*', 'patches/UniXNU/0032-*', 'patches/UniXNU/0034-*', 'patches/UniXNU/0035-*', 'patches/UniXNU/0036-*', 'patches/UniXNU/0037-*', 'config/macoslog.json', 'scripts/native_log_file.py', 'scripts/build_macos26_xnu.py', 'scripts/build_macos26_storage.py', 'scripts/prepare_macos26_gop.py', 'scripts/prepare_macos26_input.py', 'config/macos26-input-reference.json', 'platform/${{ inputs.board }}/macos26/input/**', 'config/macos26-gop-reference.json', 'platform/${{ inputs.board }}/macos26/display/**', 'scripts/build_macos26_crypto.py', 'scripts/seal_macos26_crypto.py', 'scripts/native_macho.py') }}
@@ -326,7 +327,7 @@ jobs:
         if: inputs.target == 'macos26-kernel'
         run: python3 scripts/build_macos26_xnu.py --board "${{ inputs.board }}" --arch "$NATIVE_ARCH" --link-kernel ${{ (inputs.native_ufs || inputs.native_ufs_desktop) && '--build-ufs-driver' || '' }} ${{ inputs.native_ufs_desktop && '--ufs-root-mode desktop --ufs-defer-desktop-policy' || '' }} ${{ inputs.native_gop && '--build-gop-display' || '' }} ${{ inputs.native_input && '--build-recovery-input' || '' }} --kdk-root "$SHENG_KDK_EXPANDED/KDK.pkg/Payload" -j 4
       - uses: actions/cache/save@v4
-        if: always() && steps.native-cache.outputs.cache-hit != 'true'
+        if: always() && inputs.native_ufs_desktop != true && steps.native-cache.outputs.cache-hit != 'true'
         with:
           path: ${{ env.NATIVE_OUT }}/
           key: ${{ steps.native-cache.outputs.cache-primary-key }}
