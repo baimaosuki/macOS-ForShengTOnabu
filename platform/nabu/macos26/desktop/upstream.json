@@ -71,7 +71,7 @@
     }
   ],
   "integrated_patch": "platform/nabu/macos26/desktop/integrated.patch",
-  "integrated_sha256": "ed1fed12485f13286d839c03fb9fd538970451b26cd70cae3c485963e3a8a796",
+  "integrated_sha256": "44cbc6be8e11eb1c872e993aa28cde15241327f4a94676c0fdba7df32088b15a",
   "preimage_sha256": {
     "bsd/kern/bsd_init.c": "c777eb136d9d8de4083225dc3313646d72e6609edd1509d10135f36ab4de058b",
     "bsd/kern/kern_exec.c": "da6ec882873d6071bd18e17cc7038215eb73c071ee0ee772daa87a56775a313d",
@@ -84,13 +84,15 @@
     "bsd/vfs/vfs_subr.c": "75ffa35def63c2f3a4d815dce2c147717f90e5ca6518a1970058c380aa192738",
     "bsd/vfs/vfs_syscalls.c": "67cfe165523ac4375504241a418d3cebbb46a4a10b77b22c5d590a31ebd0235d",
     "bsd/vfs/vfs_vnops.c": "d45d4bf1d4e1e8079e1fb6c7275eb73e211833619c0b3f08ed3d637dc3d3e05a",
-    "iokit/bsddev/IOKitBSDInit.cpp": "bff16a3c2396b25dbcbc4ec11840370fd3a14390a567fcf0d77794f4d59e2b40"
+    "iokit/bsddev/IOKitBSDInit.cpp": "bff16a3c2396b25dbcbc4ec11840370fd3a14390a567fcf0d77794f4d59e2b40",
+    "config/MASTER.arm64.MacOSX": "bab426817e1eb4e93b1207f765e960e6ab2558b688abfb0124ab2a842c0939bb"
   },
   "adaptations": [
     "Place owner cache/Data preparation after allocation of the actual user scratch page.",
     "Place App cryptex helper before its caller and invoke it from macOS Data preparation.",
     "Bind owner boot manifest to this candidate OS UUID, never the iPadOS reference UUID.",
     "Preserve pinned filesystem/owner semantics with ordinary ARM64 callback bridges; no Darwin26 syscall/KPI changes.",
-    "Keep paired CodeSignature entitlement constants alongside the CoreEntitlements public API."
+    "Keep paired CodeSignature entitlement constants alongside the CoreEntitlements public API.",
+    "Enable actual bindfs sources in the macOS machine configuration for cryptex views."
   ]
 }
