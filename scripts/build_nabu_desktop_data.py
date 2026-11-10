@@ -140,6 +140,8 @@ def main():
     credentials = output / 'test-account.json'
     credentials.write_text(json.dumps({'username': 'nabu', 'password': password, 'test_only': True}) + '\n')
     credentials.chmod(0o600)
+    if os.environ.get('SUDO_UID') and os.environ.get('SUDO_GID'):
+        os.chown(credentials, int(os.environ['SUDO_UID']), int(os.environ['SUDO_GID']))
     report = {'build': '25F71', 'upstream': PIN, 'source_os_sha256': RAW_SHA,
               'data_uuid': DATA_UUID, 'logical_bytes': logical,
               'packed_bytes': (output / 'data.dbr').stat().st_size,
