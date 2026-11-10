@@ -1,0 +1,136 @@
+{
+  "schema": "nabu-macos27-components-v1",
+  "build": "26C5035r",
+  "product_version": null,
+  "device_class": "j180dap",
+  "variant": "Customer Erase Install (IPSW)",
+  "content_encoding": "aea",
+  "os_disk_image_mb": 13822,
+  "minimum_system_partition_mb": 13281,
+  "ipsw_url": "https://updates.cdn-apple.com/2026FallSeed/53df7654-4865-4259-8dae-30177b76f104/UniversalMac_27.3_26C5035r_Restore.ipsw",
+  "ipsw_manifest_sha384_of_first_4k": "debaf02c225105e5d94031fc8e0600546338b78b8c01effcc4c8f929ebaa6d93",
+  "components": [
+    {
+      "name": "Cryptex1,AppOS",
+      "path": "141-22106-021.dmg",
+      "hash_method": "sha2-384",
+      "hash_method_inferred": false,
+      "digest": "2d165ef8f6180c18318833b8a12d104ab177fd75ff4dadf96a5032a59dc834e30a214eb225e75355c45a7640bc9fb91e",
+      "trusted": false,
+      "encrypted": false,
+      "size": 54525952,
+      "zip_method": 8,
+      "ipsw_member": {
+        "path": "141-22106-021.dmg",
+        "method": 8,
+        "compressed": 33111538,
+        "size": 54525952
+      }
+    },
+    {
+      "name": "Cryptex1,AppTrustCache",
+      "path": "Firmware/141-22106-021.dmg.trustcache",
+      "hash_method": "sha2-384",
+      "hash_method_inferred": false,
+      "digest": "2bcfe6d33277f567ada4532ab2132b761770fcd552b81c94e23f94a9cf0517ffe43e03125e77fc25017c87b53521e1e8",
+      "trusted": false,
+      "encrypted": false,
+      "size": 2135,
+      "zip_method": 8,
+      "ipsw_member": {
+        "path": "Firmware/141-22106-021.dmg.trustcache",
+        "method": 8,
+        "compressed": 2002,
+        "size": 2135
+      }
+    },
+    {
+      "name": "Cryptex1,SystemOS",
+      "path": "141-22145-021.dmg.aea",
+      "hash_method": "sha2-384",
+      "hash_method_inferred": false,
+      "digest": "3c2f23be814fcac03898b401970a02410473a5e1e16cdefe0bc99fe62a709fb04a9eeda20d2f9719d712afbea3edc2f0",
+      "trusted": false,
+      "encrypted": true,
+      "size": 2483027968,
+      "zip_method": 0,
+      "ipsw_member": {
+        "path": "141-22145-021.dmg.aea",
+        "method": 0,
+        "compressed": 2483027968,
+        "size": 2483027968,
+        "aea_key": "twjOTDvNKLIvzACpFyYdrYcMkWuYzo0GIcmxcUDOMf4="
+      }
+    },
+    {
+      "name": "Cryptex1,SystemTrustCache",
+      "path": "Firmware/141-22145-021.dmg.aea.trustcache",
+      "hash_method": "sha2-384",
+      "hash_method_inferred": false,
+      "digest": "0eaa773b5114afc53c42b9e64546cdceac38e558936145fd151473bbbccf304ab9f0bc25e52c3acaa5ed56e94ebef670",
+      "trusted": false,
+      "encrypted": false,
+      "size": 3503,
+      "zip_method": 8,
+      "ipsw_member": {
+        "path": "Firmware/141-22145-021.dmg.aea.trustcache",
+        "method": 8,
+        "compressed": 3204,
+        "size": 3503
+      }
+    },
+    {
+      "name": "KernelCache",
+      "path": "kernelcache.release.mac14j",
+      "hash_method": "sha2-384",
+      "hash_method_inferred": true,
+      "digest": "5a7dc18788c9c63664538c542e9cdbb1a57b6982175d7d39c51913158fbcd6619933e8ad6909a4bbbaf04d0ff29568ea",
+      "trusted": true,
+      "encrypted": false,
+      "size": 33622670,
+      "zip_method": 8,
+      "ipsw_member": {
+        "path": "kernelcache.release.mac14j",
+        "method": 8,
+        "compressed": 33571840,
+        "size": 33622670
+      }
+    },
+    {
+      "name": "OS",
+      "path": "141-22233-021.dmg.aea",
+      "hash_method": "sha2-384",
+      "hash_method_inferred": false,
+      "digest": "1a322f67ef7f1e0ef62a99230b9f7e8836b07962bd90bb73c4600b8e7c490569cdc09817c056249586dec151296c78ef",
+      "trusted": true,
+      "encrypted": true,
+      "size": 11408506880,
+      "zip_method": 0,
+      "ipsw_member": {
+        "path": "141-22233-021.dmg.aea",
+        "method": 0,
+        "compressed": 11408506880,
+        "size": 11408506880,
+        "aea_key": "KgjuAbxol/OFVUlvyKrpdr6dw7I2RNtgUHppVwU3cLQ="
+      }
+    },
+    {
+      "name": "StaticTrustCache",
+      "path": "Firmware/141-22233-021.dmg.aea.trustcache",
+      "hash_method": "sha2-384",
+      "hash_method_inferred": true,
+      "digest": "16bbff2f074a3c7e7e83389a39f7d0929b810a54a3931c5d5283f5055eee834d81ec6568e45c03655e7b44ea50d53738",
+      "trusted": true,
+      "encrypted": false,
+      "size": 445681,
+      "zip_method": 8,
+      "ipsw_member": {
+        "path": "Firmware/141-22233-021.dmg.aea.trustcache",
+        "method": 8,
+        "compressed": 400098,
+        "size": 445681
+      }
+    }
+  ],
+  "digest_is_not_authentication": true
+}

@@ -78,6 +78,13 @@ class NabuUfsNativeContract(unittest.TestCase):
         self.assertIn('root-window gate checks passed', out)
 
 
+class Macos27Components(unittest.TestCase):
+    def test_component_resolver(self) -> None:
+        for case in _cases(_load('test_macos27_components')):
+            with self.subTest(case=case.__name__):
+                case()
+
+
 class NabuUfsBootConfig(unittest.TestCase):
     def test_loader_rejects_the_recovery_build(self) -> None:
         import json
