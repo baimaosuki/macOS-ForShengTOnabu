@@ -1,3 +1,14 @@
+--- a/osfmk/arm64/Makefile
++++ b/osfmk/arm64/Makefile
+@@ -50,6 +50,8 @@
+ # Headers used to compile xnu
+ EXPORT_MD_LIST = \
+ 	cpc_arm64.h \
++	nabu_arm64e_compat.h \
++	nabu_nopac.h \
+ 	hv_hvc.h \
+ 	lowglobals.h \
+ 	machine_cpuid.h \
 --- a/bsd/dev/arm/kern_machdep.c
 +++ b/bsd/dev/arm/kern_machdep.c
 @@ -15,6 +15,7 @@

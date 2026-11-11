@@ -117,10 +117,10 @@ def assemble(kernel, prelink_report, policy, data, root, loader_build, output, *
         systemos_uuid='C7DFE43C-0A23-43F5-B3E2-471BEAC4539D',app_uuid='F894E20A-CE25-41F4-ABE2-C00E9E922B83',
         data_uuid='0A5EED00-0000-4000-8000-000000000001',owner_contract=contract,
         hardware_executed=False,root_mount_verified=False,userspace_verified=False,desktop_verified=False,
-        expected_userspace_blocker='Original arm64e launchd is rejected by the ARM64 CPU grade (EBADARCH).',
+        userspace_qualification='Unverified for this image; host assembly does not establish successful exec, dyld initialization or desktop startup.',
         deployment_performed=False,loader_binary_included=True,
         packed_slot_fill="DarwinBoot validates zero slot then writes allocated physical base and exact packed file length.",
-        artifact_status="host-validated UFS/root hardware test candidate; expected EL0 EBADARCH stop")
+        artifact_status="host-validated UFS/root hardware test candidate; userspace execution requires device validation")
     (output / 'candidate.json').write_text(json.dumps(result,indent=2)+'\n')
     return result
 

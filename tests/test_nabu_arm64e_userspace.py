@@ -39,6 +39,21 @@ class Arm64eUserspace(unittest.TestCase):
                 section = patch.split('--- a/osfmk/arm64/nabu_v82_emul.c\n')[1].split('--- a/osfmk/arm64/nabu_v82_emul.h\n')[0]
                 dest.write_text('\n'.join(s[1:] for s in section.splitlines() if s.startswith('+') and not s.startswith('+++')) + '\n')
         subprocess.run(['git', 'apply', '--unsafe-paths', str(PATCH)], cwd=cls.tree, check=True, capture_output=True)
+        # BSD imports osfmk's EXPORT_HDRS; it has no -I SRCROOT/osfmk.
+        # Evaluate the actual export list with make and stage only its files.
+        makefile = (cls.tree / 'osfmk/arm64/Makefile').read_text()
+        makefile = '\n'.join(line for line in makefile.splitlines() if not line.startswith('include '))
+        makefile += '\nprint-exports:\n\t@printf "%s\\n" "$(EXPORT_MD_DIR)" "$(EXPORT_MD_LIST)"\n'
+        result = subprocess.run(['make', '--no-print-directory', '-f', '-', 'print-exports'],
+            input=makefile, text=True, check=True, capture_output=True)
+        directory, names = result.stdout.strip().split('\n')
+        cls.exports = cls.tree / 'EXPORT_HDRS/osfmk'
+        for name in names.split():
+            source = cls.tree / 'osfmk/arm64' / name
+            if not source.exists(): source = ROOT / 'sources/macos26/xnu/osfmk/arm64' / name
+            target = cls.exports / directory / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, target)
 
     @classmethod
     def tearDownClass(cls): cls.temp.cleanup()
@@ -50,11 +65,26 @@ class Arm64eUserspace(unittest.TestCase):
         if not compiler: self.skipTest('requires Clang for feature-gated source compilation')
         result = subprocess.run([compiler, '-std=gnu11', '-Wall', '-Wextra', '-Werror',
             '-Wno-unused-function', '-Wno-unused-parameter', '-Wno-unused-variable',
-            '-I', str(self.tree / 'osfmk'), *extra, str(source), '-o', str(binary)],
+            '-I', str(self.exports), *extra, str(source), '-o', str(binary)],
             capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         result = subprocess.run([str(binary)], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_bsd_component_can_import_both_exported_headers(self):
+        # pexpert is a separate component import, as in the BSD build command.
+        # Its board selector is stubbed here; the two arm64 headers must come
+        # solely from the real osfmk export list, never its source directory.
+        pexpert = self.tree / 'EXPORT_HDRS/pexpert'
+        board = pexpert / 'pexpert/arm64/board_config.h'
+        board.parent.mkdir(parents=True, exist_ok=True)
+        board.write_text('#define ARM64_BOARD_CONFIG_NABU 1\n')
+        self.compile_run('bsd_headers', r'''
+#include <arm64/nabu_arm64e_compat.h>
+#include <arm64/nabu_nopac.h>
+_Static_assert(NABU_ARM64E_COMPAT == 1, "NABU macOS no-PAuth policy");
+int main(void) { return nabu_nopac_canonical(0xabcd000000001234ULL, true) != 0x1234; }
+''', ('-D__arm64__=1', '-DXNU_TARGET_OS_OSX=1', '-I', str(pexpert)))
 
     def test_actual_nopac_state_machine_preserves_sources_and_failure_atomicity(self):
         self.compile_run('nopac', r'''

@@ -58,5 +58,19 @@ baseline. These compatibility changes do not implement cryptographic PAC
 authentication; code-signature and owner-root authentication retain their
 separate existing checks.
 
-Implementation and host validation are in progress. No corrected kernel or
-successful EL0/desktop boot is claimed by this document.
+The seven compiled compatibility tests, five memory/root-matching checks, and
+full source patch stack passed on the host. The original delivered kernel's
+actual `_ml_grade_binary` machine code was also executed under Unicorn with
+only the CPU-subtype queries stubbed to the real ARM64_V8 value. It returned
+9/10 for arm64/arm64-v8 and 0 for arm64e ABI0, reproducing the exact admission
+mismatch. The replacement native and prelinked kernels must pass the same
+machine-code check before packaging.
+
+CI run 42974595107 failed while compiling the source archive because the new
+`arm64/nabu_arm64e_compat.h` was not installed in the BSD header export tree.
+Both kern_exec.c and kern_machdep.c reported that same missing header; the
+complete diagnostics contain no other compile errors. Both new headers are now exported through the real osfmk/arm64 Makefile.
+The new BSD import test compiles exclusively against staged EXPORT_HDRS,
+and the complete isolated 100-patch prepare and source audits pass.
+
+No corrected kernel or successful EL0/desktop boot is claimed yet.

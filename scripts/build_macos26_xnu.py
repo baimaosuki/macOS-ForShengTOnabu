@@ -224,6 +224,10 @@ def audit_nabu_arm64e_source(source: Path) -> dict:
     shared = (source / 'osfmk/vm/vm_shared_region.c').read_text()
     if shared.count('#elif NABU_ARM64E_COMPAT') != 2:
         raise ValueError('NABU requires both v3 and v5 authenticated cache pointer stores')
+    arm64_makefile = (source / 'osfmk/arm64/Makefile').read_text()
+    exported = arm64_makefile.split('EXPORT_MD_LIST =', 1)[1].split('\n\n', 1)[0]
+    if any(name not in exported.split() for name in ('nabu_arm64e_compat.h', 'nabu_nopac.h')):
+        raise ValueError('NABU arm64e headers must be exported for BSD component imports')
     return dict(software_abi=True, host_cpu_subtype_unchanged=True,
         accepted_arm64e_abi_version=0, keys_off_apple_parameter=True,
         shared_cache_v3_v5_plain_rebases=True, dyld_pager_arm64e_decoders=True,
