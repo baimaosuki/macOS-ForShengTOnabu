@@ -44,8 +44,9 @@ def assemble(kernel, prelink_report, policy, data, root, loader_build, output, *
     report = json.loads(prelink_report.read_text())
     raw = kernel.read_bytes()
     image = macho(raw, 'arm64')
-    if disable_watchdogd and '_native_owner_watchdog_policy_status' not in symbols(kernel):
-        raise ValueError('explicit watchdogd policy requires the kernel watchdog policy reader')
+    if disable_watchdogd and not {'_native_owner_watchdog_policy_status',
+                                  '_native_owner_watchdog_spawn_blocked'} <= symbols(kernel).keys():
+        raise ValueError('explicit watchdogd policy requires the kernel watchdog policy reader and spawn gate')
     storage = report.get('storage_driver', {})
     if (report.get('output_sha256') != hashlib.sha256(raw).hexdigest()
             or report.get('unresolved_sites') != 0 or report.get('loadable') is not True
@@ -149,7 +150,10 @@ def assemble(kernel, prelink_report, policy, data, root, loader_build, output, *
         boot_addon=addon_record,
         watchdog_launch_policy=dict(enabled=bool(disable_watchdogd),
             job='com.apple.watchdogd', explicit_boot_arg='disable-watchdogd=1',
-            backend_available=False, crash_and_panic_policy_modified=False),
+            backend_available=False, crash_and_panic_policy_modified=False,
+            spawn_gate_parent_pid=1, spawn_gate_path='/usr/libexec/watchdogd',
+            spawn_gate_errno='ENOENT', spawn_gate_before_child_creation=True,
+            policy_kind='explicit bring-up bypass', launchd_retry_possible=True),
         ufs_pointer_readback_count=len(storage['pointer_relocations']),
         external_branch_readback_count=report['branch_relocation_count'],constructors=storage['constructors'],
         esp_bundle_bytes=sum(p['bytes'] for n,p in files.items() if n.startswith('EFI/')),

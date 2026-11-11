@@ -18,6 +18,68 @@ def policy_source():
 
 
 class WatchdogPolicy(unittest.TestCase):
+    def test_spawn_gate_is_exact_pid1_opt_in_and_precedes_child_creation(self):
+        compiler = next((shutil.which(n) for n in ('clang', 'clang-19', 'clang-18', 'clang-17')
+                         if shutil.which(n)), None)
+        if not compiler:
+            self.skipTest('requires Clang')
+        source = policy_source()
+        helper = source[source.index('volatile unsigned int native_owner_watchdog_spawn_blocked;'):source.index(
+            '\n#endif', source.index('volatile unsigned int native_owner_watchdog_spawn_blocked;'))]
+        common = r'''
+#include <assert.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <string.h>
+#include <errno.h>
+typedef int proc_t; typedef uintptr_t user_addr_t;
+static int enabled, present, copy_error, copies, queries;
+#define relaxed 0
+#define os_atomic_inc_orig(p,order) __atomic_fetch_add((p),1,__ATOMIC_RELAXED)
+static int proc_getpid(proc_t p){return p;}
+static int PE_parse_boot_argn(const char *n,uint32_t *v,size_t len){
+ assert(!strcmp(n,"disable-watchdogd")&&len==4);queries++;*v=enabled;return present;
+}
+static int copyinstr(user_addr_t a,char *b,size_t len,size_t *copied){
+ copies++;if(copy_error)return copy_error;
+ size_t n=strlen((const char *)a)+1;if(n>len)return ENAMETOOLONG;
+ memcpy(b,(const void *)a,n);*copied=n;return 0;
+}
+'''
+        body = r'''
+int main(void){
+ const char *target="/usr/libexec/watchdogd";
+ present=1;enabled=1;
+ assert(!native_owner_watchdog_spawn_denied(2,(user_addr_t)target)&&!queries&&!copies);
+ present=0;assert(!native_owner_watchdog_spawn_denied(1,(user_addr_t)target)&&!copies);
+ present=1;for(enabled=0;enabled<4;enabled++)if(enabled!=1)
+  assert(!native_owner_watchdog_spawn_denied(1,(user_addr_t)target)&&!copies);
+ enabled=1;
+ const char *others[]={"/sbin/launchd","/usr/libexec/logd","/usr/libexec/watchdog", "/usr/libexec/watchdogd.extra","watchdogd","/other/watchdogd",""};
+ for(unsigned i=0;i<sizeof(others)/sizeof(others[0]);i++)
+  assert(!native_owner_watchdog_spawn_denied(1,(user_addr_t)others[i]));
+ copy_error=EFAULT;assert(!native_owner_watchdog_spawn_denied(1,(user_addr_t)target));
+ copy_error=ENAMETOOLONG;assert(!native_owner_watchdog_spawn_denied(1,(user_addr_t)target));
+ copy_error=0;assert(native_owner_watchdog_spawn_denied(1,(user_addr_t)target));
+ assert(native_owner_watchdog_spawn_denied(1,(user_addr_t)target));
+ assert(native_owner_watchdog_spawn_blocked==2);
+ return 0;
+}
+'''
+        with tempfile.TemporaryDirectory() as directory:
+            src, binary = Path(directory) / 'spawn.c', Path(directory) / 'spawn'
+            src.write_text(common + helper + body)
+            build = subprocess.run([compiler, '-std=gnu11', '-Wall', '-Wextra', '-Werror',
+                                    str(src), '-o', str(binary)], capture_output=True, text=True)
+            self.assertEqual(build.returncode, 0, build.stderr)
+            run = subprocess.run([binary], capture_output=True, text=True)
+            self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
+        patch = (ROOT / 'platform/nabu/macos26/desktop/patches/17-macos-watchdog-spawn-gate.patch').read_text()
+        self.assertIn('if (native_owner_watchdog_spawn_denied(ap, uap->path)) return ENOENT;', patch)
+        self.assertNotIn('execve(', patch)
+        self.assertNotIn('p_crash_behavior =', patch)
+
     def test_boolean_policy_and_checked_before_launchd(self):
         source = policy_source()
         literal = source.split('static const uint8_t contents[] =', 1)[1].split(';', 1)[0]

@@ -88,10 +88,16 @@
       "upstream_blob": "80b46336a74f102301180cc1d6c09a484f29a5f2",
       "adapted": true,
       "sha256": "410931999dabde7fcf3aaa06bd525365aa2bea25b727dabdfde6a6c030ef7a49"
+    },
+    {
+      "path": "platform/nabu/macos26/desktop/patches/17-macos-watchdog-spawn-gate.patch",
+      "upstream": "nabu-local/explicit-pid1-watchdog-spawn-gate",
+      "adapted": false,
+      "sha256": "c48ce8e9ddebeecfec5583b96c8376883c16908b1a2380913d0bda178d51cf9f"
     }
   ],
   "integrated_patch": "platform/nabu/macos26/desktop/integrated.patch",
-  "integrated_sha256": "3bbdcafa5c351bd204382b6dd4a2ef78d85b3e386600fe245e086e146abfc7c9",
+  "integrated_sha256": "e42d8006a5da5741136e643e2c2923a2114a1f3f66ef6afb5adebbb953b64dda",
   "preimage_sha256": {
     "bsd/kern/bsd_init.c": "c777eb136d9d8de4083225dc3313646d72e6609edd1509d10135f36ab4de058b",
     "bsd/kern/kern_exec.c": "da6ec882873d6071bd18e17cc7038215eb73c071ee0ee772daa87a56775a313d",
@@ -116,6 +122,7 @@
     "Enable actual bindfs sources in the macOS machine configuration for cryptex views.",
     "Publish /System/Volumes/VM as a firmlink to writable owner Data /private/var/vm after Data mount and firmlinks; preserve mount task execution.",
     "Require successful VM firmlink and addon installation before the opt-in APFS boot shim union; propagate errors to checked Data startup.",
-    "Port explicit disable-watchdogd=1 launchd bring-up policy after checked Data/shim setup; exclusively create root:wheel 0644 policy and migration marker, verify metadata/readback, refuse existing strategies and propagate errors before launchd."
+    "Port explicit disable-watchdogd=1 launchd bring-up policy after checked Data/shim setup; exclusively create root:wheel 0644 policy and migration marker, verify metadata/readback, refuse existing strategies and propagate errors before launchd.",
+    "Explicit disable-watchdogd=1 also rejects only PID1 spawning the exact watchdogd executable before child creation; standard crash/panic policies remain intact."
   ]
 }

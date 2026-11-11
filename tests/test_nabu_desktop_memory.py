@@ -108,7 +108,8 @@ class DesktopMemory(unittest.TestCase):
                                          16 + len(modules[0]) + len(modules[1])) + b''.join(modules))
             with patch('assemble_nabu_desktop_candidate.macho', return_value=image), \
                  patch('assemble_nabu_desktop_candidate.symbols',
-                       return_value={'_native_owner_watchdog_policy_status': 0x1234}) as kernel_symbols, \
+                       return_value={'_native_owner_watchdog_policy_status': 0x1234,
+                                     '_native_owner_watchdog_spawn_blocked': 0x1238}) as kernel_symbols, \
                  patch('assemble_nabu_desktop_candidate.validate', return_value=dict(manifest_sha256='fixture',
                      windows=[dict(name='OS', volume_uuid='47719f50-5527-44a3-9f59-8170528d8c14')])):
                 generated = {}
@@ -152,7 +153,7 @@ class DesktopMemory(unittest.TestCase):
                 generated['trust']['/device-tree/chosen/memory-map'].pop('TrustCache')
                 self.assertEqual(generated['trust'], generated['default'])
                 kernel_symbols.assert_called_once_with(kernel)
-                kernel_symbols.return_value = {}
+                kernel_symbols.return_value = {'_native_owner_watchdog_policy_status': 0x1234}
                 out = folder / 'missing-watchdog-reader'
                 with self.assertRaisesRegex(ValueError, 'watchdog policy reader'):
                     assemble(kernel, report, policy, data, root, loader, out, disable_watchdogd=True)

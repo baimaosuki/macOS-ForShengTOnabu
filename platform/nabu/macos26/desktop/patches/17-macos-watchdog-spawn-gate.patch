@@ -1,0 +1,43 @@
+Explicit PID1-only watchdogd spawn bypass for unavailable IOWatchdog.
+Returns ENOENT before any child process or crash behavior is installed.
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -4342,9 +4342,38 @@
+  *		Handle posix_spawnattr_t
+  *		Handle posix_spawn_file_actions_t
+  */
++#if defined(NABU) && NABU && defined(XNU_OWNER_DATA_MOUNT) && XNU_OWNER_DATA_MOUNT
++/* Explicit bring-up gate for the unavailable IOWatchdog backend. The launchd
++ * override is advisory; reject this one PID1 spawn before allocating a child.
++ * Keep ordinary spawn errors and every process crash/panic policy intact. */
++volatile unsigned int native_owner_watchdog_spawn_blocked;
++static bool
++native_owner_watchdog_spawn_denied(proc_t parent, user_addr_t path)
++{
++	static const char target[] = "/usr/libexec/watchdogd";
++	char name[sizeof(target)];
++	size_t copied = 0;
++	uint32_t enabled = 0;
++	if (proc_getpid(parent) != 1 ||
++	    !PE_parse_boot_argn("disable-watchdogd", &enabled, sizeof(enabled)) || enabled != 1)
++		return false;
++	/* Preserve the original syscall's error handling on invalid/long paths. */
++	if (copyinstr(path, name, sizeof(name), &copied) || copied != sizeof(target) ||
++	    memcmp(name, target, sizeof(target))) return false;
++	unsigned int blocked = os_atomic_inc_orig(&native_owner_watchdog_spawn_blocked, relaxed) + 1;
++	if (blocked == 1) {
++		printf("owner policy: blocked PID1 watchdogd spawn before child creation (ENOENT)\n");
++	}
++	return true;
++}
++#endif
++
+ int
+ posix_spawn(proc_t ap, struct posix_spawn_args *uap, int32_t *retval)
+ {
++#if defined(NABU) && NABU && defined(XNU_OWNER_DATA_MOUNT) && XNU_OWNER_DATA_MOUNT
++	if (native_owner_watchdog_spawn_denied(ap, uap->path)) return ENOENT;
++#endif
+ 	proc_t p = ap;
+ 	user_addr_t pid = uap->pid;
+ 	int ival[2];            /* dummy retval for setpgid() */

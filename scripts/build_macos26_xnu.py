@@ -232,6 +232,18 @@ def audit_desktop_source(source: Path) -> dict:
     if not watchdog.index('native_owner_watchdog_file(policy, contents, sizeof(contents) - 1, ctx)') < watchdog.index(
             'native_owner_watchdog_file(marker, (const uint8_t *)"", 0, ctx)'):
         raise ValueError('watchdog migration marker must follow verified policy publication')
+    spawn_gate = text[text.index('native_owner_watchdog_spawn_denied(proc_t parent'):text.index(
+        'posix_spawn(proc_t ap, struct posix_spawn_args *uap, int32_t *retval)')]
+    for needle in ('proc_getpid(parent) != 1', '"disable-watchdogd"', 'enabled != 1',
+                   '"/usr/libexec/watchdogd"', 'copyinstr(path, name, sizeof(name), &copied)',
+                   'copied != sizeof(target)', 'memcmp(name, target, sizeof(target))',
+                   'native_owner_watchdog_spawn_blocked'):
+        if needle not in spawn_gate:
+            raise ValueError('incomplete explicit watchdog spawn gate: ' + needle)
+    spawn = text[text.index('posix_spawn(proc_t ap, struct posix_spawn_args *uap, int32_t *retval)'):]
+    if not (spawn.index('if (native_owner_watchdog_spawn_denied(ap, uap->path)) return ENOENT;')
+            < spawn.index('__spawn_data = kalloc_type') < spawn.index('p->p_crash_behavior = crash_behavior;')):
+        raise ValueError('watchdog spawn gate must return before allocation/child crash policy')
     if 'native_owner_publish_boot_manifest(root_device, XNU_OWNER_OS_VOLUME_UUID,' not in text:
         raise ValueError('desktop boot manifest must use the paired candidate OS UUID')
     root = (source / 'bsd/kern/bsd_init.c').read_text()
@@ -246,7 +258,8 @@ def audit_desktop_source(source: Path) -> dict:
                 storage_start_after_vfsinit=True, vm_path_on_owner_data=True,
                 checked_apfs_boot_shim=True, watchdog_policy_explicit_opt_in=True,
                 watchdog_policy_before_launchd=True, watchdog_policy_exclusive_create=True,
-                watchdog_policy_root_owned_readback=True, watchdog_policy_boolean_true=True)
+                watchdog_policy_root_owned_readback=True, watchdog_policy_boolean_true=True,
+                watchdog_spawn_gate_before_child=True, watchdog_spawn_gate_pid1_exact_path=True)
 
 
 def audit_nabu_arm64e_source(source: Path) -> dict:
@@ -546,6 +559,10 @@ def prepare() -> dict:
             migration_marker='/private/var/db/com.apple.xpc.launchd/disabled.migrated',
             existing_policy_replaced=False, hardware_watchdog_available=False,
             crash_and_panic_policy_modified=False, hardware_qualified=False)
+        record['watchdog_launch_policy']['spawn_gate'] = dict(marker='native_owner_watchdog_spawn_blocked',
+            parent_pid=1, executable='/usr/libexec/watchdogd', errno='ENOENT',
+            before_child_creation=True, policy_kind='explicit bring-up bypass',
+            launchd_job_remains_imported=True, retry_possible=True)
     save(record)
     return record
 

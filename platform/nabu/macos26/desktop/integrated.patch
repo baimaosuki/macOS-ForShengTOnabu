@@ -78,7 +78,7 @@
  bsdinit_task(void)
 --- a/bsd/kern/kern_exec.c
 +++ b/bsd/kern/kern_exec.c
-@@ -188,6 +188,7 @@
+@@ -189,6 +189,7 @@
  #include "kern_exec_internal.h"
  
  #include <CodeSignature/Entitlements.h>
@@ -86,7 +86,46 @@
  
  #include <mach/exclaves.h>
  
-@@ -7944,8 +7945,1522 @@
+@@ -4341,9 +4342,38 @@
+  *		Handle posix_spawnattr_t
+  *		Handle posix_spawn_file_actions_t
+  */
++#if defined(NABU) && NABU && defined(XNU_OWNER_DATA_MOUNT) && XNU_OWNER_DATA_MOUNT
++/* Explicit bring-up gate for the unavailable IOWatchdog backend. The launchd
++ * override is advisory; reject this one PID1 spawn before allocating a child.
++ * Keep ordinary spawn errors and every process crash/panic policy intact. */
++volatile unsigned int native_owner_watchdog_spawn_blocked;
++static bool
++native_owner_watchdog_spawn_denied(proc_t parent, user_addr_t path)
++{
++	static const char target[] = "/usr/libexec/watchdogd";
++	char name[sizeof(target)];
++	size_t copied = 0;
++	uint32_t enabled = 0;
++	if (proc_getpid(parent) != 1 ||
++	    !PE_parse_boot_argn("disable-watchdogd", &enabled, sizeof(enabled)) || enabled != 1)
++		return false;
++	/* Preserve the original syscall's error handling on invalid/long paths. */
++	if (copyinstr(path, name, sizeof(name), &copied) || copied != sizeof(target) ||
++	    memcmp(name, target, sizeof(target))) return false;
++	unsigned int blocked = os_atomic_inc_orig(&native_owner_watchdog_spawn_blocked, relaxed) + 1;
++	if (blocked == 1) {
++		printf("owner policy: blocked PID1 watchdogd spawn before child creation (ENOENT)\n");
++	}
++	return true;
++}
++#endif
++
+ int
+ posix_spawn(proc_t ap, struct posix_spawn_args *uap, int32_t *retval)
+ {
++#if defined(NABU) && NABU && defined(XNU_OWNER_DATA_MOUNT) && XNU_OWNER_DATA_MOUNT
++	if (native_owner_watchdog_spawn_denied(ap, uap->path)) return ENOENT;
++#endif
+ 	proc_t p = ap;
+ 	user_addr_t pid = uap->pid;
+ 	int ival[2];            /* dummy retval for setpgid() */
+@@ -7952,8 +7982,1522 @@
   *		word width of the kernel. Once the self-exec completes, the
   *		initproc might be different.
   */
@@ -1610,7 +1649,7 @@
  {
  	int retval[2];
  	int error;
-@@ -8017,7 +9532,7 @@
+@@ -8025,7 +9569,7 @@
  	 */
  	init_exec_args.fname = argv0;
  	init_exec_args.argp = scratch_addr;
@@ -1619,7 +1658,7 @@
  
  	/*
  	 * So that init task is set with uid,gid 0 token
-@@ -8039,6 +9554,8 @@
+@@ -8047,6 +9591,8 @@
  #endif
  	"/sbin/launchd",
  };
@@ -1628,7 +1667,7 @@
  
  /*
   * load_init_program
-@@ -8108,11 +9625,28 @@
+@@ -8116,11 +9662,28 @@
  	exec_log_handle = os_log_create("com.apple.xnu.bsd", "exec");
  #endif /* DEVELOPMENT || DEBUG */
  
@@ -1658,7 +1697,7 @@
  
  #if DEBUG || DEVELOPMENT
  	/* Check for boot-arg suffix first */
-@@ -8124,7 +9658,7 @@
+@@ -8132,7 +9695,7 @@
  
  		if (is_release_suffix) {
  			printf("load_init_program: attempting to load /sbin/launchd\n");
@@ -1667,7 +1706,7 @@
  			if (!error) {
  				return;
  			}
-@@ -8135,7 +9669,7 @@
+@@ -8143,7 +9706,7 @@
  			strlcat(launchd_path, launchd_suffix, sizeof(launchd_path));
  
  			printf("load_init_program: attempting to load %s\n", launchd_path);
@@ -1676,7 +1715,7 @@
  			if (!error) {
  				return;
  			} else if (error != ENOENT) {
-@@ -8148,7 +9682,7 @@
+@@ -8156,7 +9719,7 @@
  	error = ENOENT;
  	for (i = 0; i < sizeof(init_programs) / sizeof(init_programs[0]); i++) {
  		printf("load_init_program: attempting to load %s\n", init_programs[i]);
