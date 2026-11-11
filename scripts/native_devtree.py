@@ -32,6 +32,7 @@ def seed_vm_nvram_uuid(image: bytes, identity: uuid.UUID) -> bytes:
 def configure_native_text_state(path: Path, *, development_root: bool = False,
                                 root_hash: bytes | None = None,
                                 boot_volume_uuid: uuid.UUID | None = None,
+                                root_match_volume_uuid: uuid.UUID | str | None = None,
                                 platform_uuid: uuid.UUID | None = None,
                                 qemu_disable_sleep: bool = False,
                                 native_gop_display: bool = False,
@@ -48,7 +49,18 @@ def configure_native_text_state(path: Path, *, development_root: bool = False,
     if root_hash is not None and not 16 <= len(root_hash) <= 16384:
         raise ValueError('invalid raw root-hash payload size')
 
-    if boot_volume_uuid is not None and root_hash is None:
+    if root_match_volume_uuid is not None:
+        if not isinstance(root_match_volume_uuid, (uuid.UUID, str)):
+            raise ValueError('root match volume UUID must be a UUID or UUID string')
+        if isinstance(root_match_volume_uuid, str):
+            root_match_volume_uuid = uuid.UUID(root_match_volume_uuid)
+        if root_match_volume_uuid.int == 0:
+            raise ValueError('root match volume UUID cannot be nil')
+    if (root_match_volume_uuid is not None and boot_volume_uuid is not None
+            and root_match_volume_uuid != boot_volume_uuid):
+        raise ValueError('boot volume UUID conflicts with root match volume UUID')
+    if (boot_volume_uuid is not None and root_hash is None
+            and not (development_root and root_match_volume_uuid == boot_volume_uuid)):
         raise ValueError('boot volume identity requires the paired recovery root hash')
 
     if platform_uuid is not None and platform_uuid.int == 0:
@@ -137,6 +149,17 @@ def configure_native_text_state(path: Path, *, development_root: bool = False,
                 identity = str(boot_volume_uuid).upper().encode('ascii') + b'\0'
                 ensure('boot-uuid', identity)
                 ensure('apfs-preboot-uuid', identity)
+            if root_match_volume_uuid is not None:
+                identity = str(root_match_volume_uuid).upper()
+                ensure('boot-uuid', identity.encode('ascii') + b'\0')
+                ensure('apfs-preboot-uuid', identity.encode('ascii') + b'\0')
+                # IOFindBSDRoot consumes this dictionary before rd=uuid. Use
+                # the mainline IOMedia property matcher, with the real volume
+                # UUID; this does not publish or modify any media identity.
+                xml = ('<dict><key>IOProviderClass</key><string>IOMedia</string>'
+                       '<key>IOPropertyMatch</key><dict><key>UUID</key><string>' +
+                       identity + '</string></dict></dict>\0')
+                ensure('root-matching', xml.encode('ascii'))
         if development_root and location == ('device-tree', 'chosen', 'asmb'):
             asmb += 1
             ensure('lp-sip0', struct.pack('<Q', 0))

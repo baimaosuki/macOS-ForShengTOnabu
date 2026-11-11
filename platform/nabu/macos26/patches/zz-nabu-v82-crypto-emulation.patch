@@ -38,7 +38,7 @@
  osfmk/arm64/cswitch.s	optional nos_arm_asm
 --- a/osfmk/arm64/nabu_v82_emul.c
 +++ b/osfmk/arm64/nabu_v82_emul.c
-@@ -0,0 +1,734 @@
+@@ -0,0 +1,811 @@
 +/*
 + * Copyright (c) 2026 The macOS-ForSheng contributors.
 + * SPDX-License-Identifier: MIT
@@ -519,7 +519,7 @@
 + * Pointer-authentication fallback.
 + *
 + * A core without FEAT_PAuth has no PAC field, so:
-+ *   - PACIA/PACIB/PACDA/PACDB Xd, Xn  ->  Xd = Xn
++ *   - PACIA/PACIB/PACDA/PACDB Xd, Xn  ->  Xd = Xd   (Xn is the modifier)
 + *   - PACIZA..AUTDZB Xd               ->  Xd = Xd
 + *   - XPACI/XPACD Xd                  ->  Xd = Xd
 + * and the value of AUT* on a correctly signed pointer equals the pointer.
@@ -549,11 +549,12 @@
 +	}
 +	rd = NABU_V82_RD(insn);
 +	*dst = rd;
-+	if (opc < NABU_V82_PAC_TWO_REG) {
-+		*result = gpr[NABU_V82_RN(insn)];
-+	} else {
-+		*result = gpr[rd];
-+	}
++	/*
++	 * Signing is a no-op on a core without a PAC field, and Xn is only the
++	 * modifier: every form leaves Xd exactly as it was.  Copying the
++	 * modifier here turned live pointers into key material.
++	 */
++	*result = gpr[rd];
 +	return true;
 +}
 +
@@ -646,6 +647,27 @@
 + * read with copyin_kern(), the same split that sleh.c's COPYIN() makes for
 + * the panic dump it prints today.
 + */
++/*
++ * Canonical form of a pointer the emulator is about to install.
++ *
++ * A core without a PAC field never writes tag bits, so what arrives here is
++ * already the plain address.  What it may still carry is an architectural tag
++ * in bits 63:48 from an earlier signed build.  User addresses drop those bits;
++ * kernel addresses are 48-bit values whose bit 47 must be sign-extended, which
++ * is why masking bits 63:48 off a kernel pointer is never acceptable.
++ */
++static uint64_t
++nabu_v82_canon(uint64_t addr, bool from_user)
++{
++	if (from_user) {
++		return addr & 0x0000ffffffffffffULL;
++	}
++	if ((addr >> 47) & 1ULL) {
++		return (addr & 0x0000ffffffffffffULL) | 0xffff000000000000ULL;
++	}
++	return addr & 0x0000ffffffffffffULL;
++}
++
 +static bool
 +nabu_v82_fetch(uint64_t pc, bool from_user, uint32_t *insn)
 +{
@@ -715,6 +737,58 @@
 +		}
 +	}
 +
++	/*
++	 * Branch, return, and load PAC instructions in arm64e userspace dylibs:
++	 * RETAA, RETAB, BLRAA, BLRAB, BLRAAZ, BLRABZ, BRAA, BRAB, BRAAZ, BRABZ, LDRAA, LDRAB.
++	 */
++	if (insn == 0xd65f0bffU || insn == 0xd65f0fffU) {
++		set_saved_state_pc(state, nabu_v82_canon(ss->lr, from_user));
++		return true;
++	}
++	if ((insn & 0xfffffc1fU) == 0xd63f081fU || (insn & 0xfffffc1fU) == 0xd63f0c1fU ||
++	    (insn & 0xfffffc00U) == 0xd73f0800U || (insn & 0xfffffc00U) == 0xd73f0c00U) {
++		uint64_t gpr[32];
++		unsigned int rn = (insn >> 5) & 0x1fU;
++		nabu_v82_read_gprs(ss, gpr);
++		ss->lr = pc + NABU_V82_INSN_SIZE;
++		set_saved_state_pc(state, nabu_v82_canon(rn == 31 ? 0 : gpr[rn],
++		    from_user));
++		return true;
++	}
++	if ((insn & 0xfffffc1fU) == 0xd61f081fU || (insn & 0xfffffc1fU) == 0xd61f0c1fU ||
++	    (insn & 0xfffffc00U) == 0xd71f0800U || (insn & 0xfffffc00U) == 0xd71f0c00U) {
++		uint64_t gpr[32];
++		unsigned int rn = (insn >> 5) & 0x1fU;
++		nabu_v82_read_gprs(ss, gpr);
++		set_saved_state_pc(state, nabu_v82_canon(rn == 31 ? 0 : gpr[rn],
++		    from_user));
++		return true;
++	}
++	if ((insn & 0xff200400U) == 0xf8200400U) {
++		uint64_t gpr[32];
++		unsigned int rt = insn & 0x1fU;
++		unsigned int rn = (insn >> 5) & 0x1fU;
++		unsigned int w = (insn >> 11) & 1U;
++		unsigned int s = (insn >> 22) & 1U;
++		unsigned int imm9 = (insn >> 12) & 0x1ffU;
++		int simm10 = (int)((s << 9) | imm9) - (s ? 1024 : 0);
++		int64_t offset_bytes = (int64_t)simm10 * 8;
++		nabu_v82_read_gprs(ss, gpr);
++		uint64_t base = (rn == 31) ? get_saved_state_sp(state) : gpr[rn];
++		uint64_t addr = base + offset_bytes;
++		uint64_t loaded = 0;
++		bool ok = from_user ? (copyin((user_addr_t)addr, &loaded, sizeof(loaded)) == 0)
++		                    : (copyin_kern((user_addr_t)addr, (char *)&loaded, sizeof(loaded)) == 0);
++		if (ok) {
++			if (rt != 31) nabu_v82_write_gpr(ss, rt, loaded);
++			if (w && rn != rt) {
++				if (rn == 31) set_saved_state_sp(state, addr);
++				else nabu_v82_write_gpr(ss, rn, addr);
++			}
++			set_saved_state_pc(state, pc + NABU_V82_INSN_SIZE);
++			return true;
++		}
++	}
 +	{
 +		nabu_v82_op_t op;
 +
@@ -745,8 +819,11 @@
 +				    nabu_v82_mnemonic(insn), insn, pc,
 +				    from_user ? "user" : "kernel", esr);
 +			}
-+			return false;
 +		}
++	}
++
++	if (__improbable(from_user)) {
++		printf("nabu: unhandled EL0 trap instr 0x%08x at pc 0x%llx\n", insn, pc);
 +	}
 +
 +	return false;

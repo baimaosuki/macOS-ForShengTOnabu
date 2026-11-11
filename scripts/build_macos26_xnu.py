@@ -209,6 +209,27 @@ def audit_desktop_source(source: Path) -> dict:
                 storage_start_after_vfsinit=True)
 
 
+def audit_nabu_arm64e_source(source: Path) -> dict:
+    """Refuse an admission-only arm64e build lacking its no-PAuth loaders."""
+    required = {
+        'bsd/dev/arm/kern_machdep.c': ('#if NABU_ARM64E_COMPAT', 'CPU_SUBTYPE_ARM64_PTR_AUTH_CURRENT_VERSION'),
+        'bsd/kern/kern_exec.c': ('#if __has_feature(ptrauth_calls) || NABU_ARM64E_COMPAT', 'ptrauth_disabled=1'),
+        'osfmk/vm/vm_dyld_pager.c': ('return fixupPageAuth64(', 'return fixupCachePageAuth64(', '*signedAddr = unsignedAddr;'),
+        'osfmk/arm64/nabu_v82_emul.c': ('if (nabu_nopac_opcode(insn))', 'if (!nabu_nopac_step('),
+    }
+    for name, needles in required.items():
+        text = (source / name).read_text()
+        if any(needle not in text for needle in needles):
+            raise ValueError('incomplete NABU arm64e compatibility: ' + name)
+    shared = (source / 'osfmk/vm/vm_shared_region.c').read_text()
+    if shared.count('#elif NABU_ARM64E_COMPAT') != 2:
+        raise ValueError('NABU requires both v3 and v5 authenticated cache pointer stores')
+    return dict(software_abi=True, host_cpu_subtype_unchanged=True,
+        accepted_arm64e_abi_version=0, keys_off_apple_parameter=True,
+        shared_cache_v3_v5_plain_rebases=True, dyld_pager_arm64e_decoders=True,
+        source_pac_emulator=True, binary_or_signature_rewriting=False, device_qualified=False)
+
+
 def save(record: dict) -> None:
     (OUT / 'build.json').write_text(json.dumps(record, indent=2) + '\n')
 
@@ -461,6 +482,8 @@ def prepare() -> dict:
                   original_component_abi_qualified=False, hardware_executed=False,
                   source_diff_sha256=hashlib.sha256(subprocess.check_output(
                       ['git', '-C', source, 'diff', 'HEAD', '--binary'])).hexdigest())
+    if BOARD == 'nabu' and ARCH == 'arm64':
+        record['arm64e_userspace_compatibility'] = audit_nabu_arm64e_source(source)
     save(record)
     return record
 

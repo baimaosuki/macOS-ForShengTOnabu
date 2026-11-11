@@ -1,0 +1,478 @@
+--- a/bsd/dev/arm/kern_machdep.c
++++ b/bsd/dev/arm/kern_machdep.c
+@@ -15,6 +15,7 @@
+ #include        <kern/cpu_number.h>
+ #include        <libkern/libkern.h>
+ #include        <machine/exec.h>
++#include        <arm64/nabu_arm64e_compat.h>
+ #include        <pexpert/arm64/board_config.h>
+ 
+ int ml_grade_binary(cpu_type_t, cpu_subtype_t, cpu_subtype_t, bool);
+@@ -87,6 +88,13 @@
+ 		switch (hostsubtype) {
+ 		case CPU_SUBTYPE_ARM64_V8:
+ 			switch (execsubtype) {
++#if NABU_ARM64E_COMPAT
++			case CPU_SUBTYPE_ARM64E:
++				if (!(execfeatures & CPU_SUBTYPE_PTRAUTH_ABI) ||
++				    CPU_SUBTYPE_ARM64_PTR_AUTH_VERSION(execfeatures) !=
++				    CPU_SUBTYPE_ARM64_PTR_AUTH_CURRENT_VERSION) return 0;
++				return grade_arm64e_binary(execfeatures);
++#endif
+ 			case CPU_SUBTYPE_ARM64_V8:
+ 				return 10;
+ 			case CPU_SUBTYPE_ARM64_ALL:
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -78,6 +78,7 @@
+  * is included in support of clause 2.2 (b) of the Apple Public License,
+  * Version 2.0.
+  */
++#include <arm64/nabu_arm64e_compat.h>
+ #include <machine/reg.h>
+ #include <machine/cpu_capabilities.h>
+ 
+@@ -2031,6 +2032,13 @@
+ 		goto bad;
+ 	}
+ 
++#if NABU_ARM64E_COMPAT
++	if (mach_header->cputype == CPU_TYPE_ARM64 &&
++	    (mach_header->cpusubtype & ~CPU_SUBTYPE_MASK) == CPU_SUBTYPE_ARM64E) {
++		imgp->ip_flags |= IMGPF_NOJOP;
++	}
++#endif
++
+ #if defined(HAS_APPLE_PAC)
+ 	assert(mach_header->cputype == CPU_TYPE_ARM64
+ 	    );
+@@ -6990,7 +6998,7 @@
+ #define DYLD_FLAGS_KEY "dyld_flags="
+ #define SUBSYSTEM_ROOT_PATH_KEY "subsystem_root_path="
+ #define APP_BOOT_SESSION_KEY "executable_boothash="
+-#if __has_feature(ptrauth_calls)
++#if __has_feature(ptrauth_calls) || NABU_ARM64E_COMPAT
+ #define PTRAUTH_DISABLED_FLAG "ptrauth_disabled=1"
+ #endif /* __has_feature(ptrauth_calls) */
+ #define MAIN_TH_PORT_KEY "th_port="
+@@ -7041,7 +7049,7 @@
+ extern uint64_t dyld_flags;
+ #endif
+ 
+-#if __has_feature(ptrauth_calls)
++#if __has_feature(ptrauth_calls) || NABU_ARM64E_COMPAT
+ static inline bool
+ is_arm64e_running_as_arm64(const struct image_params *imgp)
+ {
+@@ -7242,7 +7250,7 @@
+ 
+ 		imgp->ip_applec++;
+ 	}
+-#if __has_feature(ptrauth_calls)
++#if __has_feature(ptrauth_calls) || NABU_ARM64E_COMPAT
+ 	if (is_arm64e_running_as_arm64(imgp)) {
+ 		error = exec_add_user_string(imgp, CAST_USER_ADDR_T(PTRAUTH_DISABLED_FLAG), UIO_SYSSPACE, FALSE);
+ 		if (error) {
+--- a/osfmk/vm/vm_shared_region.c
++++ b/osfmk/vm/vm_shared_region.c
+@@ -51,6 +51,7 @@
+  * without having to do a system call.
+  */
+ 
++#include <arm64/nabu_arm64e_compat.h>
+ #include <debug.h>
+ 
+ #include <kern/ipc_tt.h>
+@@ -3345,6 +3346,9 @@
+ 			} else {
+ 				memcpy(rebaseLocation, &value, sizeof(value));
+ 			}
++#elif NABU_ARM64E_COMPAT
++			/* The decoded address is the no-PAuth ABI's pointer. */
++			memcpy(rebaseLocation, &value, sizeof(value));
+ #endif /* __has_feature(ptrauth_calls) */
+ 		} else {
+ 			// The new value for a rebase is the low 51-bits of the threaded value plus the slide.
+@@ -3564,6 +3568,9 @@
+ 			} else {
+ 				memcpy(rebaseLocation, &value, sizeof(value));
+ 			}
++#elif NABU_ARM64E_COMPAT
++			/* The decoded address is the no-PAuth ABI's pointer. */
++			memcpy(rebaseLocation, &value, sizeof(value));
+ #endif /* __has_feature(ptrauth_calls) */
+ 		} else {
+ 			// the value already has the correct low bits, so just add in the high8 if it exists
+--- a/osfmk/vm/vm_dyld_pager.c
++++ b/osfmk/vm/vm_dyld_pager.c
+@@ -26,6 +26,7 @@
+  * @APPLE_OSREFERENCE_LICENSE_HEADER_END@
+  */
+ 
++#include <arm64/nabu_arm64e_compat.h>
+ #include <sys/errno.h>
+ 
+ #include <mach/mach_types.h>
+@@ -557,7 +558,12 @@
+ 	return KERN_SUCCESS;
+ }
+ 
+-#if defined(HAS_APPLE_PAC)
++#if defined(HAS_APPLE_PAC) || NABU_ARM64E_COMPAT
++#if NABU_ARM64E_COMPAT
++typedef unsigned int nabu_pager_key_t;
++#else
++typedef ptrauth_key nabu_pager_key_t;
++#endif
+ /*
+  * Sign a pointer needed for fixups.
+  */
+@@ -567,10 +573,18 @@
+ 	void             *loc,
+ 	bool             addrDiv,
+ 	uint16_t         diversity,
+-	ptrauth_key      key,
++	nabu_pager_key_t key,
+ 	dyld_pager_t     pager,
+ 	uint64_t         *signedAddr)
+ {
++#if NABU_ARM64E_COMPAT
++	/* Userland fixups use A keys only. Preserve that validation without
++	 * inventing hardware keys or touching the image's signature. */
++	(void)loc; (void)addrDiv; (void)diversity; (void)pager;
++	if (key != 0 && key != 2) return KERN_FAILURE;
++	*signedAddr = unsignedAddr;
++	return KERN_SUCCESS;
++#else
+ 	// don't sign NULL
+ 	if (unsignedAddr == 0) {
+ 		*signedAddr = 0;
+@@ -601,6 +615,7 @@
+ 		return KERN_FAILURE;
+ 	}
+ 	return KERN_SUCCESS;
++#endif
+ }
+ 
+ /*
+@@ -667,7 +682,7 @@
+ 		bool isAuth = (value & 0x8000000000000000ULL);
+ 		bool isBind = (value & 0x4000000000000000ULL);
+ 		if (isAuth) {
+-			ptrauth_key key = (ptrauth_key)((value >> 49) & 0x3);
++			nabu_pager_key_t key = (nabu_pager_key_t)((value >> 49) & 0x3);
+ 			bool        addrDiv = ((value & (1ULL << 48)) != 0);
+ 			uint16_t    diversity = (uint16_t)((value >> 32) & 0xFFFF);
+ 			uintptr_t   uVA = userVA + ((uintptr_t)chain - contents);
+@@ -791,7 +806,7 @@
+ 			bool        addrDiv = ((value & (1ULL << 50)) != 0);
+ 			bool        keyIsData = ((value & (1ULL << 51)) != 0);
+ 			// the key is always A, and the bit tells us if its IA or ID
+-			ptrauth_key key = keyIsData ? ptrauth_key_asda : ptrauth_key_asia;
++			nabu_pager_key_t key = (nabu_pager_key_t)(keyIsData ? 2U : 0U);
+ 			uint16_t    diversity = (uint16_t)((value >> 34) & 0xFFFF);
+ 			uintptr_t   uVA = userVA + ((uintptr_t)chain - contents);
+ 			// target is always a 34-bit runtime offset, never a vmaddr
+@@ -922,17 +937,14 @@
+ 	 * Route to the appropriate fixup routine
+ 	 */
+ 	switch (hdr->mwli_pointer_format) {
+-#if defined(HAS_APPLE_PAC)
++#if defined(HAS_APPLE_PAC) || NABU_ARM64E_COMPAT
+ 	case DYLD_CHAINED_PTR_ARM64E:
+-		fixupPageAuth64(userVA, contents, pager, segInfo, pageIndex, false);
+-		break;
++		return fixupPageAuth64(userVA, contents, pager, segInfo, pageIndex, false);
+ 	case DYLD_CHAINED_PTR_ARM64E_USERLAND:
+ 	case DYLD_CHAINED_PTR_ARM64E_USERLAND24:
+-		fixupPageAuth64(userVA, contents, pager, segInfo, pageIndex, true);
+-		break;
++		return fixupPageAuth64(userVA, contents, pager, segInfo, pageIndex, true);
+ 	case DYLD_CHAINED_PTR_ARM64E_SHARED_CACHE:
+-		fixupCachePageAuth64(userVA, contents, pager, segInfo, pageIndex);
+-		break;
++		return fixupCachePageAuth64(userVA, contents, pager, segInfo, pageIndex);
+ #endif /* defined(HAS_APPLE_PAC) */
+ 	case DYLD_CHAINED_PTR_64:
+ 		fixupPage64(userVA, contents, link_info, segInfo, pageIndex, false);
+--- a/osfmk/arm64/nabu_v82_emul.c
++++ b/osfmk/arm64/nabu_v82_emul.c
+@@ -87,6 +87,7 @@
+ 
+ #include <arm64/proc_reg.h>             /* ESR_EC(), PSR64_IS_USER()        */
+ #include <arm64/nabu_v82_emul.h>
++#include <arm64/nabu_nopac.h>
+ 
+ #if defined(ARM64_BOARD_CONFIG_NABU)
+ 
+@@ -569,64 +570,12 @@
+ 	ns->v.q[reg] = ((uint128_t)vec->hi << 64) | (uint128_t)vec->lo;
+ }
+ 
+-static void
+-nabu_v82_read_gprs(const arm_saved_state64_t *ss, uint64_t gpr[32])
+-{
+-	unsigned int i;
+-
+-	for (i = 0; i < 29; i++) {
+-		gpr[i] = ss->x[i];
+-	}
+-	gpr[29] = ss->fp;
+-	gpr[30] = ss->lr;
+-	gpr[31] = 0;                            /* XZR */
+-}
+-
+-static void
+-nabu_v82_write_gpr(arm_saved_state64_t *ss, unsigned int reg, uint64_t value)
+-{
+-	switch (reg) {
+-	case 31:                                /* XZR: result discarded */
+-		break;
+-	case 29:
+-		ss->fp = value;
+-		break;
+-	case 30:
+-		ss->lr = value;
+-		break;
+-	default:
+-		ss->x[reg] = value;
+-		break;
+-	}
+-}
+-
+ /*
+  * Fetch the faulting instruction.  EL0 faults are read with copyin() so
+  * that a bogus PC is rejected instead of being dereferenced; kernel text is
+  * read with copyin_kern(), the same split that sleh.c's COPYIN() makes for
+  * the panic dump it prints today.
+  */
+-/*
+- * Canonical form of a pointer the emulator is about to install.
+- *
+- * A core without a PAC field never writes tag bits, so what arrives here is
+- * already the plain address.  What it may still carry is an architectural tag
+- * in bits 63:48 from an earlier signed build.  User addresses drop those bits;
+- * kernel addresses are 48-bit values whose bit 47 must be sign-extended, which
+- * is why masking bits 63:48 off a kernel pointer is never acceptable.
+- */
+-static uint64_t
+-nabu_v82_canon(uint64_t addr, bool from_user)
+-{
+-	if (from_user) {
+-		return addr & 0x0000ffffffffffffULL;
+-	}
+-	if ((addr >> 47) & 1ULL) {
+-		return (addr & 0x0000ffffffffffffULL) | 0xffff000000000000ULL;
+-	}
+-	return addr & 0x0000ffffffffffffULL;
+-}
+-
+ static bool
+ nabu_v82_fetch(uint64_t pc, bool from_user, uint32_t *insn)
+ {
+@@ -637,6 +586,13 @@
+ 		return copyin((user_addr_t)pc, insn, sizeof(*insn)) == 0;
+ 	}
+ 	return copyin_kern((user_addr_t)pc, (char *)insn, sizeof(*insn)) == 0;
++}
++
++static bool
++nabu_v82_read_pointer(uint64_t address, uint64_t *value, void *context)
++{
++	return *(bool *)context ? copyin((user_addr_t)address, value, sizeof(*value)) == 0 :
++	    copyin_kern((user_addr_t)address, (char *)value, sizeof(*value)) == 0;
+ }
+ 
+ bool
+@@ -673,80 +629,32 @@
+ 	cns = &context->ns.ns_64;
+ 	ns = neon_state64(&context->ns);
+ 
+-	/*
+-	 * Pointer authentication first: it costs a register snapshot and keeps
+-	 * arm64e code that slipped past the static PAC strip from faulting.
+-	 */
+-	if (NABU_V82_MATCH(insn, NABU_V82_PAC_MASK, NABU_V82_PAC_BASE) ||
+-	    NABU_V82_MATCH(insn, NABU_V82_PACGA_MASK, NABU_V82_PACGA_BASE)) {
++	/* PAC preserves Xd; authentication strips its address bits. This must
++	 * run before vector crypto and must not fall back for invalid PAC forms. */
++	if (nabu_nopac_opcode(insn)) {
++		struct nabu_nopac_frame frame;
++		for (unsigned int i = 0; i < 29; i++) frame.x[i] = ss->x[i];
++		frame.x[29] = ss->fp; frame.x[30] = ss->lr;
++		frame.sp = ss->sp; frame.pc = pc;
++		if (!nabu_nopac_step(&frame, insn, from_user, nabu_v82_read_pointer, &from_user)) return false;
++		for (unsigned int i = 0; i < 29; i++) ss->x[i] = frame.x[i];
++		ss->fp = frame.x[29]; ss->lr = frame.x[30]; ss->sp = frame.sp;
++		set_saved_state_pc(state, frame.pc);
++		return true;
++	}
++	/* PACGA has no memory/control-flow effect and retains the existing
++	 * deterministic no-key convention used by this board. */
++	if (NABU_V82_MATCH(insn, NABU_V82_PACGA_MASK, NABU_V82_PACGA_BASE)) {
+ 		uint64_t gpr[32];
+-		uint64_t pac_result;
+-
+-		nabu_v82_read_gprs(ss, gpr);
+-		if (nabu_v82_pac_core(insn, gpr, &dst, &pac_result)) {
+-			nabu_v82_write_gpr(ss, dst, pac_result);
+-			if (__improbable(!nabu_v82_emul_reported_emulated)) {
+-				nabu_v82_emul_reported_emulated = true;
+-				printf("nabu: v82 emul: %s at pc 0x%llx in %s mode, "
+-				    "esr 0x%llx\n", nabu_v82_mnemonic(insn), pc,
+-				    from_user ? "user" : "kernel", esr);
+-			}
+-			set_saved_state_pc(state, pc + NABU_V82_INSN_SIZE);
+-			return true;
+-		}
+-	}
+-
+-	/*
+-	 * Branch, return, and load PAC instructions in arm64e userspace dylibs:
+-	 * RETAA, RETAB, BLRAA, BLRAB, BLRAAZ, BLRABZ, BRAA, BRAB, BRAAZ, BRABZ, LDRAA, LDRAB.
+-	 */
+-	if (insn == 0xd65f0bffU || insn == 0xd65f0fffU) {
+-		set_saved_state_pc(state, nabu_v82_canon(ss->lr, from_user));
++		for (unsigned int i = 0; i < 29; i++) gpr[i] = ss->x[i];
++		gpr[29] = ss->fp; gpr[30] = ss->lr; gpr[31] = 0;
++		uint64_t result_value;
++		if (!nabu_v82_pac_core(insn, gpr, &dst, &result_value)) return false;
++		if (dst < 29) ss->x[dst] = result_value;
++		else if (dst == 29) ss->fp = result_value;
++		else if (dst == 30) ss->lr = result_value;
++		set_saved_state_pc(state, pc + 4);
+ 		return true;
+-	}
+-	if ((insn & 0xfffffc1fU) == 0xd63f081fU || (insn & 0xfffffc1fU) == 0xd63f0c1fU ||
+-	    (insn & 0xfffffc00U) == 0xd73f0800U || (insn & 0xfffffc00U) == 0xd73f0c00U) {
+-		uint64_t gpr[32];
+-		unsigned int rn = (insn >> 5) & 0x1fU;
+-		nabu_v82_read_gprs(ss, gpr);
+-		ss->lr = pc + NABU_V82_INSN_SIZE;
+-		set_saved_state_pc(state, nabu_v82_canon(rn == 31 ? 0 : gpr[rn],
+-		    from_user));
+-		return true;
+-	}
+-	if ((insn & 0xfffffc1fU) == 0xd61f081fU || (insn & 0xfffffc1fU) == 0xd61f0c1fU ||
+-	    (insn & 0xfffffc00U) == 0xd71f0800U || (insn & 0xfffffc00U) == 0xd71f0c00U) {
+-		uint64_t gpr[32];
+-		unsigned int rn = (insn >> 5) & 0x1fU;
+-		nabu_v82_read_gprs(ss, gpr);
+-		set_saved_state_pc(state, nabu_v82_canon(rn == 31 ? 0 : gpr[rn],
+-		    from_user));
+-		return true;
+-	}
+-	if ((insn & 0xff200400U) == 0xf8200400U) {
+-		uint64_t gpr[32];
+-		unsigned int rt = insn & 0x1fU;
+-		unsigned int rn = (insn >> 5) & 0x1fU;
+-		unsigned int w = (insn >> 11) & 1U;
+-		unsigned int s = (insn >> 22) & 1U;
+-		unsigned int imm9 = (insn >> 12) & 0x1ffU;
+-		int simm10 = (int)((s << 9) | imm9) - (s ? 1024 : 0);
+-		int64_t offset_bytes = (int64_t)simm10 * 8;
+-		nabu_v82_read_gprs(ss, gpr);
+-		uint64_t base = (rn == 31) ? get_saved_state_sp(state) : gpr[rn];
+-		uint64_t addr = base + offset_bytes;
+-		uint64_t loaded = 0;
+-		bool ok = from_user ? (copyin((user_addr_t)addr, &loaded, sizeof(loaded)) == 0)
+-		                    : (copyin_kern((user_addr_t)addr, (char *)&loaded, sizeof(loaded)) == 0);
+-		if (ok) {
+-			if (rt != 31) nabu_v82_write_gpr(ss, rt, loaded);
+-			if (w && rn != rt) {
+-				if (rn == 31) set_saved_state_sp(state, addr);
+-				else nabu_v82_write_gpr(ss, rn, addr);
+-			}
+-			set_saved_state_pc(state, pc + NABU_V82_INSN_SIZE);
+-			return true;
+-		}
+ 	}
+ 	{
+ 		nabu_v82_op_t op;
+--- a/osfmk/arm64/nabu_arm64e_compat.h
++++ b/osfmk/arm64/nabu_arm64e_compat.h
+@@ -0,0 +1,13 @@
++/* SPDX-License-Identifier: BSD-2-Clause-Patent */
++#ifndef NABU_ARM64E_COMPAT_H
++#define NABU_ARM64E_COMPAT_H
++#if defined(__arm64__)
++#include <pexpert/arm64/board_config.h>
++#endif
++/* This is a software ABI on the no-PAuth board, never a hardware capability. */
++#if defined(ARM64_BOARD_CONFIG_NABU) && XNU_TARGET_OS_OSX && !__has_feature(ptrauth_calls) && !defined(HAS_APPLE_PAC)
++#define NABU_ARM64E_COMPAT 1
++#else
++#define NABU_ARM64E_COMPAT 0
++#endif
++#endif
+--- a/osfmk/arm64/nabu_nopac.h
++++ b/osfmk/arm64/nabu_nopac.h
+@@ -0,0 +1,68 @@
++/* SPDX-License-Identifier: BSD-2-Clause-Patent */
++#ifndef NABU_NOPAC_H
++#define NABU_NOPAC_H
++#include <stdint.h>
++#include <stdbool.h>
++/* No keys or signed-pointer ABI are claimed. PAC leaves Xd intact, AUT/XPAC
++ * restore address bits, authenticated control flow uses that plain address.
++ * The caller copies this frame back only on success, including successful loads.
++ */
++struct nabu_nopac_frame { uint64_t x[31], sp, pc; };
++typedef bool (*nabu_nopac_read_t)(uint64_t, uint64_t *, void *);
++static inline uint64_t
++nabu_nopac_canonical(uint64_t value, bool user)
++{
++    uint64_t plain = value & UINT64_C(0x0000ffffffffffff);
++    return !user && (plain & (UINT64_C(1) << 47)) ? plain | UINT64_C(0xffff000000000000) : plain;
++}
++static inline bool
++nabu_nopac_opcode(uint32_t op)
++{
++    return (op & 0xffff8000U) == 0xdac10000U || op == 0xd65f0bffU || op == 0xd65f0fffU ||
++        (op & 0xfffffc00U) == 0xd71f0800U || (op & 0xfffffc00U) == 0xd71f0c00U ||
++        (op & 0xfffffc00U) == 0xd73f0800U || (op & 0xfffffc00U) == 0xd73f0c00U ||
++        (op & 0xfffffc1fU) == 0xd61f081fU || (op & 0xfffffc1fU) == 0xd61f0c1fU ||
++        (op & 0xfffffc1fU) == 0xd63f081fU || (op & 0xfffffc1fU) == 0xd63f0c1fU ||
++        (op & 0xff200400U) == 0xf8200400U;
++}
++static inline bool
++nabu_nopac_step(struct nabu_nopac_frame *f, uint32_t op, bool user,
++    nabu_nopac_read_t read64, void *context)
++{
++    unsigned rd = op & 31U, rn = (op >> 5) & 31U;
++    uint64_t pc = f->pc;
++    if ((op & 0xffff8000U) == 0xdac10000U) {
++        unsigned opc = (op >> 10) & 31U;
++        if (opc > 17U || (opc >= 8U && rn != 31U)) return false;
++        if (rd != 31U && (opc >= 4U && (opc < 8U || opc >= 12U))) f->x[rd] = nabu_nopac_canonical(f->x[rd], user);
++        f->pc = pc + 4;
++        return true;
++    }
++    if (op == 0xd65f0bffU || op == 0xd65f0fffU) {
++        f->pc = nabu_nopac_canonical(f->x[30], user);
++        return true;
++    }
++    if ((op & 0xff200400U) == 0xf8200400U) {
++        unsigned wb = (op >> 11) & 1U, sign = (op >> 22) & 1U;
++        int64_t imm = (int64_t)((sign << 9) | ((op >> 12) & 511U)) - (sign ? 1024 : 0);
++        if (wb && rd == rn && rd != 31U) return false;
++        uint64_t base = rn == 31U ? f->sp : f->x[rn];
++        uint64_t address = nabu_nopac_canonical(base, user) + (uint64_t)(imm * 8);
++        uint64_t value;
++        if (!read64 || !read64(address, &value, context)) return false;
++        if (rd != 31U) f->x[rd] = value; /* Loaded data is not an address. */
++        if (wb) { if (rn == 31U) f->sp = address; else f->x[rn] = address; }
++        f->pc = pc + 4;
++        return true;
++    }
++    if (nabu_nopac_opcode(op)) {
++        if (rn == 31U) return false; /* branch target X31 is reserved */
++        uint64_t target = nabu_nopac_canonical(f->x[rn], user);
++        bool link = (op & 0x00200000U) != 0;
++        if (link) f->x[30] = pc + 4; /* capture target before changing LR */
++        f->pc = target;
++        return true;
++    }
++    return false;
++}
++#endif

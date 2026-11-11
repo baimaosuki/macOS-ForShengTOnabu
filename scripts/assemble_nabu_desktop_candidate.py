@@ -6,13 +6,25 @@ import json
 from pathlib import Path
 import shutil
 import struct
+import uuid
 from audit_adt import parse_adt
 from native_devtree import make_nabu_adt, configure_native_text_state
 from native_macho import macho
 from prepare_nabu_desktop_policy import validate
 
 
-def assemble(kernel, prelink_report, policy, data, root, loader_build, output):
+def validate_owned_memory_size(owned_memory_size, kernel_span, packed_seed_bytes):
+    if not (256 << 20) <= owned_memory_size <= (5 << 30):
+        raise ValueError('owned memory request must be between 256 MiB and 5 GiB')
+    if owned_memory_size % (2 << 20):
+        raise ValueError('owned memory request must be 2 MiB aligned')
+    if kernel_span + packed_seed_bytes + (2 << 20) > owned_memory_size:
+        raise ValueError('loader owned window too small for kernel, packed Data and 2 MiB headroom')
+    return owned_memory_size
+
+
+def assemble(kernel, prelink_report, policy, data, root, loader_build, output, *, owned_memory_size=2 << 30):
+    validate_owned_memory_size(owned_memory_size, 0, 0)
     report = json.loads(prelink_report.read_text())
     raw = kernel.read_bytes()
     image = macho(raw, 'arm64')
@@ -23,6 +35,8 @@ def assemble(kernel, prelink_report, policy, data, root, loader_build, output):
             or storage.get('build', {}).get('root_mode') != 'desktop'):
         raise ValueError('requires the actual owner-linked ARM64 desktop storage image')
     contract = validate(policy, '25F71')
+    root_identity = uuid.UUID(next(w['volume_uuid'] for w in contract['windows'] if w['name'] == 'OS'))
+    root_uuid = str(root_identity).upper()
     root_record = json.loads((root / 'build.json').read_text())
     root_image = root / 'root_image.bin'
     if (root_record.get('build') != '25F71' or root_record.get('final_image_readback_verified') is not True
@@ -42,10 +56,9 @@ def assemble(kernel, prelink_report, policy, data, root, loader_build, output):
     if cursor != len(seed): raise ValueError('unbounded packed Data')
     base = min(s['va'] for s in image['segments'] if s['size'])
     extent = max(s['va'] + s['size'] for s in image['segments']) - base
-    owned = 512 << 20
+    owned = validate_owned_memory_size(owned_memory_size, extent, len(seed))
     # DarwinBoot keeps PackedRAMDisk compressed, NativeRamBlock imports its
     # bounded nonzero extents into volatile pages. Do not allocate 3 GiB here.
-    if extent + len(seed) + (2 << 20) > owned: raise ValueError('loader owned window too small')
     output.mkdir(parents=True, exist_ok=False)
     entry = output / 'EFI/UniXNU'; entry.mkdir(parents=True)
     payload = entry / 'Payloads'; payload.mkdir()
@@ -67,7 +80,7 @@ def assemble(kernel, prelink_report, policy, data, root, loader_build, output):
     adt = payload / 'kernel.macho.adt'
     make_nabu_adt(adt, owned_memory_size=owned, os_environment='main',
                   native_ufs=True, packed_ramdisk=True)
-    configure_native_text_state(adt, development_root=True)
+    configure_native_text_state(adt, development_root=True, root_match_volume_uuid=root_identity)
     tree, parsed = parse_adt(adt.read_bytes())
     if parsed != adt.stat().st_size: raise ValueError('ADT has trailing bytes')
     ufs = tree['/device-tree/arm-io/ufs']
@@ -81,7 +94,7 @@ def assemble(kernel, prelink_report, policy, data, root, loader_build, output):
     if mm.get('PackedRAMDisk') != bytes(16) or 'RAMDisk' in mm: raise ValueError('loader packed slot mismatch')
     # A root-test candidate must expose transport/layout failures on the panic
     # panel instead of silently returning false and waiting forever for its UUID.
-    args = '-v keepsyms=1 debug=0x14e cpus=1 armcpu-self-ipi=1 nabu-source-text=1 native-ufs-root=1 native-ufs-diagnostics=1 rd=uuid boot-uuid=47719F50-5527-44A3-9F59-8170528D8C14'
+    args = '-v keepsyms=1 debug=0x14e cpus=1 armcpu-self-ipi=1 nabu-source-text=1 native-ufs-root=1 native-ufs-diagnostics=1 rd=uuid boot-uuid=' + root_uuid
     menu = ('version = 1\n[boot]\ntimeout = 5\ndefault = "nabu-ufs-root-test"\n'
             '[[driver]]\npath = "Drivers/DarwinBoot.efi"\n'
             '[[entry]]\nid = "nabu-ufs-root-test"\ntitle = "NABU 25F71 UFS/root test"\n'
@@ -92,13 +105,15 @@ def assemble(kernel, prelink_report, policy, data, root, loader_build, output):
              for p in output.rglob('*') if p.is_file() and not p.is_symlink()}
     result = dict(schema='nabu-25F71-ufs-root-test-v1',build='25F71',files=files,
         kernel_span=extent,owned_memory_bytes=owned,packed_seed_bytes=len(seed),data_logical_bytes=logical,
+        owned_memory_request_bytes=owned,
+        owned_memory_contract='ADT request only; DarwinBoot must successfully AllocatePages for the complete contiguous window before passing it to XNU. Host assembly does not prove runtime ownership.',
         loader=loader_record,source_module_pointer_formats=storage['pointer_formats'],
         ufs_pointer_readback_count=len(storage['pointer_relocations']),
         external_branch_readback_count=report['branch_relocation_count'],constructors=storage['constructors'],
         esp_bundle_bytes=sum(p['bytes'] for n,p in files.items() if n.startswith('EFI/')),
         loader_preserves_packed=True,ufs_resource_contract_checked=True,boot_args=args,
         kernel_architecture='arm64',root_image=dict(path=str(root_image.resolve()), **root_record),
-        root_uuid='47719F50-5527-44A3-9F59-8170528D8C14',
+        root_uuid=root_uuid,root_matching='IOMedia IOPropertyMatch UUID from validated OS policy',
         systemos_uuid='C7DFE43C-0A23-43F5-B3E2-471BEAC4539D',app_uuid='F894E20A-CE25-41F4-ABE2-C00E9E922B83',
         data_uuid='0A5EED00-0000-4000-8000-000000000001',owner_contract=contract,
         hardware_executed=False,root_mount_verified=False,userspace_verified=False,desktop_verified=False,
@@ -112,4 +127,7 @@ def assemble(kernel, prelink_report, policy, data, root, loader_build, output):
 if __name__ == '__main__':
     p=argparse.ArgumentParser(description=__doc__)
     for n in ('kernel','prelink-report','policy','data','root','loader-build','output'):p.add_argument('--'+n,type=Path,required=True)
-    a=p.parse_args(); print(json.dumps(assemble(a.kernel,a.prelink_report,a.policy,a.data,a.root,a.loader_build,a.output),indent=2))
+    p.add_argument('--owned-memory-size', type=lambda value: int(value, 0), default=2 << 30,
+                   help='contiguous memory request in bytes (decimal or 0x hex); default 2 GiB, subject to real firmware allocation')
+    a=p.parse_args(); print(json.dumps(assemble(a.kernel,a.prelink_report,a.policy,a.data,a.root,a.loader_build,a.output,
+        owned_memory_size=a.owned_memory_size),indent=2))
