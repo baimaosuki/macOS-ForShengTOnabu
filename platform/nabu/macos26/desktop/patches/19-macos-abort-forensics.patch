@@ -1,7 +1,7 @@
-Explicit opt-in bounded selected-process userspace abort diagnostics; no fault policy changes.
+Explicit opt-in bounded selected-process abort and fatal-signal diagnostics; no fault policy changes.
 --- a/bsd/kern/kern_exit.c
 +++ b/bsd/kern/kern_exit.c
-@@ -1514,6 +1514,91 @@
+@@ -1514,6 +1514,113 @@
  }
  
  
@@ -11,15 +11,17 @@ Explicit opt-in bounded selected-process userspace abort diagnostics; no fault p
 +#include <kern/clock.h>
 +/* Observational only. The original reason creation, signal and result follow. */
 +static LCK_MTX_DECLARE(nabu_abort_trace_lock, &proc_lck_grp);
-+static struct { unsigned int initial; uint64_t last_ns, suppressed; } nabu_abort_buckets[6];
++static struct { unsigned int initial; uint64_t last_ns, suppressed; } nabu_abort_buckets[12];
 +volatile unsigned int nabu_abort_trace_events;
 +
 +static int
 +nabu_abort_trace_kind(const char *name)
 +{
 +	static const char *const names[] = { "cryptexd", "fskitd", "mount", "mount_apfs",
-+		"WindowServer", "diskarbitrationd" };
-+	for (unsigned int i = 0; i < 6; i++) if (!strcmp(name, names[i])) return (int)i;
++		"WindowServer", "diskarbitrationd", "cfprefsd", "digest-service", "eligibilityd", "endpointsecurity",
++		"opendirectoryd", "loginwindow" };
++	for (unsigned int i = 0; i < sizeof(names) / sizeof(names[0]); i++) if (!strcmp(name, names[i])) return (int)i;
++	if (!strcmp(name, "endpointsecurityd")) return 9;
 +	return -1;
 +}
 +
@@ -31,8 +33,8 @@ Explicit opt-in bounded selected-process userspace abort diagnostics; no fault p
 +}
 +
 +static void
-+nabu_abort_trace(proc_t p, uint32_t reason_namespace, uint64_t reason_code,
-+    uint32_t payload_size, user_addr_t reason_string, uint64_t reason_flags, uint32_t internal_flags)
++nabu_abort_observe(proc_t p, uint32_t reason_namespace, uint64_t reason_code,
++    uint32_t payload_size, user_addr_t reason_string, uint64_t reason_flags, uint32_t internal_flags, int fatal_signal)
 +{
 +	uint32_t enabled = 0;
 +	if (!PE_parse_boot_argn("nabu-boot-proc", &enabled, sizeof(enabled)) || enabled != 1) return;
@@ -59,8 +61,9 @@ Explicit opt-in bounded selected-process userspace abort diagnostics; no fault p
 +	text[sizeof(text) - 1] = 0;
 +	for (unsigned int i = 0; i < sizeof(text) - 1 && text[i]; i++)
 +		if ((unsigned char)text[i] < 32 || text[i] == 127) text[i] = '?';
-+	printf("NABU-ABORT t_ns=%llu pid=%d uid=%llu name=%s ns=%u code=0x%llx flags=0x%llx internal=0x%x payload_size=%u suppressed=%llu\n",
-+	    ns, proc_getpid(p), uid, p->p_comm, reason_namespace, reason_code, reason_flags,
++	printf("NABU-ABORT t_ns=%llu pid=%d uid=%llu name=%s source=%s signal=%d ns=%u code=0x%llx flags=0x%llx internal=0x%x payload_size=%u suppressed=%llu\n",
++	    ns, proc_getpid(p), uid, p->p_comm, fatal_signal ? "fatal-signal" : "abort-payload",
++	    fatal_signal, reason_namespace, reason_code, reason_flags,
 +	    internal_flags, payload_size, suppressed);
 +	printf("NABU-ABORT uid=%llu reason_ptr=0x%llx copy_error=%d truncated=%d copied=%lu text=%s\n",
 +	    uid, (uint64_t)reason_string, text_error, text_error == ENAMETOOLONG,
@@ -88,12 +91,31 @@ Explicit opt-in bounded selected-process userspace abort diagnostics; no fault p
 +		frame = next;
 +	}
 +}
++static void
++nabu_abort_trace(proc_t p, uint32_t reason_namespace, uint64_t reason_code,
++    uint32_t payload_size, user_addr_t reason_string, uint64_t reason_flags, uint32_t internal_flags)
++{
++	nabu_abort_observe(p, reason_namespace, reason_code, payload_size, reason_string,
++	    reason_flags, internal_flags, 0);
++}
++
++/* postsig calls after dropping the proc lock, before coredump changes state. */
++void nabu_fatal_signal_trace(proc_t, int);
++void
++nabu_fatal_signal_trace(proc_t p, int signum)
++{
++	if (p != current_proc()) return;
++	if (signum != SIGABRT && signum != SIGILL && signum != SIGSEGV &&
++	    signum != SIGBUS && signum != SIGTRAP) return;
++	nabu_abort_observe(p, OS_REASON_SIGNAL, (uint64_t)signum, 0, 0, 0, 0, signum);
++}
++
 +#endif
 +
  static int
  abort_with_payload_internal(proc_t p,
      uint32_t reason_namespace, uint64_t reason_code,
-@@ -1531,6 +1616,10 @@
+@@ -1531,6 +1638,10 @@
  	KERNEL_DEBUG_CONSTANT(BSDDBG_CODE(DBG_BSD_PROC, BSD_PROC_EXITREASON_CREATE) | DBG_FUNC_NONE,
  	    proc_getpid(p), reason_namespace,
  	    reason_code, 0, 0);
@@ -104,3 +126,26 @@ Explicit opt-in bounded selected-process userspace abort diagnostics; no fault p
  
  	exit_reason = build_userspace_exit_reason(reason_namespace, reason_code,
  	    payload, payload_size, reason_string, reason_flags | OS_REASON_FLAG_ABORT);
+--- a/bsd/kern/kern_sig.c
++++ b/bsd/kern/kern_sig.c
+@@ -3062,6 +3062,10 @@
+  * Take the action for the specified signal
+  * from the current set of pending signals.
+  */
++#if defined(NABU) && NABU && defined(XNU_OWNER_DATA_MOUNT) && XNU_OWNER_DATA_MOUNT && defined(__arm64__)
++extern void nabu_fatal_signal_trace(proc_t, int);
++#endif
++
+ void
+ postsig_locked(int signum)
+ {
+@@ -3111,6 +3115,9 @@
+ 			p->p_sigacts.ps_sig = signum;
+ 			proc_signalend(p, 1);
+ 			proc_unlock(p);
++#if defined(NABU) && NABU && defined(XNU_OWNER_DATA_MOUNT) && XNU_OWNER_DATA_MOUNT && defined(__arm64__)
++			nabu_fatal_signal_trace(p, signum);
++#endif
+ #if CONFIG_COREDUMP || CONFIG_UCOREDUMP
+ 			/*
+ 			 * For now, driver dumps are only performed by xnu.

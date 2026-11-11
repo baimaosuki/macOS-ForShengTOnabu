@@ -86,7 +86,7 @@
  
  #include <mach/exclaves.h>
  
-@@ -944,6 +945,209 @@
+@@ -944,6 +945,233 @@
  		p->p_crash_behavior |= POSIX_SPAWN_PANIC_ON_SPAWN_FAIL;
  	}
  }
@@ -97,11 +97,12 @@
 +#include <sys/wait.h>
 +void nabu_lifecycle_exit(proc_t);
 +#define NABU_LIFE_SLOTS 64
-+#define NABU_LIFE_KINDS 12
++#define NABU_LIFE_KINDS 23
 +struct nabu_life_record {
 +	uint64_t uniqueid, sequence;
 +	pid_t pid, ppid, gpid;
 +	unsigned int kind;
++	uid_t real_uid, effective_uid;
 +	int argc, argv_truncated, path_error;
 +	char parent[32], grandparent[32], path[MAXPATHLEN], args[512];
 +};
@@ -123,18 +124,27 @@
 +nabu_life_kind(const char *name)
 +{
 +	static const char *const names[] = { "mount", "mount_apfs", "fskitd", "WindowServer",
-+		"diskarbitrationd", "cryptexd" };
-+	for (unsigned int i = 0; i < 6; i++) if (!strcmp(name, names[i])) return i + 1;
++		"diskarbitrationd", "cryptexd", "cfprefsd", "digest-service", "eligibilityd", "endpointsecurity",
++		"opendirectoryd", "loginwindow" };
++	for (unsigned int i = 0; i < sizeof(names) / sizeof(names[0]); i++) if (!strcmp(name, names[i])) return i + 1;
++	if (!strcmp(name, "endpointsecurityd")) return 10;
 +	return 0;
 +}
 +
 +static unsigned int
 +nabu_life_proxy_kind(const char *label)
 +{
-+	if (!strcmp(label, "com.apple.filesystems.fskitd")) return 9;
-+	if (!strcmp(label, "com.apple.WindowServer")) return 10;
-+	if (!strcmp(label, "com.apple.diskarbitrationd")) return 11;
-+	if (!strcmp(label, "com.apple.security.cryptexd")) return 12;
++	if (!strcmp(label, "com.apple.filesystems.fskitd")) return 13;
++	if (!strcmp(label, "com.apple.WindowServer")) return 14;
++	if (!strcmp(label, "com.apple.diskarbitrationd")) return 15;
++	if (!strcmp(label, "com.apple.security.cryptexd")) return 16;
++	if (!strcmp(label, "com.apple.cfprefsd.xpc.agent")) return 17;
++	if (!strcmp(label, "com.apple.cfprefsd.xpc.daemon")) return 18;
++	if (!strcmp(label, "com.apple.Kerberos.digest-service")) return 19;
++	if (!strcmp(label, "com.apple.eligibilityd")) return 20;
++	if (!strcmp(label, "com.apple.endpointsecurity.endpointsecurityd")) return 21;
++	if (!strcmp(label, "com.apple.opendirectoryd")) return 22;
++	if (!strcmp(label, "com.apple.loginwindow")) return 23;
 +	return 0;
 +}
 +
@@ -190,6 +200,16 @@
 +	return false;
 +}
 +
++/* Snapshot referenced credentials outside trace/proc locks at each event. */
++static void
++nabu_life_credentials(proc_t p, struct nabu_life_record *r)
++{
++	kauth_cred_t cred = kauth_cred_proc_ref(p);
++	r->real_uid = kauth_cred_getruid(cred);
++	r->effective_uid = kauth_cred_getuid(cred);
++	kauth_cred_unref(&cred);
++}
++
 +static void
 +nabu_life_emit(struct nabu_life_record *r, bool exiting, int status, os_reason_t reason)
 +{
@@ -202,9 +222,9 @@
 +	lck_mtx_unlock(&nabu_life_lock);
 +	if (!emit) return;
 +	os_atomic_inc(&nabu_lifecycle_trace_events, relaxed);
-+	printf("NABU-PROC t_ns=%llu event=%s pid=%d uid=%llu exec=%llu ppid=%d parent=%s gpid=%d grandparent=%s suppressed=%llu evicted=%llu\n",
++	printf("NABU-PROC t_ns=%llu event=%s pid=%d uid=%llu exec=%llu real_uid=%u effective_uid=%u ppid=%d parent=%s gpid=%d grandparent=%s suppressed=%llu evicted=%llu\n",
 +	    ns, exiting ? "exit" : "exec", r->pid, r->uniqueid, r->sequence,
-+	    r->ppid, r->parent, r->gpid, r->grandparent, skipped, evicted);
++	    r->real_uid, r->effective_uid, r->ppid, r->parent, r->gpid, r->grandparent, skipped, evicted);
 +	printf("NABU-PROC uid=%llu exec=%llu path=%s path_error=%d argc=%d argv_truncated=%d argv=%s\n",
 +	    r->uniqueid, r->sequence, r->path, r->path_error, r->argc, r->argv_truncated, r->args);
 +	if (exiting) {
@@ -237,6 +257,7 @@
 +	struct nabu_life_record *r = kalloc_type(struct nabu_life_record, Z_WAITOK | Z_ZERO);
 +	if (!r) return;
 +	r->uniqueid = uid; r->pid = proc_getpid(p); r->kind = kind;
++	nabu_life_credentials(p, r);
 +	r->ppid = proc_ppid(p);
 +	proc_t parent = proc_find(r->ppid);
 +	if (parent != PROC_NULL) {
@@ -289,14 +310,17 @@
 +		}
 +	}
 +	lck_mtx_unlock(&nabu_life_lock);
-+	if (r->uniqueid) nabu_life_emit(r, true, p->p_xstat, p->p_exit_reason);
++	if (r->uniqueid) {
++		nabu_life_credentials(p, r);
++		nabu_life_emit(r, true, p->p_xstat, p->p_exit_reason);
++	}
 +	kfree_type(struct nabu_life_record, r);
 +}
 +#endif
  
  void
  set_proc_name(struct image_params *imgp, proc_t p)
-@@ -2746,6 +2950,9 @@
+@@ -2746,6 +2974,9 @@
  	p->p_acflag &= ~AFORK;
  
  	set_proc_name(imgp, p);
@@ -306,7 +330,7 @@
  #if SHENG
  	/* Image activation is observable here; this is not application readiness. */
  	sheng_boot_service(p->p_comm, proc_getpid(p), 0, 0);
-@@ -4341,9 +4548,54 @@
+@@ -4341,9 +4572,54 @@
   *		Handle posix_spawnattr_t
   *		Handle posix_spawn_file_actions_t
   */
@@ -361,7 +385,7 @@
  	proc_t p = ap;
  	user_addr_t pid = uap->pid;
  	int ival[2];            /* dummy retval for setpgid() */
-@@ -7952,8 +8204,1594 @@
+@@ -7952,8 +8228,1594 @@
   *		word width of the kernel. Once the self-exec completes, the
   *		initproc might be different.
   */
@@ -1957,7 +1981,7 @@
  {
  	int retval[2];
  	int error;
-@@ -8025,7 +9863,7 @@
+@@ -8025,7 +9887,7 @@
  	 */
  	init_exec_args.fname = argv0;
  	init_exec_args.argp = scratch_addr;
@@ -1966,7 +1990,7 @@
  
  	/*
  	 * So that init task is set with uid,gid 0 token
-@@ -8047,6 +9885,8 @@
+@@ -8047,6 +9909,8 @@
  #endif
  	"/sbin/launchd",
  };
@@ -1975,7 +1999,7 @@
  
  /*
   * load_init_program
-@@ -8116,11 +9956,28 @@
+@@ -8116,11 +9980,28 @@
  	exec_log_handle = os_log_create("com.apple.xnu.bsd", "exec");
  #endif /* DEVELOPMENT || DEBUG */
  
@@ -2005,7 +2029,7 @@
  
  #if DEBUG || DEVELOPMENT
  	/* Check for boot-arg suffix first */
-@@ -8132,7 +9989,7 @@
+@@ -8132,7 +10013,7 @@
  
  		if (is_release_suffix) {
  			printf("load_init_program: attempting to load /sbin/launchd\n");
@@ -2014,7 +2038,7 @@
  			if (!error) {
  				return;
  			}
-@@ -8143,7 +10000,7 @@
+@@ -8143,7 +10024,7 @@
  			strlcat(launchd_path, launchd_suffix, sizeof(launchd_path));
  
  			printf("load_init_program: attempting to load %s\n", launchd_path);
@@ -2023,7 +2047,7 @@
  			if (!error) {
  				return;
  			} else if (error != ENOENT) {
-@@ -8156,7 +10013,7 @@
+@@ -8156,7 +10037,7 @@
  	error = ENOENT;
  	for (i = 0; i < sizeof(init_programs) / sizeof(init_programs[0]); i++) {
  		printf("load_init_program: attempting to load %s\n", init_programs[i]);
@@ -2034,7 +2058,7 @@
  		} else if (error != ENOENT) {
 --- a/bsd/kern/kern_exit.c
 +++ b/bsd/kern/kern_exit.c
-@@ -1514,6 +1514,91 @@
+@@ -1514,6 +1514,113 @@
  }
  
  
@@ -2044,15 +2068,17 @@
 +#include <kern/clock.h>
 +/* Observational only. The original reason creation, signal and result follow. */
 +static LCK_MTX_DECLARE(nabu_abort_trace_lock, &proc_lck_grp);
-+static struct { unsigned int initial; uint64_t last_ns, suppressed; } nabu_abort_buckets[6];
++static struct { unsigned int initial; uint64_t last_ns, suppressed; } nabu_abort_buckets[12];
 +volatile unsigned int nabu_abort_trace_events;
 +
 +static int
 +nabu_abort_trace_kind(const char *name)
 +{
 +	static const char *const names[] = { "cryptexd", "fskitd", "mount", "mount_apfs",
-+		"WindowServer", "diskarbitrationd" };
-+	for (unsigned int i = 0; i < 6; i++) if (!strcmp(name, names[i])) return (int)i;
++		"WindowServer", "diskarbitrationd", "cfprefsd", "digest-service", "eligibilityd", "endpointsecurity",
++		"opendirectoryd", "loginwindow" };
++	for (unsigned int i = 0; i < sizeof(names) / sizeof(names[0]); i++) if (!strcmp(name, names[i])) return (int)i;
++	if (!strcmp(name, "endpointsecurityd")) return 9;
 +	return -1;
 +}
 +
@@ -2064,8 +2090,8 @@
 +}
 +
 +static void
-+nabu_abort_trace(proc_t p, uint32_t reason_namespace, uint64_t reason_code,
-+    uint32_t payload_size, user_addr_t reason_string, uint64_t reason_flags, uint32_t internal_flags)
++nabu_abort_observe(proc_t p, uint32_t reason_namespace, uint64_t reason_code,
++    uint32_t payload_size, user_addr_t reason_string, uint64_t reason_flags, uint32_t internal_flags, int fatal_signal)
 +{
 +	uint32_t enabled = 0;
 +	if (!PE_parse_boot_argn("nabu-boot-proc", &enabled, sizeof(enabled)) || enabled != 1) return;
@@ -2092,8 +2118,9 @@
 +	text[sizeof(text) - 1] = 0;
 +	for (unsigned int i = 0; i < sizeof(text) - 1 && text[i]; i++)
 +		if ((unsigned char)text[i] < 32 || text[i] == 127) text[i] = '?';
-+	printf("NABU-ABORT t_ns=%llu pid=%d uid=%llu name=%s ns=%u code=0x%llx flags=0x%llx internal=0x%x payload_size=%u suppressed=%llu\n",
-+	    ns, proc_getpid(p), uid, p->p_comm, reason_namespace, reason_code, reason_flags,
++	printf("NABU-ABORT t_ns=%llu pid=%d uid=%llu name=%s source=%s signal=%d ns=%u code=0x%llx flags=0x%llx internal=0x%x payload_size=%u suppressed=%llu\n",
++	    ns, proc_getpid(p), uid, p->p_comm, fatal_signal ? "fatal-signal" : "abort-payload",
++	    fatal_signal, reason_namespace, reason_code, reason_flags,
 +	    internal_flags, payload_size, suppressed);
 +	printf("NABU-ABORT uid=%llu reason_ptr=0x%llx copy_error=%d truncated=%d copied=%lu text=%s\n",
 +	    uid, (uint64_t)reason_string, text_error, text_error == ENAMETOOLONG,
@@ -2121,12 +2148,31 @@
 +		frame = next;
 +	}
 +}
++static void
++nabu_abort_trace(proc_t p, uint32_t reason_namespace, uint64_t reason_code,
++    uint32_t payload_size, user_addr_t reason_string, uint64_t reason_flags, uint32_t internal_flags)
++{
++	nabu_abort_observe(p, reason_namespace, reason_code, payload_size, reason_string,
++	    reason_flags, internal_flags, 0);
++}
++
++/* postsig calls after dropping the proc lock, before coredump changes state. */
++void nabu_fatal_signal_trace(proc_t, int);
++void
++nabu_fatal_signal_trace(proc_t p, int signum)
++{
++	if (p != current_proc()) return;
++	if (signum != SIGABRT && signum != SIGILL && signum != SIGSEGV &&
++	    signum != SIGBUS && signum != SIGTRAP) return;
++	nabu_abort_observe(p, OS_REASON_SIGNAL, (uint64_t)signum, 0, 0, 0, 0, signum);
++}
++
 +#endif
 +
  static int
  abort_with_payload_internal(proc_t p,
      uint32_t reason_namespace, uint64_t reason_code,
-@@ -1531,6 +1616,10 @@
+@@ -1531,6 +1638,10 @@
  	KERNEL_DEBUG_CONSTANT(BSDDBG_CODE(DBG_BSD_PROC, BSD_PROC_EXITREASON_CREATE) | DBG_FUNC_NONE,
  	    proc_getpid(p), reason_namespace,
  	    reason_code, 0, 0);
@@ -2137,7 +2183,7 @@
  
  	exit_reason = build_userspace_exit_reason(reason_namespace, reason_code,
  	    payload, payload_size, reason_string, reason_flags | OS_REASON_FLAG_ABORT);
-@@ -2357,6 +2446,10 @@
+@@ -2357,6 +2468,10 @@
  	proc_unlock(p);
  	pid = proc_getpid(p);
  	exitval = p->p_xstat;
@@ -2201,6 +2247,29 @@
  
  	/*
  	 * Reference the OID and drop the geometry lock; this prevents the
+--- a/bsd/kern/kern_sig.c
++++ b/bsd/kern/kern_sig.c
+@@ -3062,6 +3062,10 @@
+  * Take the action for the specified signal
+  * from the current set of pending signals.
+  */
++#if defined(NABU) && NABU && defined(XNU_OWNER_DATA_MOUNT) && XNU_OWNER_DATA_MOUNT && defined(__arm64__)
++extern void nabu_fatal_signal_trace(proc_t, int);
++#endif
++
+ void
+ postsig_locked(int signum)
+ {
+@@ -3111,6 +3115,9 @@
+ 			p->p_sigacts.ps_sig = signum;
+ 			proc_signalend(p, 1);
+ 			proc_unlock(p);
++#if defined(NABU) && NABU && defined(XNU_OWNER_DATA_MOUNT) && XNU_OWNER_DATA_MOUNT && defined(__arm64__)
++			nabu_fatal_signal_trace(p, signum);
++#endif
+ #if CONFIG_COREDUMP || CONFIG_UCOREDUMP
+ 			/*
+ 			 * For now, driver dumps are only performed by xnu.
 --- a/bsd/miscfs/bindfs/bind_vfsops.c
 +++ b/bsd/miscfs/bindfs/bind_vfsops.c
 @@ -77,6 +77,8 @@

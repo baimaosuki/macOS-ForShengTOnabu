@@ -99,13 +99,13 @@
       "path": "platform/nabu/macos26/desktop/patches/18-macos-boot-process-trace.patch",
       "upstream": "nabu-local/explicit-boot-process-diagnostics",
       "adapted": false,
-      "sha256": "228c8fdc1b10f7009fed33275b3bd82658140c8bb244e7d71d7bd414e54491cd"
+      "sha256": "97eb4dbb77b19fcb4ec916f13d88d6bfd9a4c3a1be09ee5b0d82a02be220625a"
     },
     {
       "path": "platform/nabu/macos26/desktop/patches/19-macos-abort-forensics.patch",
       "upstream": "nabu-local/explicit-selected-abort-forensics",
       "adapted": false,
-      "sha256": "4de1205afdb1874daaaa0536651e0ab1012a7b5e4f9835f39283dec419a8b22a"
+      "sha256": "270ea06da5e4334583e4b8f2746d389082e180be6049f756f3b17344f1b276ba"
     },
     {
       "path": "platform/nabu/macos26/desktop/patches/20-macos-writable-preboot-state.patch",
@@ -115,7 +115,7 @@
     }
   ],
   "integrated_patch": "platform/nabu/macos26/desktop/integrated.patch",
-  "integrated_sha256": "08c4500a661c6b2816556a2162f3a387b2c097dab4d53f0330686388d8af5f0a",
+  "integrated_sha256": "f437dbf0204b8d295bdc9256a28844c682aacffc446bc1a03c0e9e00cc4f72eb",
   "preimage_sha256": {
     "bsd/kern/bsd_init.c": "c777eb136d9d8de4083225dc3313646d72e6609edd1509d10135f36ab4de058b",
     "bsd/kern/kern_exec.c": "8d1e81f8d32522f178b2743fa1bea25ff9ca26f13f3931167768fdd99ca00305",
@@ -130,7 +130,8 @@
     "bsd/vfs/vfs_vnops.c": "d45d4bf1d4e1e8079e1fb6c7275eb73e211833619c0b3f08ed3d637dc3d3e05a",
     "iokit/bsddev/IOKitBSDInit.cpp": "bff16a3c2396b25dbcbc4ec11840370fd3a14390a567fcf0d77794f4d59e2b40",
     "config/MASTER.arm64.MacOSX": "bab426817e1eb4e93b1207f765e960e6ab2558b688abfb0124ab2a842c0939bb",
-    "bsd/kern/kern_exit.c": "8460fd64fc711e105a8b406c2a82f5290889bcdb8bd801cbcbaeff0fe458efd1"
+    "bsd/kern/kern_exit.c": "8460fd64fc711e105a8b406c2a82f5290889bcdb8bd801cbcbaeff0fe458efd1",
+    "bsd/kern/kern_sig.c": "8ce8c8d74345256e8598fc36b79976406fb165ae88d90721f3d918a3dd317495"
   },
   "adaptations": [
     "Place owner cache/Data preparation after allocation of the actual user scratch page.",
@@ -145,6 +146,7 @@
     "Explicit disable-watchdogd=1 rejects PID1 direct watchdogd execution and the real xpcproxy argv[1]=com.apple.watchdogd route before child creation; all other proxy jobs and crash/panic policies stay intact.",
     "Explicit nabu-boot-proc=1 records selected final Mach-O activations and committed exit status/reason with bounded argv, ancestry and independent recurring rate limits; no mount, exec, exit or crash policy changes. Ignore retired exec shadow procs before looking up or consuming the live uniqueid trace record.",
     "Explicit nabu-boot-proc=1 records selected abort reason input and saved user registers, with at most six copyin-only frame candidates and independent recurring limits; leaves original abort result and signal policy intact.",
-    "Expose the outer macOS Preboot state directory through a validated owner Data firmlink, verify published lookup and exclusive create/write/readback/remove, and propagate failures before launchd. Keep SystemOS /System,/usr binds and authenticated App cryptex readonly."
+    "Expose the outer macOS Preboot state directory through a validated owner Data firmlink, verify published lookup and exclusive create/write/readback/remove, and propagate failures before launchd. Keep SystemOS /System,/usr binds and authenticated App cryptex readonly.",
+    "Expand bounded lifecycle, abort/fatal-signal and stderr diagnostics to cfprefsd, digest-service, eligibilityd, endpointsecurityd (including MAXCOMLEN truncation), opendirectoryd and loginwindow. Verify xpcproxy labels against original 25F71 launchd cache; snapshot referenced real/effective credentials at exec and exit. Observe selected default fatal ABRT/ILL/SEGV/BUS/TRAP delivery after dropping proc lock and before coredump, preserving original signal handling and existing per-target budgets."
   ]
 }

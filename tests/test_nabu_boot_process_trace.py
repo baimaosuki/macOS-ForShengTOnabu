@@ -43,6 +43,14 @@ struct reason {unsigned osr_namespace; uint64_t osr_code, osr_flags;};
 typedef struct reason *os_reason_t;
 struct proc {int pid,ppid; uint64_t uid; const char *p_comm; int p_xstat; os_reason_t p_exit_reason;};
 typedef struct proc *proc_t;
+struct test_cred {unsigned real_uid,effective_uid;};
+typedef struct test_cred *kauth_cred_t;
+static struct test_cred credentials={0,0};
+static int cred_refs;
+static kauth_cred_t kauth_cred_proc_ref(proc_t p){assert(p);cred_refs++;return &credentials;}
+static unsigned kauth_cred_getruid(kauth_cred_t c){return c->real_uid;}
+static unsigned kauth_cred_getuid(kauth_cred_t c){return c->effective_uid;}
+static void kauth_cred_unref(kauth_cred_t *c){assert(*c);*c=0;cred_refs--;}
 static proc_t retired_shadow;
 static bool proc_is_shadow(proc_t p){return p==retired_shadow;}
 struct image_params {const char *ip_startargv,*ip_endargv,*ip_strings,*ip_vp; int ip_argc;};
@@ -111,6 +119,34 @@ int main(void){
  count=nabu_lifecycle_trace_events;p.uid=10001;
  image(&p,"xpcproxy","/usr/libexec/xpcproxy",unrelated,sizeof(unrelated)-1,2);nabu_lifecycle_exit(&p);
  assert(count==nabu_lifecycle_trace_events&&!refs);
+ /* All selected services and original cached proxy labels have independent
+  * normal/failure exits; credentials are refreshed for the actual exit. */
+ const char *names[]={"cfprefsd","digest-service","eligibilityd","endpointsecurity","opendirectoryd","loginwindow"};
+ const char *labels[]={"com.apple.cfprefsd.xpc.agent","com.apple.cfprefsd.xpc.daemon",
+ "com.apple.Kerberos.digest-service","com.apple.eligibilityd",
+ "com.apple.endpointsecurity.endpointsecurityd","com.apple.opendirectoryd","com.apple.loginwindow"};
+ for(unsigned i=0;i<6;i++){
+  assert(nabu_life_kind(names[i])==i+7);
+  p.pid=1100+i;p.uid=11000+i;p.p_exit_reason=0;p.p_xstat=0;
+  credentials.real_uid=501;credentials.effective_uid=501;
+  count=nabu_lifecycle_trace_events;image(&p,names[i],names[i],fsk,sizeof(fsk)-1,1);
+  credentials.effective_uid=0;nabu_lifecycle_exit(&p);
+  assert(nabu_lifecycle_trace_events==count+2&&!cred_refs);
+  p.uid=12000+i;p.p_xstat=SIGABRT;
+  image(&p,names[i],names[i],fsk,sizeof(fsk)-1,1);nabu_lifecycle_exit(&p);
+  assert(nabu_lifecycle_trace_events==count+4&&!cred_refs);
+ }
+ assert(nabu_life_kind("endpointsecurityd")==nabu_life_kind("endpointsecurity"));
+ assert(!nabu_life_kind("endpointsecurity.extra"));
+ for(unsigned i=0;i<7;i++){
+  assert(nabu_life_proxy_kind(labels[i])==i+17);
+  char proxyargs[160];size_t len=strlen(labels[i])+1;
+  memcpy(proxyargs,"xpcproxy",9);memcpy(proxyargs+9,labels[i],len);
+  p.uid=13000+i;p.p_xstat=0;count=nabu_lifecycle_trace_events;
+  image(&p,"xpcproxy","/usr/libexec/xpcproxy",proxyargs,9+len,2);nabu_lifecycle_exit(&p);
+  assert(nabu_lifecycle_trace_events==count+2&&!cred_refs);
+ }
+
  return 0;
 }
 '''
@@ -130,6 +166,10 @@ int main(void){
         self.assertIn('suppressed=17', run.stdout)
         self.assertIn('path=/fallback path_error=5', run.stdout)
         self.assertNotIn('com.apple.logd', run.stdout)
+        self.assertIn('event=exec pid=1100 uid=11000', run.stdout)
+        self.assertIn('real_uid=501 effective_uid=501', run.stdout)
+        self.assertIn('event=exit pid=1100 uid=11000', run.stdout)
+        self.assertIn('real_uid=501 effective_uid=0', run.stdout)
 
 
 if __name__ == '__main__':

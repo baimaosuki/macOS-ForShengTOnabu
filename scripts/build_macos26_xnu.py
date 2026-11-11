@@ -274,7 +274,14 @@ def audit_desktop_source(source: Path) -> dict:
                    '"com.apple.diskarbitrationd"', '"com.apple.security.cryptexd"',
                    '5000000000ULL', 'nabu_life_buckets[NABU_LIFE_KINDS][3]',
                    'b->suppressed++', 'absolutetime_to_nanoseconds(mach_absolute_time()',
-                   'p->p_xstat, p->p_exit_reason', 'nabu_lifecycle_trace_events'):
+                   'p->p_xstat, p->p_exit_reason', 'nabu_lifecycle_trace_events',
+                   'kauth_cred_proc_ref(p)', 'kauth_cred_getruid(cred)',
+                   'kauth_cred_getuid(cred)', 'kauth_cred_unref(&cred)',
+                   'real_uid=%u effective_uid=%u',
+                   '"com.apple.cfprefsd.xpc.agent"', '"com.apple.cfprefsd.xpc.daemon"',
+                   '"com.apple.Kerberos.digest-service"', '"com.apple.eligibilityd"',
+                   '"com.apple.endpointsecurity.endpointsecurityd"',
+                   '"com.apple.opendirectoryd"', '"com.apple.loginwindow"'):
         if needle not in lifecycle:
             raise ValueError('incomplete bounded boot process diagnostics: ' + needle)
     activation = text[text.index('p->p_acflag &= ~AFORK;'):]
@@ -285,7 +292,7 @@ def audit_desktop_source(source: Path) -> dict:
         raise ValueError('boot process exit trace must ignore exec shadows before consuming live records')
     exit_source = (source / 'bsd/kern/kern_exit.c').read_text()
     abort_trace = exit_source[exit_source.index('static LCK_MTX_DECLARE(nabu_abort_trace_lock'):exit_source.index('static int\nabort_with_payload_internal(')]
-    for needle in ('"nabu-boot-proc"', 'enabled != 1', 'nabu_abort_buckets[6]',
+    for needle in ('"nabu-boot-proc"', 'enabled != 1', 'nabu_abort_buckets[12]',
                    'initial < 4', '5000000000ULL', 'nabu_abort_trace_events',
                    'copyinstr(reason_string, text, sizeof(text), &copied)',
                    'get_user_regs(current_thread())', 'is_saved_state64(state)',
@@ -295,6 +302,22 @@ def audit_desktop_source(source: Path) -> dict:
                    'copyin((user_addr_t)frame, pair, sizeof(pair))'):
         if needle not in abort_trace:
             raise ValueError('incomplete bounded abort forensics: ' + needle)
+    selected_names = ('cfprefsd', 'digest-service', 'eligibilityd', 'endpointsecurity',
+                      'endpointsecurityd', 'opendirectoryd', 'loginwindow')
+    stderr = (source / 'bsd/kern/sheng_process_output.h').read_text()
+    for name in selected_names:
+        if any('"' + name + '"' not in helper for helper in (lifecycle, abort_trace, stderr)):
+            raise ValueError('selected boot diagnostics omit service: ' + name)
+    signal_source = (source / 'bsd/kern/kern_sig.c').read_text()
+    fatal = signal_source[signal_source.index('if (sigprop[signum] & SA_CORE) {'):]
+    if not (fatal.index('proc_unlock(p);') < fatal.index('nabu_fatal_signal_trace(p, signum);')
+            < fatal.index('#if CONFIG_COREDUMP')):
+        raise ValueError('fatal signal trace must run unlocked before coredump')
+    for needle in ('p != current_proc()', 'signum != SIGABRT', 'signum != SIGILL',
+                   'signum != SIGSEGV', 'signum != SIGBUS', 'signum != SIGTRAP',
+                   'nabu_abort_observe(p, OS_REASON_SIGNAL'):
+        if needle not in abort_trace:
+            raise ValueError('incomplete selected fatal signal observer: ' + needle)
     abort = exit_source[exit_source.index('static int\nabort_with_payload_internal('):]
     if not (abort.index('abort_should_be_throttled(') < abort.index('nabu_abort_trace(p,')
             < abort.index('exit_reason = build_userspace_exit_reason(')
@@ -305,7 +328,7 @@ def audit_desktop_source(source: Path) -> dict:
         raise ValueError('boot process exit trace must precede proc reference drain')
     stderr = (source / 'bsd/kern/sheng_process_output.h').read_text()
     for needle in ('"boot-filesystems"', '"nabu-boot-proc"',
-                   'nabu_boot_filesystem_output == 1', 'nabu_output_buckets[6]',
+                   'nabu_boot_filesystem_output == 1', 'nabu_output_buckets[12]',
                    'initial < 8', '5000000000ULL', 'suppressed++',
                    '"mount_apfs"', '"fskitd"', '"WindowServer"',
                    '"diskarbitrationd"', '"cryptexd"'):
@@ -648,7 +671,10 @@ def prepare() -> dict:
             os_content_binds_readonly=True, app_volume_readonly=True, hardware_qualified=False)
         record['boot_process_trace'] = dict(default_off=True, boot_argument='nabu-boot-proc=1',
             marker='nabu_lifecycle_trace_events', observational_only=True,
-            targets=['mount', 'mount_apfs', 'fskitd', 'WindowServer', 'diskarbitrationd', 'cryptexd'],
+            targets=['mount', 'mount_apfs', 'fskitd', 'WindowServer', 'diskarbitrationd', 'cryptexd',
+                     'cfprefsd', 'digest-service', 'eligibilityd', 'endpointsecurityd',
+                     'opendirectoryd', 'loginwindow'],
+            credential_fields=['real_uid', 'effective_uid'], credentials_refreshed_at_exec_and_exit=True,
             final_exec_activation=True, tracked_processes=64, argv_bytes=512, argv_count=24,
             first_events_per_bucket=4, recurring_interval_seconds=5,
             separate_exec_success_exit_failure_exit_buckets=True,
@@ -660,7 +686,10 @@ def prepare() -> dict:
             frame_bytes=16, max_frame_distance_from_sp=1 << 20,
             saved_user_registers=['PC', 'LR', 'FP', 'SP'], first_events_per_target=4,
             recurring_interval_seconds=5, original_abort_results_preserved=True,
-            stripped_addresses_are_diagnostic_candidates=True)
+            stripped_addresses_are_diagnostic_candidates=True,
+            default_fatal_signals=['SIGABRT', 'SIGILL', 'SIGSEGV', 'SIGBUS', 'SIGTRAP'],
+            fatal_trace_after_proc_unlock_before_coredump=True,
+            payload_and_fatal_signal_share_per_target_budget=True)
         record['watchdog_launch_policy'] = dict(default_off=True, boot_argument='disable-watchdogd=1',
             job='com.apple.watchdogd', policy='/private/var/db/com.apple.xpc.launchd/disabled.plist',
             migration_marker='/private/var/db/com.apple.xpc.launchd/disabled.migrated',

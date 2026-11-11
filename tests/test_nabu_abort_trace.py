@@ -26,6 +26,8 @@ class AbortTrace(unittest.TestCase):
 #include <string.h>
 #include <errno.h>
 #include <stdlib.h>
+#include <signal.h>
+#define OS_REASON_SIGNAL 2
 #define LCK_MTX_DECLARE(n,g) int n
 #define lck_mtx_lock(p) ((void)(p))
 #define lck_mtx_unlock(p) ((void)(p))
@@ -34,6 +36,8 @@ class AbortTrace(unittest.TestCase):
 typedef uint64_t user_addr_t;
 struct proc {const char *p_comm;int pid;uint64_t uid;};
 typedef struct proc *proc_t;
+static proc_t active_proc;
+static proc_t current_proc(void){return active_proc;}
 typedef struct {uint64_t pc,lr,fp,sp;bool is64;} arm_saved_state_t;
 static arm_saved_state_t saved={0x180000100,0x180001234,0x1000,0x1000,true};
 static int present,enabled,copy_calls,copy_error,no_state,reason_fault;
@@ -89,6 +93,21 @@ int main(void){
  unsigned seen=nabu_abort_trace_events;now+=6000000000ULL;
  nabu_abort_trace(&p,18,2,0,0,0,0);assert(nabu_abort_trace_events==seen+1);
  assert(saved.pc==before.pc&&saved.lr==before.lr&&saved.sp==before.sp);
+ /* Ordinary abort()/pthread_kill and synchronous fatal signals share the
+  * bounded read-only stack observer only for the current selected process. */
+ const char *names[]={"cfprefsd","digest-service","eligibilityd","endpointsecurity","opendirectoryd","loginwindow"};
+ int signals[]={SIGABRT,SIGILL,SIGSEGV,SIGBUS,SIGTRAP,SIGABRT};
+ saved=before;
+ for(unsigned i=0;i<6;i++){
+  p.p_comm=names[i];active_proc=&p;unsigned count=nabu_abort_trace_events;
+  nabu_fatal_signal_trace(&p,SIGTERM);assert(nabu_abort_trace_events==count);
+  active_proc=0;nabu_fatal_signal_trace(&p,signals[i]);assert(nabu_abort_trace_events==count);
+  active_proc=&p;nabu_fatal_signal_trace(&p,signals[i]);assert(nabu_abort_trace_events==count+1);
+ }
+ assert(nabu_abort_trace_kind("endpointsecurityd")==nabu_abort_trace_kind("endpointsecurity"));
+ assert(nabu_abort_trace_kind("endpointsecurity.extra")<0);
+ assert(!memcmp(&saved,&before,sizeof(saved)));
+
  return 0;
 }
 '''
@@ -110,9 +129,23 @@ int main(void){
         self.assertNotIn('frame=6', run.stdout)
         self.assertIn('user_state64=0', run.stdout)
         self.assertIn('suppressed=5', run.stdout)
+        for name in ('cfprefsd', 'digest-service', 'eligibilityd', 'endpointsecurity', 'opendirectoryd', 'loginwindow'):
+            self.assertIn('name=' + name + ' source=fatal-signal', run.stdout)
+        self.assertIn('source=abort-payload signal=0', run.stdout)
         # This patch adds only the observer call to the existing abort body.
         self.assertNotIn('return ', source[source.index('nabu_abort_trace(p, reason_namespace'):])
         self.assertNotIn('set_saved_state', helper)
+        # The real fatal delivery hook runs unlocked before core generation,
+        # keeping the existing reason, coredump, signal and exit flow in place.
+        fatal = source[source.index('nabu_fatal_signal_trace(proc_t p, int signum)'):]
+        self.assertIn('p != current_proc()', fatal)
+        self.assertIn('OS_REASON_SIGNAL', fatal)
+        signal_patch = patch[patch.index('--- a/bsd/kern/kern_sig.c'):]
+        self.assertLess(signal_patch.index('proc_unlock(p);'),
+                        signal_patch.index('nabu_fatal_signal_trace(p, signum);'))
+        self.assertLess(signal_patch.index('nabu_fatal_signal_trace(p, signum);'),
+                        signal_patch.index('#if CONFIG_COREDUMP'))
+
 
 
 if __name__ == '__main__': unittest.main()

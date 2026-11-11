@@ -1,7 +1,7 @@
 Explicit opt-in bounded boot process exec/exit diagnostics; no behavior overrides.
 --- a/bsd/kern/kern_exec.c
 +++ b/bsd/kern/kern_exec.c
-@@ -945,6 +945,209 @@
+@@ -945,6 +945,233 @@
  		p->p_crash_behavior |= POSIX_SPAWN_PANIC_ON_SPAWN_FAIL;
  	}
  }
@@ -12,11 +12,12 @@ Explicit opt-in bounded boot process exec/exit diagnostics; no behavior override
 +#include <sys/wait.h>
 +void nabu_lifecycle_exit(proc_t);
 +#define NABU_LIFE_SLOTS 64
-+#define NABU_LIFE_KINDS 12
++#define NABU_LIFE_KINDS 23
 +struct nabu_life_record {
 +	uint64_t uniqueid, sequence;
 +	pid_t pid, ppid, gpid;
 +	unsigned int kind;
++	uid_t real_uid, effective_uid;
 +	int argc, argv_truncated, path_error;
 +	char parent[32], grandparent[32], path[MAXPATHLEN], args[512];
 +};
@@ -38,18 +39,27 @@ Explicit opt-in bounded boot process exec/exit diagnostics; no behavior override
 +nabu_life_kind(const char *name)
 +{
 +	static const char *const names[] = { "mount", "mount_apfs", "fskitd", "WindowServer",
-+		"diskarbitrationd", "cryptexd" };
-+	for (unsigned int i = 0; i < 6; i++) if (!strcmp(name, names[i])) return i + 1;
++		"diskarbitrationd", "cryptexd", "cfprefsd", "digest-service", "eligibilityd", "endpointsecurity",
++		"opendirectoryd", "loginwindow" };
++	for (unsigned int i = 0; i < sizeof(names) / sizeof(names[0]); i++) if (!strcmp(name, names[i])) return i + 1;
++	if (!strcmp(name, "endpointsecurityd")) return 10;
 +	return 0;
 +}
 +
 +static unsigned int
 +nabu_life_proxy_kind(const char *label)
 +{
-+	if (!strcmp(label, "com.apple.filesystems.fskitd")) return 9;
-+	if (!strcmp(label, "com.apple.WindowServer")) return 10;
-+	if (!strcmp(label, "com.apple.diskarbitrationd")) return 11;
-+	if (!strcmp(label, "com.apple.security.cryptexd")) return 12;
++	if (!strcmp(label, "com.apple.filesystems.fskitd")) return 13;
++	if (!strcmp(label, "com.apple.WindowServer")) return 14;
++	if (!strcmp(label, "com.apple.diskarbitrationd")) return 15;
++	if (!strcmp(label, "com.apple.security.cryptexd")) return 16;
++	if (!strcmp(label, "com.apple.cfprefsd.xpc.agent")) return 17;
++	if (!strcmp(label, "com.apple.cfprefsd.xpc.daemon")) return 18;
++	if (!strcmp(label, "com.apple.Kerberos.digest-service")) return 19;
++	if (!strcmp(label, "com.apple.eligibilityd")) return 20;
++	if (!strcmp(label, "com.apple.endpointsecurity.endpointsecurityd")) return 21;
++	if (!strcmp(label, "com.apple.opendirectoryd")) return 22;
++	if (!strcmp(label, "com.apple.loginwindow")) return 23;
 +	return 0;
 +}
 +
@@ -105,6 +115,16 @@ Explicit opt-in bounded boot process exec/exit diagnostics; no behavior override
 +	return false;
 +}
 +
++/* Snapshot referenced credentials outside trace/proc locks at each event. */
++static void
++nabu_life_credentials(proc_t p, struct nabu_life_record *r)
++{
++	kauth_cred_t cred = kauth_cred_proc_ref(p);
++	r->real_uid = kauth_cred_getruid(cred);
++	r->effective_uid = kauth_cred_getuid(cred);
++	kauth_cred_unref(&cred);
++}
++
 +static void
 +nabu_life_emit(struct nabu_life_record *r, bool exiting, int status, os_reason_t reason)
 +{
@@ -117,9 +137,9 @@ Explicit opt-in bounded boot process exec/exit diagnostics; no behavior override
 +	lck_mtx_unlock(&nabu_life_lock);
 +	if (!emit) return;
 +	os_atomic_inc(&nabu_lifecycle_trace_events, relaxed);
-+	printf("NABU-PROC t_ns=%llu event=%s pid=%d uid=%llu exec=%llu ppid=%d parent=%s gpid=%d grandparent=%s suppressed=%llu evicted=%llu\n",
++	printf("NABU-PROC t_ns=%llu event=%s pid=%d uid=%llu exec=%llu real_uid=%u effective_uid=%u ppid=%d parent=%s gpid=%d grandparent=%s suppressed=%llu evicted=%llu\n",
 +	    ns, exiting ? "exit" : "exec", r->pid, r->uniqueid, r->sequence,
-+	    r->ppid, r->parent, r->gpid, r->grandparent, skipped, evicted);
++	    r->real_uid, r->effective_uid, r->ppid, r->parent, r->gpid, r->grandparent, skipped, evicted);
 +	printf("NABU-PROC uid=%llu exec=%llu path=%s path_error=%d argc=%d argv_truncated=%d argv=%s\n",
 +	    r->uniqueid, r->sequence, r->path, r->path_error, r->argc, r->argv_truncated, r->args);
 +	if (exiting) {
@@ -152,6 +172,7 @@ Explicit opt-in bounded boot process exec/exit diagnostics; no behavior override
 +	struct nabu_life_record *r = kalloc_type(struct nabu_life_record, Z_WAITOK | Z_ZERO);
 +	if (!r) return;
 +	r->uniqueid = uid; r->pid = proc_getpid(p); r->kind = kind;
++	nabu_life_credentials(p, r);
 +	r->ppid = proc_ppid(p);
 +	proc_t parent = proc_find(r->ppid);
 +	if (parent != PROC_NULL) {
@@ -204,14 +225,17 @@ Explicit opt-in bounded boot process exec/exit diagnostics; no behavior override
 +		}
 +	}
 +	lck_mtx_unlock(&nabu_life_lock);
-+	if (r->uniqueid) nabu_life_emit(r, true, p->p_xstat, p->p_exit_reason);
++	if (r->uniqueid) {
++		nabu_life_credentials(p, r);
++		nabu_life_emit(r, true, p->p_xstat, p->p_exit_reason);
++	}
 +	kfree_type(struct nabu_life_record, r);
 +}
 +#endif
  
  void
  set_proc_name(struct image_params *imgp, proc_t p)
-@@ -2747,6 +2950,9 @@
+@@ -2747,6 +2974,9 @@
  	p->p_acflag &= ~AFORK;
  
  	set_proc_name(imgp, p);

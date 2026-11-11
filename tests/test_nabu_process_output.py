@@ -69,6 +69,15 @@ int main(void){
  strcpy(p.p_comm,"other");
  sheng_process_output(&p,2,(user_addr_t)s,strlen(s),1,"other");assert(lines==12);
  assert(nabu_output_kind("mount.extra")<0);
+ const char *names[]={"cfprefsd","digest-service","eligibilityd","endpointsecurity","opendirectoryd","loginwindow"};
+ for(unsigned i=0;i<6;i++){
+  strcpy(p.p_comm,names[i]);unsigned before=lines;
+  sheng_process_output(&p,2,(user_addr_t)s,strlen(s),1,"boot-filesystems");
+  assert(lines==before+1);
+ }
+ assert(nabu_output_kind("endpointsecurityd")==nabu_output_kind("endpointsecurity"));
+ assert(nabu_output_kind("endpointsecurity.extra")<0);
+
  return 0;
 }
 '''

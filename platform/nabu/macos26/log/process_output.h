@@ -12,14 +12,16 @@ static LCK_MTX_DECLARE(nabu_output_lock, &nabu_output_group);
 static struct {
     uint64_t last_ns, suppressed;
     unsigned initial;
-} nabu_output_buckets[6];
+} nabu_output_buckets[12];
 
 static int nabu_output_kind(const char *name)
 {
     const char *const names[] = {"mount", "mount_apfs", "fskitd", "WindowServer",
-                               "diskarbitrationd", "cryptexd"};
+                               "diskarbitrationd", "cryptexd", "cfprefsd", "digest-service",
+                               "eligibilityd", "endpointsecurity", "opendirectoryd", "loginwindow"};
     for (unsigned i = 0; i < sizeof(names) / sizeof(names[0]); i++)
         if (!strncmp(name, names[i], MAXCOMLEN + 1)) return (int)i;
+    if (!strcmp(name, "endpointsecurityd")) return 9;
     return -1;
 }
 
