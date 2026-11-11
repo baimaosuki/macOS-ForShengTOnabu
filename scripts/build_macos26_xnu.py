@@ -236,6 +236,8 @@ def audit_nabu_arm64e_source(source: Path) -> dict:
         'osfmk/arm64/nabu_v82_emul.c': ('if (nabu_nopac_opcode(insn))', 'if (!nabu_nopac_step('),
         'osfmk/arm64/nabu_nopac.h': ('nabu_nopac_authenticate(',
             'if (user && data) plain |= value & UINT64_C(0xff00000000000000);'),
+        'osfmk/arm64/nabu_el0_sysreg.h': ('0xd53b42a0U', '0xd51b42a0U',
+            '0xd503405fU', '0xd50330ffU', 'if (!barrier) return false;', 'barrier();'),
     }
     for name, needles in required.items():
         text = (source / name).read_text()
@@ -246,12 +248,18 @@ def audit_nabu_arm64e_source(source: Path) -> dict:
         raise ValueError('NABU requires both v3 and v5 authenticated cache pointer stores')
     arm64_makefile = (source / 'osfmk/arm64/Makefile').read_text()
     exported = arm64_makefile.split('EXPORT_MD_LIST =', 1)[1].split('\n\n', 1)[0]
-    if any(name not in exported.split() for name in ('nabu_arm64e_compat.h', 'nabu_nopac.h')):
+    if any(name not in exported.split() for name in ('nabu_arm64e_compat.h', 'nabu_nopac.h', 'nabu_el0_sysreg.h')):
         raise ValueError('NABU arm64e headers must be exported for BSD component imports')
+    emulator = (source / 'osfmk/arm64/nabu_v82_emul.c').read_text()
+    if any(needle not in emulator for needle in ('if (from_user) {',
+           'nabu_el0_sysreg_step(insn, &value, &write, nabu_v82_speculation_barrier)',
+           '__asm__ volatile("dsb sy\\n\\tisb" ::: "memory")')):
+        raise ValueError('NABU EL0 DIT/SB compatibility must use the real speculation barrier')
     return dict(software_abi=True, host_cpu_subtype_unchanged=True,
         accepted_arm64e_abi_version=0, keys_off_apple_parameter=True,
         shared_cache_v3_v5_plain_rebases=True, dyld_pager_arm64e_decoders=True,
         source_pac_emulator=True, data_auth_preserves_top_byte=True,
+        el0_dit_effectively_disabled=True, el0_sb_dsb_sy_isb=True,
         binary_or_signature_rewriting=False, device_qualified=False)
 
 

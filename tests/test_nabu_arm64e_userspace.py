@@ -8,6 +8,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 PATCH = ROOT / 'platform/nabu/macos26/patches/zzz-nabu-arm64e-userspace.patch'
+SYSREG_PATCH = ROOT / 'platform/nabu/macos26/patches/zzzz-nabu-el0-dit-sb.patch'
 
 
 def function(text, name):
@@ -39,6 +40,7 @@ class Arm64eUserspace(unittest.TestCase):
                 section = patch.split('--- a/osfmk/arm64/nabu_v82_emul.c\n')[1].split('--- a/osfmk/arm64/nabu_v82_emul.h\n')[0]
                 dest.write_text('\n'.join(s[1:] for s in section.splitlines() if s.startswith('+') and not s.startswith('+++')) + '\n')
         subprocess.run(['git', 'apply', '--unsafe-paths', str(PATCH)], cwd=cls.tree, check=True, capture_output=True)
+        subprocess.run(['git', 'apply', '--unsafe-paths', str(SYSREG_PATCH)], cwd=cls.tree, check=True, capture_output=True)
         # BSD imports osfmk's EXPORT_HDRS; it has no -I SRCROOT/osfmk.
         # Evaluate the actual export list with make and stage only its files.
         makefile = (cls.tree / 'osfmk/arm64/Makefile').read_text()
@@ -373,6 +375,7 @@ static uintptr_t pmap_sign_user_ptr(void *address,ptrauth_key key,uint64_t div,u
 #include <string.h>
 #include <assert.h>
 #include "arm64/nabu_nopac.h"
+#include "arm64/nabu_el0_sysreg.h"
 #define __improbable(x) (x)
 #define printf(...) ((void)0)
 #define ESR_EC(x) (x)
@@ -396,6 +399,8 @@ typedef struct {arm_saved_state_t ss;struct {arm_neon_saved_state64_t ns_64;} ns
 static bool nabu_v82_emul_reported_emulated,nabu_v82_emul_reported_unsupported;
 static uint32_t instruction;
 static bool fail_load;
+static unsigned barriers;
+static void nabu_v82_speculation_barrier(void){barriers++;}
 static int copyin(uint64_t address,void *target,unsigned long size) {
  if(size==4){assert(address==0x1000);memcpy(target,&instruction,4);return 0;}
  if(fail_load)return 1;assert(address==0x2000);uint64_t value=0xabcdabcd01234567ULL;memcpy(target,&value,8);return 0;
@@ -421,11 +426,87 @@ int main(void) {
    before.ss.x[16]=0x80000007d4c00ce4ULL;before.ss.pc=0x1004;
    assert(!memcmp(&c,&before,sizeof c));
   }
+  c.ss.pc=0x1000;c.ss.x[8]=0x12345678;before=c;instruction=0xd53b42a8U;
+  assert(nabu_v82_emul_sync_exception(&c,0)==!mode);
+  if(!mode){before.ss.x[8]=0;before.ss.pc+=4;}
+  assert(!memcmp(&c,&before,sizeof c));
+  c.ss.pc=0x1000;before=c;instruction=0xd503415fU;
+  assert(nabu_v82_emul_sync_exception(&c,0)==!mode);
+  if(!mode)before.ss.pc+=4;
+  assert(!memcmp(&c,&before,sizeof c));
+  c.ss.pc=0x1000;before=c;instruction=0xd50330ffU;
+  unsigned old_barriers=barriers;
+  assert(nabu_v82_emul_sync_exception(&c,0)==!mode);
+  if(!mode)before.ss.pc+=4;
+  assert(barriers==old_barriers+!mode&&!memcmp(&c,&before,sizeof c));
+  if(!mode) for(unsigned rt=0;rt<32;rt++){
+   c.ss.pc=0x1000;for(unsigned j=0;j<29;j++)c.ss.x[j]=j+1;
+   c.ss.fp=0x29;c.ss.lr=0x30;before=c;instruction=0xd53b42a0U|rt;
+   assert(nabu_v82_emul_sync_exception(&c,0));
+   if(rt<29)before.ss.x[rt]=0;else if(rt==29)before.ss.fp=0;else if(rt==30)before.ss.lr=0;
+   before.ss.pc+=4;assert(!memcmp(&c,&before,sizeof c));
+  }
  }
  return 0;
 }
 '''
         self.compile_run('adapter',common+core+helpers+adapter+body)
+
+    def test_actual_dit_sysreg_and_sb_decoder_is_narrow_and_reports_hardware_state(self):
+        self.compile_run('el0_sysreg', r'''
+#include <assert.h>
+#include "arm64/nabu_el0_sysreg.h"
+static unsigned barriers;
+static void barrier(void){barriers++;}
+int main(void){
+ uint64_t value;bool write;
+ for(unsigned rt=0;rt<32;rt++){
+  value=0x1234567890abcdefULL;write=false;
+  assert(nabu_el0_sysreg_step(0xd53b42a0U|rt,&value,&write,barrier)&&write&&value==0);
+  value=0xffffffffffffffffULL;write=true;
+  assert(nabu_el0_sysreg_step(0xd51b42a0U|rt,&value,&write,barrier)&&!write&&value==0xffffffffffffffffULL);
+ }
+ /* ARM MSR-immediate accepts imm4; only operand[0] sets DIT. Other
+  * PSTATE fields retain their own decode and must not be swallowed. */
+ for(unsigned imm=0;imm<16;imm++){
+  value=77;write=true;
+  assert(nabu_el0_sysreg_step(0xd503405fU|(imm<<8),&value,&write,barrier)&&!write&&value==77);
+ }
+ const uint32_t denied[]={0xd503201fU,0xd50320ffU,0xd503319fU,0xd503409fU,
+  0xd503403fU,0xd503413fU,0xd53b4208U,0xd53b4288U,0xd53bd048U,0xd51b4288U,
+  0xd50330dfU,0xd50330feU};
+ for(unsigned i=0;i<sizeof(denied)/sizeof(denied[0]);i++){
+  value=77;write=true;
+  assert(!nabu_el0_sysreg_step(denied[i],&value,&write,barrier)&&value==77&&write);
+ }
+ value=77;write=true;
+ assert(!nabu_el0_sysreg_step(0xd50330ffU,&value,&write,0)&&value==77&&write&&!barriers);
+ assert(nabu_el0_sysreg_step(0xd50330ffU,&value,&write,barrier)&&!write&&value==77&&barriers==1);
+ /* Actual dyld leaf: MRS x8,DIT; UBFX x0,x8,#24,#1; MSR DIT,#1;
+  * SB; RET. Its token remains false because no DIT hardware is enabled. */
+ value=~0ULL;write=false;
+ assert(nabu_el0_sysreg_step(0xd53b42a8U,&value,&write,barrier));
+ uint64_t token=(value>>24)&1;
+ assert(nabu_el0_sysreg_step(0xd503415fU,&value,&write,barrier));
+ assert(nabu_el0_sysreg_step(0xd50330ffU,&value,&write,barrier));
+ assert(!token&&barriers==2);
+ if(!token)assert(nabu_el0_sysreg_step(0xd503405fU,&value,&write,barrier));
+ assert(nabu_el0_sysreg_step(0xd53b42a8U,&value,&write,barrier)&&write&&!value);
+ return 0;
+}
+''')
+        source = (self.tree / 'osfmk/arm64/nabu_v82_emul.c').read_text()
+        self.assertIn('__asm__ volatile("dsb sy\\n\\tisb" ::: "memory")', source)
+        barrier_source = self.tree / 'barrier.c'
+        barrier_object = self.tree / 'barrier.o'
+        barrier_source.write_text(function(source, 'nabu_v82_speculation_barrier').replace('static void', 'void'))
+        compiler = next((shutil.which(name) for name in ('clang', 'clang-19', 'clang-18', 'clang-17')
+                         if shutil.which(name)), None)
+        result = subprocess.run([compiler, '-target', 'aarch64-none-elf', '-O2', '-c',
+                                 str(barrier_source), '-o', str(barrier_object)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        # Actual ARMv8.2 object contains DSB SY; ISB; RET, not an SB or a NOP.
+        self.assertIn(bytes.fromhex('9f3f03d5df3f03d5c0035fd6'), barrier_object.read_bytes())
 
 
 if __name__=='__main__':unittest.main()
