@@ -6,6 +6,7 @@
     "com.apple.driver.AppleMobileFileIntegrity",
     "com.apple.filesystems.apfs",
     "com.apple.security.sandbox",
+    "com.apple.security.quarantine",
     "com.apple.kec.pthread",
     "com.apple.AppleFSCompression.AppleFSCompressionTypeZlib",
     "com.apple.filesystems.lifs"
@@ -16,6 +17,6 @@
       "IOUserClientClass": "AppleLIFSUserClient"
     }
   },
-  "purpose": "Original 25F71 FSKit calls IOServiceMatching for com_apple_filesystems_lifs; missing service makes fskitd initialization fail with exit 1.",
+  "purpose": "Original 25F71 FSKit calls IOServiceMatching for com_apple_filesystems_lifs; missing service makes fskitd initialization fail with exit 1. Original 25F71 cfprefsd requires the Quarantine MAC policy at startup; absent policy returns ENOPOLICY=103 and libquarantine maps it to -2.",
   "hardware_validated": false
 }
