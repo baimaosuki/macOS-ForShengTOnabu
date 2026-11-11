@@ -237,11 +237,15 @@ def audit_desktop_source(source: Path) -> dict:
     for needle in ('proc_getpid(parent) != 1', '"disable-watchdogd"', 'enabled != 1',
                    '"/usr/libexec/watchdogd"', 'copyinstr(path, name, sizeof(name), &copied)',
                    'copied != sizeof(target)', 'memcmp(name, target, sizeof(target))',
-                   'native_owner_watchdog_spawn_blocked'):
+                   'native_owner_watchdog_spawn_blocked', '"/usr/libexec/xpcproxy"',
+                   '"com.apple.watchdogd"', 'IS_64BIT_PROCESS(parent)',
+                   'copyin(argv + sizeof(user64_addr_t), &job_address, sizeof(job_address))',
+                   'copied != sizeof(label)', 'memcmp(job, label, sizeof(label))',
+                   'native_owner_watchdog_proxy_blocked'):
         if needle not in spawn_gate:
             raise ValueError('incomplete explicit watchdog spawn gate: ' + needle)
     spawn = text[text.index('posix_spawn(proc_t ap, struct posix_spawn_args *uap, int32_t *retval)'):]
-    if not (spawn.index('if (native_owner_watchdog_spawn_denied(ap, uap->path)) return ENOENT;')
+    if not (spawn.index('if (native_owner_watchdog_spawn_denied(ap, uap->path, uap->argv)) return ENOENT;')
             < spawn.index('__spawn_data = kalloc_type') < spawn.index('p->p_crash_behavior = crash_behavior;')):
         raise ValueError('watchdog spawn gate must return before allocation/child crash policy')
     if 'native_owner_publish_boot_manifest(root_device, XNU_OWNER_OS_VOLUME_UUID,' not in text:
@@ -259,7 +263,8 @@ def audit_desktop_source(source: Path) -> dict:
                 checked_apfs_boot_shim=True, watchdog_policy_explicit_opt_in=True,
                 watchdog_policy_before_launchd=True, watchdog_policy_exclusive_create=True,
                 watchdog_policy_root_owned_readback=True, watchdog_policy_boolean_true=True,
-                watchdog_spawn_gate_before_child=True, watchdog_spawn_gate_pid1_exact_path=True)
+                watchdog_spawn_gate_before_child=True, watchdog_spawn_gate_pid1_exact_path=True,
+                watchdog_spawn_gate_xpcproxy_exact_label=True)
 
 
 def audit_nabu_arm64e_source(source: Path) -> dict:
@@ -561,6 +566,8 @@ def prepare() -> dict:
             crash_and_panic_policy_modified=False, hardware_qualified=False)
         record['watchdog_launch_policy']['spawn_gate'] = dict(marker='native_owner_watchdog_spawn_blocked',
             parent_pid=1, executable='/usr/libexec/watchdogd', errno='ENOENT',
+            proxy='/usr/libexec/xpcproxy', proxy_argument_index=1,
+            proxy_label='com.apple.watchdogd', proxy_marker='native_owner_watchdog_proxy_blocked',
             before_child_creation=True, policy_kind='explicit bring-up bypass',
             launchd_job_remains_imported=True, retry_possible=True)
     save(record)

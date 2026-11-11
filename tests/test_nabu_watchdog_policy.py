@@ -33,8 +33,11 @@ class WatchdogPolicy(unittest.TestCase):
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
-typedef int proc_t; typedef uintptr_t user_addr_t;
-static int enabled, present, copy_error, copies, queries;
+typedef int proc_t; typedef uintptr_t user_addr_t; typedef uint64_t user64_addr_t;
+static int enabled, present, copy_error, pointer_error, copies, queries, is64=1;
+#define IS_64BIT_PROCESS(p) (is64)
+#define os_atomic_inc(p,order) ((void)__atomic_fetch_add((p),1,__ATOMIC_RELAXED))
+static int copyin(user_addr_t a,void *b,size_t len){if(pointer_error)return pointer_error;memcpy(b,(const void*)a,len);return 0;}
 #define relaxed 0
 #define os_atomic_inc_orig(p,order) __atomic_fetch_add((p),1,__ATOMIC_RELAXED)
 static int proc_getpid(proc_t p){return p;}
@@ -51,19 +54,34 @@ static int copyinstr(user_addr_t a,char *b,size_t len,size_t *copied){
 int main(void){
  const char *target="/usr/libexec/watchdogd";
  present=1;enabled=1;
- assert(!native_owner_watchdog_spawn_denied(2,(user_addr_t)target)&&!queries&&!copies);
- present=0;assert(!native_owner_watchdog_spawn_denied(1,(user_addr_t)target)&&!copies);
+ assert(!native_owner_watchdog_spawn_denied(2,(user_addr_t)target,0)&&!queries&&!copies);
+ present=0;assert(!native_owner_watchdog_spawn_denied(1,(user_addr_t)target,0)&&!copies);
  present=1;for(enabled=0;enabled<4;enabled++)if(enabled!=1)
-  assert(!native_owner_watchdog_spawn_denied(1,(user_addr_t)target)&&!copies);
+  assert(!native_owner_watchdog_spawn_denied(1,(user_addr_t)target,0)&&!copies);
  enabled=1;
  const char *others[]={"/sbin/launchd","/usr/libexec/logd","/usr/libexec/watchdog", "/usr/libexec/watchdogd.extra","watchdogd","/other/watchdogd",""};
  for(unsigned i=0;i<sizeof(others)/sizeof(others[0]);i++)
-  assert(!native_owner_watchdog_spawn_denied(1,(user_addr_t)others[i]));
- copy_error=EFAULT;assert(!native_owner_watchdog_spawn_denied(1,(user_addr_t)target));
- copy_error=ENAMETOOLONG;assert(!native_owner_watchdog_spawn_denied(1,(user_addr_t)target));
- copy_error=0;assert(native_owner_watchdog_spawn_denied(1,(user_addr_t)target));
- assert(native_owner_watchdog_spawn_denied(1,(user_addr_t)target));
+  assert(!native_owner_watchdog_spawn_denied(1,(user_addr_t)others[i],0));
+ copy_error=EFAULT;assert(!native_owner_watchdog_spawn_denied(1,(user_addr_t)target,0));
+ copy_error=ENAMETOOLONG;assert(!native_owner_watchdog_spawn_denied(1,(user_addr_t)target,0));
+ copy_error=0;assert(native_owner_watchdog_spawn_denied(1,(user_addr_t)target,0));
+ assert(native_owner_watchdog_spawn_denied(1,(user_addr_t)target,0));
  assert(native_owner_watchdog_spawn_blocked==2);
+ const char *proxy="/usr/libexec/xpcproxy";user64_addr_t argv[3]={(uintptr_t)"xpcproxy",(uintptr_t)"com.apple.watchdogd",0};
+ assert(native_owner_watchdog_spawn_denied(1,(user_addr_t)proxy,(user_addr_t)argv));
+ assert(native_owner_watchdog_spawn_blocked==3&&native_owner_watchdog_proxy_blocked==1);
+ const char *labels[]={"com.apple.logd","com.apple.watchdog","com.apple.watchdogd.extra","watchdogd",""};
+ for(unsigned i=0;i<sizeof(labels)/sizeof(labels[0]);i++){
+  argv[1]=(uintptr_t)labels[i];assert(!native_owner_watchdog_spawn_denied(1,(user_addr_t)proxy,(user_addr_t)argv));
+ }
+ argv[1]=(uintptr_t)"com.apple.watchdogd";
+ assert(!native_owner_watchdog_spawn_denied(2,(user_addr_t)proxy,(user_addr_t)argv));
+ is64=0;assert(!native_owner_watchdog_spawn_denied(1,(user_addr_t)proxy,(user_addr_t)argv));is64=1;
+ pointer_error=EFAULT;assert(!native_owner_watchdog_spawn_denied(1,(user_addr_t)proxy,(user_addr_t)argv));pointer_error=0;
+ assert(!native_owner_watchdog_spawn_denied(1,(user_addr_t)proxy,0));
+ assert(!native_owner_watchdog_spawn_denied(1,(user_addr_t)proxy,UINT64_MAX));
+ argv[1]=0;assert(!native_owner_watchdog_spawn_denied(1,(user_addr_t)proxy,(user_addr_t)argv));
+ assert(native_owner_watchdog_spawn_blocked==3&&native_owner_watchdog_proxy_blocked==1);
  return 0;
 }
 '''
@@ -76,7 +94,7 @@ int main(void){
             run = subprocess.run([binary], capture_output=True, text=True)
             self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
         patch = (ROOT / 'platform/nabu/macos26/desktop/patches/17-macos-watchdog-spawn-gate.patch').read_text()
-        self.assertIn('if (native_owner_watchdog_spawn_denied(ap, uap->path)) return ENOENT;', patch)
+        self.assertIn('if (native_owner_watchdog_spawn_denied(ap, uap->path, uap->argv)) return ENOENT;', patch)
         self.assertNotIn('execve(', patch)
         self.assertNotIn('p_crash_behavior =', patch)
 

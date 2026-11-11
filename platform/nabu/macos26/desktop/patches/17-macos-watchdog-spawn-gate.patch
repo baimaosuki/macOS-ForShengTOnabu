@@ -1,32 +1,48 @@
-Explicit PID1-only watchdogd spawn bypass for unavailable IOWatchdog.
-Returns ENOENT before any child process or crash behavior is installed.
+Explicit PID1-only watchdogd direct/xpcproxy spawn bypass.
+Matches xpcproxy argv[1] label before any child or crash behavior exists.
 --- a/bsd/kern/kern_exec.c
 +++ b/bsd/kern/kern_exec.c
-@@ -4342,9 +4342,38 @@
+@@ -4342,9 +4342,54 @@
   *		Handle posix_spawnattr_t
   *		Handle posix_spawn_file_actions_t
   */
 +#if defined(NABU) && NABU && defined(XNU_OWNER_DATA_MOUNT) && XNU_OWNER_DATA_MOUNT
-+/* Explicit bring-up gate for the unavailable IOWatchdog backend. The launchd
-+ * override is advisory; reject this one PID1 spawn before allocating a child.
-+ * Keep ordinary spawn errors and every process crash/panic policy intact. */
++/* launchd normally spawns xpcproxy with argv[1] naming the job. Match that
++ * exact launch route before creating a child; keep direct execution covered.
++ * This explicit bring-up bypass leaves all crash/panic policies intact. */
 +volatile unsigned int native_owner_watchdog_spawn_blocked;
++volatile unsigned int native_owner_watchdog_proxy_blocked;
 +static bool
-+native_owner_watchdog_spawn_denied(proc_t parent, user_addr_t path)
++native_owner_watchdog_spawn_denied(proc_t parent, user_addr_t path, user_addr_t argv)
 +{
 +	static const char target[] = "/usr/libexec/watchdogd";
-+	char name[sizeof(target)];
++	static const char proxy[] = "/usr/libexec/xpcproxy";
++	static const char label[] = "com.apple.watchdogd";
++	char name[sizeof(target)], job[sizeof(label)];
 +	size_t copied = 0;
 +	uint32_t enabled = 0;
++	bool via_proxy = false;
 +	if (proc_getpid(parent) != 1 ||
 +	    !PE_parse_boot_argn("disable-watchdogd", &enabled, sizeof(enabled)) || enabled != 1)
 +		return false;
-+	/* Preserve the original syscall's error handling on invalid/long paths. */
-+	if (copyinstr(path, name, sizeof(name), &copied) || copied != sizeof(target) ||
-+	    memcmp(name, target, sizeof(target))) return false;
++	/* Invalid user memory keeps the original syscall's error handling. */
++	if (copyinstr(path, name, sizeof(name), &copied)) return false;
++	if (copied != sizeof(target) || memcmp(name, target, sizeof(target))) {
++		user64_addr_t job_address = 0;
++		if (copied != sizeof(proxy) || memcmp(name, proxy, sizeof(proxy)) ||
++		    !IS_64BIT_PROCESS(parent) || !argv || argv > UINT64_MAX - sizeof(user64_addr_t) ||
++		    copyin(argv + sizeof(user64_addr_t), &job_address, sizeof(job_address)) || !job_address)
++			return false;
++		copied = 0;
++		if (copyinstr(job_address, job, sizeof(job), &copied) || copied != sizeof(label) ||
++		    memcmp(job, label, sizeof(label))) return false;
++		via_proxy = true;
++	}
++	if (via_proxy) os_atomic_inc(&native_owner_watchdog_proxy_blocked, relaxed);
 +	unsigned int blocked = os_atomic_inc_orig(&native_owner_watchdog_spawn_blocked, relaxed) + 1;
 +	if (blocked == 1) {
-+		printf("owner policy: blocked PID1 watchdogd spawn before child creation (ENOENT)\n");
++		printf("owner policy: blocked PID1 watchdogd spawn %s before child creation (ENOENT)\n",
++		    via_proxy ? "via xpcproxy" : "directly");
 +	}
 +	return true;
 +}
@@ -36,7 +52,7 @@ Returns ENOENT before any child process or crash behavior is installed.
  posix_spawn(proc_t ap, struct posix_spawn_args *uap, int32_t *retval)
  {
 +#if defined(NABU) && NABU && defined(XNU_OWNER_DATA_MOUNT) && XNU_OWNER_DATA_MOUNT
-+	if (native_owner_watchdog_spawn_denied(ap, uap->path)) return ENOENT;
++	if (native_owner_watchdog_spawn_denied(ap, uap->path, uap->argv)) return ENOENT;
 +#endif
  	proc_t p = ap;
  	user_addr_t pid = uap->pid;

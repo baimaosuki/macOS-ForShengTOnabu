@@ -45,7 +45,8 @@ def assemble(kernel, prelink_report, policy, data, root, loader_build, output, *
     raw = kernel.read_bytes()
     image = macho(raw, 'arm64')
     if disable_watchdogd and not {'_native_owner_watchdog_policy_status',
-                                  '_native_owner_watchdog_spawn_blocked'} <= symbols(kernel).keys():
+                                  '_native_owner_watchdog_spawn_blocked',
+                                  '_native_owner_watchdog_proxy_blocked'} <= symbols(kernel).keys():
         raise ValueError('explicit watchdogd policy requires the kernel watchdog policy reader and spawn gate')
     storage = report.get('storage_driver', {})
     if (report.get('output_sha256') != hashlib.sha256(raw).hexdigest()
@@ -152,6 +153,8 @@ def assemble(kernel, prelink_report, policy, data, root, loader_build, output, *
             job='com.apple.watchdogd', explicit_boot_arg='disable-watchdogd=1',
             backend_available=False, crash_and_panic_policy_modified=False,
             spawn_gate_parent_pid=1, spawn_gate_path='/usr/libexec/watchdogd',
+            spawn_gate_proxy='/usr/libexec/xpcproxy', spawn_gate_proxy_argument_index=1,
+            spawn_gate_proxy_label='com.apple.watchdogd',
             spawn_gate_errno='ENOENT', spawn_gate_before_child_creation=True,
             policy_kind='explicit bring-up bypass', launchd_retry_possible=True),
         ufs_pointer_readback_count=len(storage['pointer_relocations']),
