@@ -73,11 +73,11 @@ static const unsigned kDataOffset=0,kDataMax=65536;
 static unsigned char dma[kDataMax];
 static struct {bool ready=true,poisoned=false;void*lock=(void*)1;uint64_t blocks=130000;unsigned char*virt=dma;}gHost;
 static uint64_t nabu_log_root_first=110000,nabu_log_root_blocks=19991;
-static FILE*disk_file;static int fail_header,write_calls,sync_calls;
+static FILE*disk_file;static int fail_header,write_calls,sync_calls,scsi_calls,unlock_calls;
 static uint64_t ticks;
-static bool held;
-static bool IOLockTryLock(void*){if(held)return false;held=true;return true;}
-static void IOLockUnlock(void*){assert(held);held=false;}
+static bool held,quarantine_on_lock;
+static bool IOLockTryLock(void*){if(held)return false;held=true;if(quarantine_on_lock){gHost.poisoned=true;gHost.ready=false;}return true;}
+static void IOLockUnlock(void*){assert(held);held=false;unlock_calls++;}
 #define IOLog(...) std::printf(__VA_ARGS__)
 static unsigned boot_enable=1;
 static int PE_parse_boot_argn(const char*n,unsigned*v,unsigned){if(!strcmp(n,"nabu-log")){*v=boot_enable;return 1;}return 0;}
@@ -91,6 +91,7 @@ static thread_t current_thread(){return nullptr;}
 static void thread_deallocate(thread_t){}
 static int kernel_thread_start(void(*f)(void*,int),void*p,thread_t*t){*t=nullptr;f(p,0);return 0;}
 static IOReturn hostScsiDir(unsigned lun,const uint8_t*cdb,unsigned len,unsigned direction,unsigned bytes,unsigned,uint32_t*scsi){
+ scsi_calls++;
  assert(lun==0&&len==10&&held);*scsi=0;
  if(cdb[0]==0x35){assert(!direction&&!bytes);sync_calls++;return 0;}
  uint64_t lba=((uint64_t)cdb[2]<<24)|((uint64_t)cdb[3]<<16)|(cdb[4]<<8)|cdb[5];
@@ -112,6 +113,15 @@ int main(int argc,char**argv){
  assert(argc==3);disk_file=fopen(argv[1],"r+b");assert(disk_file);fail_header=atoi(argv[2]);
  uint8_t token[16]={0};
  assert(!nb_volume_write_allowed(&nabu_log_volume,1,1));
+ // A competing root request times out after the pre-lock check. The old DMA
+ // allocation is quarantined while TryLock succeeds: no byte may be touched.
+ memset(dma,0xa5,sizeof(dma));uint8_t payload[4096];memset(payload,0x5a,sizeof(payload));
+ nabu_log_volume.validated=1;nabu_log_volume.file_first=100;quarantine_on_lock=true;
+ assert(nabuLogIo(true,101,1,payload)==-1);
+ assert(!held&&unlock_calls==1&&!scsi_calls&&!write_calls&&!sync_calls);
+ for(unsigned i=0;i<sizeof(dma);i++)assert(dma[i]==0xa5);
+ assert(!strcmp(nabu_log_io_reason,"transport-quarantined"));
+ quarantine_on_lock=false;gHost.ready=true;gHost.poisoned=false;nabu_log_volume.validated=0;
  boot_enable=0;nabuLogStart();assert(!write_calls&&!nabu_log_writer_state);boot_enable=1;
  bootargs="nabu-log=1 nabu-log-token=0";assert(nabuLogTokenParse(token)==NB_TOKEN_BAD_HEX);
  bootargs="nabu-log=1 nabu-log-token=00000000000000000000000000000000";assert(nabuLogTokenParse(token)==NB_TOKEN_BAD_HEX);

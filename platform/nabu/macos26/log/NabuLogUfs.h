@@ -30,6 +30,13 @@ static int nabuLogIo(bool write,uint64_t lba,uint32_t blocks,uint8_t *data,bool 
   if(write && !nb_volume_write_allowed(&nabu_log_volume,lba,blocks)) {nabu_log_io_reason="write-gate";return -1;}
   if(!sync && (!blocks || !data)) {nabu_log_io_reason="bad-args";return -1;}
   if(!IOLockTryLock(gHost.lock)) {nabu_log_io_reason="busy";return 0;}
+  /* A root request may quarantine this DMA allocation before we acquire the
+   * shared lock. Revalidate ownership before touching DMA or issuing SCSI. */
+  if(!gHost.ready || gHost.poisoned) {
+    IOLockUnlock(gHost.lock);
+    nabu_log_io_reason="transport-quarantined";
+    return -1;
+  }
   uint8_t cdb[10]={0};uint32_t scsi=0;IOReturn result;
   if(sync) {
     cdb[0]=0x35;
