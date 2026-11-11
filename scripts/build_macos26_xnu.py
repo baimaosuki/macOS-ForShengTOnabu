@@ -216,6 +216,8 @@ def audit_nabu_arm64e_source(source: Path) -> dict:
         'bsd/kern/kern_exec.c': ('#if __has_feature(ptrauth_calls) || NABU_ARM64E_COMPAT', 'ptrauth_disabled=1'),
         'osfmk/vm/vm_dyld_pager.c': ('return fixupPageAuth64(', 'return fixupCachePageAuth64(', '*signedAddr = unsignedAddr;'),
         'osfmk/arm64/nabu_v82_emul.c': ('if (nabu_nopac_opcode(insn))', 'if (!nabu_nopac_step('),
+        'osfmk/arm64/nabu_nopac.h': ('nabu_nopac_authenticate(',
+            'if (user && data) plain |= value & UINT64_C(0xff00000000000000);'),
     }
     for name, needles in required.items():
         text = (source / name).read_text()
@@ -231,7 +233,8 @@ def audit_nabu_arm64e_source(source: Path) -> dict:
     return dict(software_abi=True, host_cpu_subtype_unchanged=True,
         accepted_arm64e_abi_version=0, keys_off_apple_parameter=True,
         shared_cache_v3_v5_plain_rebases=True, dyld_pager_arm64e_decoders=True,
-        source_pac_emulator=True, binary_or_signature_rewriting=False, device_qualified=False)
+        source_pac_emulator=True, data_auth_preserves_top_byte=True,
+        binary_or_signature_rewriting=False, device_qualified=False)
 
 
 def save(record: dict) -> None:

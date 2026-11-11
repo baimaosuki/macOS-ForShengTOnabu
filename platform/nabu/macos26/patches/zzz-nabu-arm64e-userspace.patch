@@ -418,7 +418,7 @@
 +#endif
 --- a/osfmk/arm64/nabu_nopac.h
 +++ b/osfmk/arm64/nabu_nopac.h
-@@ -0,0 +1,68 @@
+@@ -0,0 +1,81 @@
 +/* SPDX-License-Identifier: BSD-2-Clause-Patent */
 +#ifndef NABU_NOPAC_H
 +#define NABU_NOPAC_H
@@ -435,6 +435,16 @@
 +{
 +    uint64_t plain = value & UINT64_C(0x0000ffffffffffff);
 +    return !user && (plain & (UINT64_C(1) << 47)) ? plain | UINT64_C(0xffff000000000000) : plain;
++}
++static inline uint64_t
++nabu_nopac_authenticate(uint64_t value, bool user, bool data)
++{
++    uint64_t plain = nabu_nopac_canonical(value, user);
++    /* TCR.TBI0 ignores the top byte for data. AUTD/XPACD must preserve
++     * it: libobjc stores FAST_IS_RW_POINTER (bit 63) in class data bits.
++     * Address translation for branches/loads still uses canonical(). */
++    if (user && data) plain |= value & UINT64_C(0xff00000000000000);
++    return plain;
 +}
 +static inline bool
 +nabu_nopac_opcode(uint32_t op)
@@ -455,7 +465,10 @@
 +    if ((op & 0xffff8000U) == 0xdac10000U) {
 +        unsigned opc = (op >> 10) & 31U;
 +        if (opc > 17U || (opc >= 8U && rn != 31U)) return false;
-+        if (rd != 31U && (opc >= 4U && (opc < 8U || opc >= 12U))) f->x[rd] = nabu_nopac_canonical(f->x[rd], user);
++        if (rd != 31U && (opc >= 4U && (opc < 8U || opc >= 12U))) {
++            bool data = opc == 6U || opc == 7U || opc == 14U || opc == 15U || opc == 17U;
++            f->x[rd] = nabu_nopac_authenticate(f->x[rd], user, data);
++        }
 +        f->pc = pc + 4;
 +        return true;
 +    }

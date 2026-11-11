@@ -130,6 +130,54 @@ int main(void) {
 }
 ''')
 
+    def test_data_auth_preserves_objc_rw_flag_and_top_byte_without_tagging_addresses(self):
+        self.compile_run('objc_top_byte', r'''
+#include <assert.h>
+#include <string.h>
+#include "arm64/nabu_nopac.h"
+static uint64_t wanted;
+static bool read64(uint64_t address, uint64_t *value, void *context) {
+    (void)context; if (address != wanted) return false; *value = 0x80080001; return true;
+}
+int main(void) {
+    struct nabu_nopac_frame f = { .pc=0x1000 }, before;
+    /* AUTDA/AUTDB/AUTDZA/AUTDZB/XPACD retain every TBI data tag. */
+    for (unsigned tag=0; tag<256; tag++) for (unsigned i=0; i<5; i++) {
+        unsigned opc=(unsigned[]){6,7,14,15,17}[i], rn=opc>=8?31:21;
+        uint64_t input=((uint64_t)tag<<56)|0x00cd0007d4c00ce4ULL;
+        f.x[16]=input;f.x[21]=0xc93a0001ef3ba788ULL;before=f;
+        assert(nabu_nopac_step(&f,0xdac10000U|(opc<<10)|(rn<<5)|16,true,0,0));
+        assert(f.x[16]==(((uint64_t)tag<<56)|0x7d4c00ce4ULL));
+        assert(f.x[21]==before.x[21] && f.pc==before.pc+4);
+    }
+    /* Real libobjc class-data pattern: bit63 distinguishes class_rw_t
+     * from class_ro_t. Clearing it makes safe_ro read rw flags as a pointer. */
+    f.x[16]=0x80000007d4c00ce4ULL; f.x[21]=0xc93a0001ef3ba788ULL;
+    assert(nabu_nopac_step(&f,0xdac11eb0U,true,0,0)); /* autdb x16,x21 */
+    assert(f.x[16]&(1ULL<<63));
+    f.x[17]=f.x[16];
+    assert(nabu_nopac_step(&f,0xdac147f1U,true,0,0)); /* xpacd x17 */
+    assert(f.x[16]==f.x[17]);
+    assert((f.x[16]&0x0f007ffffffffff8ULL)==0x7d4c00ce0ULL);
+    /* Instruction auth/strip uses an instruction address, not a data tag. */
+    for (unsigned i=0; i<5; i++) {
+        unsigned opc=(unsigned[]){4,5,12,13,16}[i], rn=opc>=8?31:21;
+        f.x[16]=0xabcd000182dd5e1cULL;
+        assert(nabu_nopac_step(&f,0xdac10000U|(opc<<10)|(rn<<5)|16,true,0,0));
+        assert(f.x[16]==0x182dd5e1cULL);
+    }
+    /* A data tag may reach an authenticated load/branch. Only their effective
+     * address is untagged; loaded data and the source register stay intact. */
+    f.x[9]=0x80000007d4c00800ULL;wanted=0x7d4c00820ULL;
+    assert(nabu_nopac_step(&f,0xf8200400U|(4<<12)|(9<<5)|8,true,read64,0));
+    assert(f.x[8]==0x80080001 && f.x[9]==0x80000007d4c00800ULL);
+    f.x[9]=0x8000000182dd5e1cULL;
+    assert(nabu_nopac_step(&f,0xd71f0800U|(9<<5),true,0,0));
+    assert(f.pc==0x182dd5e1cULL && f.x[9]==0x8000000182dd5e1cULL);
+    return 0;
+}
+''')
+
     def test_actual_grade_accepts_only_current_version_and_leaves_other_boards(self):
         text = (self.tree / 'bsd/dev/arm/kern_machdep.c').read_text()
         functions = function(text, 'grade_arm64e_binary') + function(text, 'ml_grade_binary')
@@ -366,6 +414,13 @@ int main(void) {
   assert(!nabu_v82_emul_sync_exception(&c,0));assert(!memcmp(&c,&before,sizeof c));
   fail_load=false;assert(nabu_v82_emul_sync_exception(&c,0));assert(c.ss.x[8]==0xabcdabcd01234567ULL);
   assert(!memcmp(&c.ns,&before.ns,sizeof c.ns));
+  if (!mode) {
+   c.ss.pc=0x1000;c.ss.x[16]=0x80cd0007d4c00ce4ULL;c.ss.x[21]=0xc93a0001ef3ba788ULL;
+   before=c;instruction=0xdac11eb0U; /* AUTDB x16,x21 from libobjc */
+   assert(nabu_v82_emul_sync_exception(&c,0));
+   before.ss.x[16]=0x80000007d4c00ce4ULL;before.ss.pc=0x1004;
+   assert(!memcmp(&c,&before,sizeof c));
+  }
  }
  return 0;
 }
