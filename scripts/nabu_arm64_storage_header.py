@@ -31,8 +31,13 @@ def write(driver, output, at):
                                for s in image['segments']):
                         raise ValueError('initializer offset is not actual source code')
                     constructors.append(base + target)
-    if len(constructors) != 2:
-        raise ValueError('requires the two real UFS and RAM Data translation-unit constructors')
+    expected_names = ['__GLOBAL__sub_I_NativeUfs.cpp', '__GLOBAL__sub_I_NativeRamBlock.cpp']
+    if driver['evidence'].get('desktop_services'):
+        expected_names += ['__GLOBAL__sub_I_NabuKeyStoreComponent.cpp',
+                           '__GLOBAL__sub_I_NabuTimeSyncIdentity.cpp']
+    expected = [driver['symbols'].get(name) for name in expected_names]
+    if None in expected or constructors != expected:
+        raise ValueError('requires the actual selected translation-unit constructors in link order')
     init_va = header_va + 0x3000
     commands.append(struct.pack('<II16s4Q4I', 0x19, 152, b'__TEXT', header_va, 0x4000,
                                 at(header_va, 1), 0x4000, 1, 1, 1, 0) +

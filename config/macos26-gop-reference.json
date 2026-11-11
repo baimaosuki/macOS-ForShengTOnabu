@@ -19,5 +19,7 @@
     "legacy_class_bytes": 6904,
     "legacy_slots": 473
   },
-  "adapted_header_sha256": "afbbad7bedccc74371d45922036535ae71cbe81025d805f38b78c5ccada05a72"
+  "adapted_header_sha256": "afbbad7bedccc74371d45922036535ae71cbe81025d805f38b78c5ccada05a72",
+  "arm64_pac_stripped_family_text_sha256": "1a2df9283fb15bfe98bcf9195971c1e458f8c03ca9b95dda6c8d2864534fa25a",
+  "arm64_pac_stripped_note": "Same 25F71 family UUID and object ABI; exact text after existing NABU PAC instruction translation. Original source hash remains in abi.family_text_sha256."
 }

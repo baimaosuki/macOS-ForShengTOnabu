@@ -149,13 +149,17 @@ def prepare(directory: Path, base: int, native: dict, original: bytes,
             if len(display_cpus(display)) > 1:
                 if hashlib.sha256((directory / 'gop-display/framebuffer_owner.h').read_bytes()).hexdigest() != display.get('framebuffer_owner_sha256'):
                     raise ValueError('GOP framebuffer owner differs from the compiled record')
-            contract = json.loads((Path(__file__).resolve().parents[1] /
-                                  'config/macos26-gop-reference.json').read_text())['abi']
+            display_reference = json.loads((Path(__file__).resolve().parents[1] /
+                                  'config/macos26-gop-reference.json').read_text())
+            contract = display_reference['abi']
             family = kc_macho(original, kc['entries']['com.apple.iokit.IOMobileGraphicsFamily'][1])
             text = next(s for s in family['segments'] if s['name'] == '__TEXT_EXEC')
             text_hash = hashlib.sha256(original[text['fileoff']:text['fileoff'] + text['filesize']]).hexdigest()
+            accepted_text = {contract['family_text_sha256']}
+            if architecture == 'arm64':
+                accepted_text.add(display_reference['arm64_pac_stripped_family_text_sha256'])
             if (display.get('abi') != contract or family['uuid'] != contract['family_uuid']
-                    or text_hash != contract['family_text_sha256']):
+                    or text_hash not in accepted_text):
                 raise ValueError('GOP private field layout requires the reviewed paired framebuffer family')
         if input_driver:
             contract = json.loads((Path(__file__).resolve().parents[1] /
@@ -209,8 +213,9 @@ def prepare(directory: Path, base: int, native: dict, original: bytes,
                      '__ZN13AppleKeyStore10gMetaClassE', '__ZN20NabuTimeSyncIdentity10gMetaClassE'):
             if name not in own:
                 raise ValueError('desktop companion omitted service definition: ' + name)
-        from nabu_timesync_binding import ethernet_private_slots
+        from nabu_timesync_binding import ethernet_private_slots, ethernet_reserved_slots
         ethernet_slots, ethernet_names = ethernet_private_slots(original, kc, own, base, slide)
+        ethernet_slots.update(ethernet_reserved_slots(original, kc, own, base, slide, data))
         private_slots.update(ethernet_slots)
     imported = {}
     for name in selected:

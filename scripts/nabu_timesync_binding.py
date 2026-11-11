@@ -75,3 +75,109 @@ def validate_ethernet_slot(item, allowed):
     if len(matches) != 1:
         raise ValueError('private Ethernet method may only bind its exact inherited vtable slot and PAC contract')
     return matches[0]
+
+
+def companion_import_sites(data):
+    """Return import-name -> bind sites in a linked ARM64 companion (formats 2/6).
+
+    Every occurrence is checked, including GOT slots used by direct calls. A
+    reserved SDK method is allowed only if all occurrences are inherited slots.
+    """
+    from native_macho import macho as own_macho
+    image = own_macho(data)
+    command = next(p for c, p, _ in image['commands'] if c == 0x80000034)
+    offset, extent = struct.unpack_from('<II', data, command + 8)
+    blob = data[offset:offset+extent]
+    version, starts, imports, strings, count, fmt, symbols_fmt = struct.unpack_from('<7I', blob)
+    if version or symbols_fmt or fmt not in (1, 2, 3):
+        raise ValueError('unsupported Ethernet companion imports')
+    stride = {1:4, 2:8, 3:16}[fmt]
+    imported = []
+    for i in range(count):
+        word, = struct.unpack_from('<Q' if fmt == 3 else '<I', blob, imports+i*stride)
+        at = strings + (word >> (32 if fmt == 3 else 9))
+        end = blob.index(b'\0', at)
+        imported.append(blob[at:end].decode())
+    result = {name: [] for name in imported}
+    segments, = struct.unpack_from('<I', blob, starts)
+    if segments != len(image['segments']):
+        raise ValueError('Ethernet companion chain segment count mismatch')
+    for index, segment in enumerate(image['segments']):
+        relative, = struct.unpack_from('<I', blob, starts+4+4*index)
+        if not relative:
+            continue
+        p = starts+relative
+        length, page_size, pointer_format, seg_offset, _, pages = struct.unpack_from('<IHHQIH', blob,p)
+        if pointer_format not in (2, 6) or seg_offset != segment['va']:
+            raise ValueError('reserved Ethernet adaptation requires reviewed ARM64 format-2/6 companion')
+        for page in range(pages):
+            first, = struct.unpack_from('<H', blob,p+22+2*page)
+            if first == 0xffff:
+                continue
+            if first & 0x8000:
+                raise ValueError('multi-start Ethernet companion chain')
+            site = segment['va'] + page*page_size + first
+            visited = set()
+            while True:
+                if site in visited or not segment['va']+page*page_size <= site < segment['va']+(page+1)*page_size:
+                    raise ValueError('invalid Ethernet companion chain')
+                visited.add(site)
+                at = backed_offset(image['segments'],site,8,len(data))
+                word, = struct.unpack_from('<Q',data,at)
+                if word >> 63:
+                    ordinal = word & 0xffffff
+                    if ordinal >= count or (word >> 24) & 0xff:
+                        raise ValueError('Ethernet inherited bind has invalid ordinal/addend')
+                    result[imported[ordinal]].append(site)
+                following = (word>>51)&0xfff
+                if not following:
+                    break
+                site += following*4
+    return result
+
+
+def ethernet_reserved_slots(original, kc, own, base, slide, own_data):
+    """Return reserved-placeholder bindings, proven to occur only in own vtable.
+
+    Merge into ethernet_private_slots' bindings. All new entries require the
+    same validate_ethernet_slot check (use ARM64 normalization described below).
+    Exact target and original runtime names are retained for the final audit.
+    """
+    imports = companion_import_sites(own_data)
+    family = macho(original,kc['entries'][FAMILY][1])
+    public = exports(original,family)
+    table = next(a for a,ns in public.items() if BASE_TABLE in ns)
+    pointers = {p['site']:p for p in chains(original,kc) if table+16 <= p['site'] < table+16+400*8}
+    own_table = own[OWN_TABLE]
+    bindings = {}
+    reviewed = {
+        '__ZN19IONetworkController29_RESERVEDIONetworkController2Ev':
+            (331, '__ZN19IONetworkController11outputStartEP18IONetworkInterfacej'),
+        '__ZN19IONetworkController29_RESERVEDIONetworkController3Ev':
+            (332, '__ZN19IONetworkController27setInputPacketPollingEnableEP18IONetworkInterfaceb'),
+        '__ZN19IONetworkController29_RESERVEDIONetworkController4Ev':
+            (333, '__ZN19IONetworkController16pollInputPacketsEP18IONetworkInterfacejP11IOMbufQueuePv'),
+        '__ZN19IONetworkController29_RESERVEDIONetworkController5Ev':
+            (334, '__ZN19IONetworkController28networkInterfaceNotificationEP18IONetworkInterfacejPv'),
+    }
+    for name, sites in imports.items():
+        if name not in reviewed:
+            continue
+        if not sites:
+            raise ValueError('unused reserved Ethernet import cannot be adapted')
+        allowed = []
+        for site in sites:
+            index, remainder = divmod(site-own_table-16,8)
+            if remainder or not 0 <= index < 400:
+                raise ValueError('reserved Ethernet method is used outside its inherited vtable')
+            pointer = pointers[table+16+index*8]
+            expected_slot, expected_method = reviewed[name]
+            if index != expected_slot or expected_method not in public.get(pointer['target'], []):
+                raise ValueError('reserved Ethernet placeholder differs from reviewed 25F71 replacement')
+            allowed.append(dict(slot=index,original=pointer,new_site=base+site,
+                                new_target=pointer['target']+slide,
+                                sdk_placeholder=name,runtime_names=public.get(pointer['target'],[])))
+        if len({x['new_target'] for x in allowed}) != 1:
+            raise ValueError('reserved Ethernet placeholder requires different slot targets')
+        bindings[name]=allowed
+    return bindings

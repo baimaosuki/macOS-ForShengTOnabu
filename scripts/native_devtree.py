@@ -20,6 +20,13 @@ def seed_vm_nvram_uuid(image: bytes, identity: uuid.UUID) -> bytes:
         encoded.extend((255, 1 if value == 0 else 129) if value in (0, 255) else (value,))
     record = b'platform-uuid=' + encoded + b'\0'
     existing = image[48:2096]
+    # The original NABU generator placed a 32-byte deterministic bank tag at
+    # 20..52 before writing the common header at 32..48. Its final four tag
+    # bytes leaked into the otherwise empty variable area. Recognize only that
+    # exact generated residue; it is not a firmware variable to preserve.
+    tag_tail = hashlib.sha256(b'nabu-adt-nvram').digest()[28:32]
+    if existing == tag_tail + bytes(2044):
+        existing = bytes(2048)
     expected = record + bytes(2048 - len(record))
     if existing != bytes(2048) and existing != expected:
         raise ValueError('refusing to replace existing NVRAM variables or VM identity')
