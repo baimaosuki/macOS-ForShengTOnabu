@@ -106,10 +106,16 @@
       "upstream": "nabu-local/explicit-selected-abort-forensics",
       "adapted": false,
       "sha256": "4de1205afdb1874daaaa0536651e0ab1012a7b5e4f9835f39283dec419a8b22a"
+    },
+    {
+      "path": "platform/nabu/macos26/desktop/patches/20-macos-writable-preboot-state.patch",
+      "upstream": "nabu-local/writable-preboot-state-view",
+      "adapted": false,
+      "sha256": "3d36680b60564617a6d71a9913475bf2cb87c45234228dbf87b64c2a765f8dcb"
     }
   ],
   "integrated_patch": "platform/nabu/macos26/desktop/integrated.patch",
-  "integrated_sha256": "992e974faa3165ac9ad5d55c88add992401b41a18e168c795d2c4f67105de92a",
+  "integrated_sha256": "08c4500a661c6b2816556a2162f3a387b2c097dab4d53f0330686388d8af5f0a",
   "preimage_sha256": {
     "bsd/kern/bsd_init.c": "c777eb136d9d8de4083225dc3313646d72e6609edd1509d10135f36ab4de058b",
     "bsd/kern/kern_exec.c": "8d1e81f8d32522f178b2743fa1bea25ff9ca26f13f3931167768fdd99ca00305",
@@ -138,6 +144,7 @@
     "Port explicit disable-watchdogd=1 launchd bring-up policy after checked Data/shim setup; exclusively create root:wheel 0644 policy and migration marker, verify metadata/readback, refuse existing strategies and propagate errors before launchd.",
     "Explicit disable-watchdogd=1 rejects PID1 direct watchdogd execution and the real xpcproxy argv[1]=com.apple.watchdogd route before child creation; all other proxy jobs and crash/panic policies stay intact.",
     "Explicit nabu-boot-proc=1 records selected final Mach-O activations and committed exit status/reason with bounded argv, ancestry and independent recurring rate limits; no mount, exec, exit or crash policy changes. Ignore retired exec shadow procs before looking up or consuming the live uniqueid trace record.",
-    "Explicit nabu-boot-proc=1 records selected abort reason input and saved user registers, with at most six copyin-only frame candidates and independent recurring limits; leaves original abort result and signal policy intact."
+    "Explicit nabu-boot-proc=1 records selected abort reason input and saved user registers, with at most six copyin-only frame candidates and independent recurring limits; leaves original abort result and signal policy intact.",
+    "Expose the outer macOS Preboot state directory through a validated owner Data firmlink, verify published lookup and exclusive create/write/readback/remove, and propagate failures before launchd. Keep SystemOS /System,/usr binds and authenticated App cryptex readonly."
   ]
 }

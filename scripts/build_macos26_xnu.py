@@ -201,6 +201,22 @@ def audit_desktop_source(source: Path) -> dict:
             < data.index('native_owner_macos_vm_volume(p, scratch)')
             < data.index('native_owner_macos_cryptex_view(p, scratch)')):
         raise ValueError('desktop VM firmlink must follow the writable Data mount and firmlinks')
+    preboot = text[text.index('native_owner_macos_preboot_view(proc_t p'):text.index(
+        'native_owner_macos_vm_volume(proc_t p')]
+    for needle in ('native_owner_data_stage >= 5', 'actual != native_owner_data_device',
+                   'vnode_mount(target) != data_mount', 'vnode_setasfirmlink(source, target)',
+                   'source != target', 'mapped != target', 'vnode_mount(mapped) != data_mount',
+                   '.nabu-preboot-write-probe-', 'O_CREAT | O_EXCL | O_NOFOLLOW',
+                   'vn_rdwr(UIO_WRITE', 'vn_rdwr(UIO_READ', 'memcmp(contents, readback',
+                   'unlink(p, &remove, &result)', 'native_owner_preboot_status = error', 'return error;'):
+        if needle not in preboot:
+            raise ValueError('incomplete checked writable Preboot state view: ' + needle)
+    for needle in ('native_cryptex_os_bind(p, scratch, "/System", "/System/Volumes/Preboot/Cryptexes/OS/System", 0)',
+                   'native_cryptex_os_bind(p, scratch, "/usr", "/System/Volumes/Preboot/Cryptexes/OS/usr", 0)'):
+        if needle not in preboot:
+            raise ValueError('Preboot state view must preserve readonly OS content binds')
+    if 'error = native_owner_macos_cryptex_view(p, scratch)' not in data:
+        raise ValueError('checked Preboot failure must propagate to Data startup')
     vm = text[text.index('native_owner_macos_vm_volume(proc_t p'):text.index('#ifdef XNU_OWNER_APP_VOLUME_UUID',
         text.index('native_owner_macos_vm_volume(proc_t p'))]
     if any(needle not in vm for needle in ('"/System/Volumes/VM"', '"/private/var/vm"',
@@ -313,7 +329,9 @@ def audit_desktop_source(source: Path) -> dict:
                 boot_process_trace_final_activation=True, boot_process_trace_recurring_bounded=True,
                 boot_process_trace_committed_exit=True, boot_stderr_trace_recurring_bounded=True,
                 boot_process_trace_ignores_retired_exec_shadows=True,
-                abort_trace_saved_user_state_and_reason=True, abort_trace_recurring_bounded=True)
+                abort_trace_saved_user_state_and_reason=True, abort_trace_recurring_bounded=True,
+                preboot_view_on_writable_owner_data=True, preboot_write_probe_before_launchd=True,
+                preboot_failure_blocks_launchd=True)
 
 
 def audit_nabu_arm64e_source(source: Path) -> dict:
@@ -608,6 +626,11 @@ def prepare() -> dict:
         record['arm64e_userspace_compatibility'] = audit_nabu_arm64e_source(source)
     if DESKTOP_CFLAGS:
         record['desktop_source_audit'] = audit_desktop_source(source)
+        record['preboot_state_view'] = dict(path='/System/Volumes/Preboot',
+            marker='native_owner_preboot_status',
+            target='/private/var/ngpu/preboot', mechanism='checked owner Data firmlink',
+            published_path_write_readback_remove=True, failure_blocks_launchd=True,
+            os_content_binds_readonly=True, app_volume_readonly=True, hardware_qualified=False)
         record['boot_process_trace'] = dict(default_off=True, boot_argument='nabu-boot-proc=1',
             marker='nabu_lifecycle_trace_events', observational_only=True,
             targets=['mount', 'mount_apfs', 'fskitd', 'WindowServer', 'diskarbitrationd', 'cryptexd'],
@@ -993,7 +1016,7 @@ def link_kernel(args, record, common, sdk, source, env):
                     '_native_owner_root_accepted', '_native_owner_cache_status',
                     '_native_owner_data_stage', '_native_owner_firmlink_count',
                     '_native_owner_app_cryptex_stage', '_nabu_lifecycle_trace_events',
-                    '_nabu_abort_trace_events')
+                    '_nabu_abort_trace_events', '_native_owner_preboot_status')
         missing = [name for name in required if name not in actual]
         if missing:
             raise ValueError('linked desktop kernel omitted owner/root/Data code: ' + ', '.join(missing))

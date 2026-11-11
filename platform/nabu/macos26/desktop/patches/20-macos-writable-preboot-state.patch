@@ -1,0 +1,115 @@
+Expose only the outer Preboot state view through checked writable owner Data; retain readonly cryptex content.
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -9312,11 +9312,82 @@
+ /*
+  * The OS cryptex where macOS looks for it: /System/Cryptexes/OS links to /System/Volumes/Preboot/Cryptexes/OS, and system volume
+  * entries such as /System/Library/Frameworks/WebKit.framework link into it. As native_cryptex_os_view does for iPadOS's
+- * /private/preboot, two owner Data directories are shown over the empty /System/Volumes/Preboot as a read-only union, and the SystemOS
+- * volume's /System and /usr (the upper layer of the root union) are bound over them. Never fatal. Stage: 1 mount points made,
++ * /private/preboot, the outer Preboot view is a checked firmlink to writable owner Data; the SystemOS
++ * volume's /System and /usr remain readonly binds below it. Failure blocks checked Data startup. Stage: 1 mount points made,
+  * 2 Preboot shown, 3 System bound, 4 usr bound, 5 a cryptex framework visible through /System/Cryptexes/OS.
+  */
+-static void
++/* Preboot contains daemon state as well as readonly cryptex submounts. A
++ * bindfs wrapper cannot create directories even when its backing Data is RW. */
++volatile int native_owner_preboot_status = -1;
++static int
++native_owner_macos_preboot_view(proc_t p, user_addr_t scratch)
++{
++	vfs_context_t ctx = vfs_context_current();
++	vnode_t source = NULLVP, target = NULLVP, data_root = NULLVP, mapped = NULLVP, probe = NULLVP;
++	mount_t data_mount = NULL;
++	bool linked = false, created = false;
++	int error = native_owner_data_stage >= 5 ? 0 : ENXIO;
++	int32_t result = 0;
++	char path[128], readback[16] = {0};
++	static const char contents[] = "nabu-preboot-rw\n";
++	struct unlink_args remove = {.path = scratch + 0xc00};
++	if (!error) error = vnode_lookup(NATIVE_OWNER_DATA_MOUNT_POINT, VNODE_LOOKUP_NOFOLLOW, &data_root, ctx);
++	if (!error) {
++		data_mount = vnode_mount(data_root);
++		vnode_t device = vfs_devvp(data_mount);
++		dev_t actual = device ? vnode_specrdev(device) : NODEV;
++		if (device) vnode_put(device);
++		if (vnode_vtype(data_root) != VDIR || !vnode_isvroot(data_root) ||
++		    actual == NODEV || actual != native_owner_data_device ||
++		    strcmp(vfs_statfs(data_mount)->f_fstypename, "apfs") ||
++		    (vfs_flags(data_mount) & MNT_RDONLY)) error = EROFS;
++	}
++	if (!error) error = vnode_lookup("/private/var/ngpu/preboot", VNODE_LOOKUP_NOFOLLOW_ANY, &target, ctx);
++	if (!error && (vnode_vtype(target) != VDIR || vnode_mount(target) != data_mount)) error = EXDEV;
++	if (!error) error = vnode_lookup("/System/Volumes/Preboot", VNODE_LOOKUP_NOFOLLOW_ANY, &source, ctx);
++	if (!error && source != target && (vnode_vtype(source) != VDIR || vnode_mount(source) == data_mount ||
++	    !(vfs_flags(vnode_mount(source)) & MNT_RDONLY))) error = EINVAL;
++	/* A repeated call already resolves to target; never create a self-link. */
++	if (!error && source != target) {
++		error = vnode_setasfirmlink(source, target);
++		linked = error == 0;
++	}
++	if (!error) error = vnode_lookup("/System/Volumes/Preboot", 0, &mapped, ctx);
++	if (!error && (mapped != target || vnode_mount(mapped) != data_mount ||
++	    (vfs_flags(vnode_mount(mapped)) & MNT_RDONLY))) error = EROFS;
++	/* Exercise the published path, never precreate cryptexd's state directory. */
++	if (!error) {
++		snprintf(path, sizeof(path), "/System/Volumes/Preboot/.nabu-preboot-write-probe-%016llx", mach_absolute_time());
++		error = copyout(path, remove.path, strlen(path) + 1);
++	}
++	if (!error) {
++		error = vnode_open(path, FREAD | FWRITE | O_CREAT | O_EXCL | O_NOFOLLOW, 0600, 0, &probe, ctx);
++		created = error == 0;
++	}
++	if (!error && (vnode_vtype(probe) != VREG || vnode_mount(probe) != data_mount)) error = EXDEV;
++	int resid = 0;
++	if (!error) error = vn_rdwr(UIO_WRITE, probe, (caddr_t)(uintptr_t)contents, sizeof(contents) - 1,
++	    0, UIO_SYSSPACE, IO_UNIT, vfs_context_ucred(ctx), &resid, p);
++	if (!error && resid) error = EIO;
++	if (!error) error = vn_rdwr(UIO_READ, probe, readback, sizeof(contents) - 1,
++	    0, UIO_SYSSPACE, 0, vfs_context_ucred(ctx), &resid, p);
++	if (!error && (resid || memcmp(contents, readback, sizeof(contents) - 1))) error = EIO;
++	if (created) {
++		int close_error = vnode_close(probe, FREAD | FWRITE, ctx);
++		probe = NULLVP;
++		int remove_error = unlink(p, &remove, &result);
++		if (!error) error = close_error ? close_error : remove_error;
++	}
++	if (error && linked) (void)vnode_setasfirmlink(source, NULLVP);
++	if (mapped) vnode_put(mapped);
++	if (source) vnode_put(source);
++	if (target) vnode_put(target);
++	if (data_root) vnode_put(data_root);
++	native_owner_preboot_status = error;
++	return error;
++}
++
++static int
+ native_owner_macos_cryptex_view(proc_t p, user_addr_t scratch)
+ {
+ 	static const char *const points[] = {"/private/var/ngpu/preboot/Cryptexes/OS/System/", "/private/var/ngpu/preboot/Cryptexes/OS/usr/"};
+@@ -9327,7 +9398,7 @@
+ 	}
+ 	if (!error) {
+ 		native_cryptex_os_stage = 1;
+-		error = native_cryptex_os_bind(p, scratch, "/private/var/ngpu/preboot", "/System/Volumes/Preboot", MNT_UNION);
++		error = native_owner_macos_preboot_view(p, scratch);
+ 	}
+ 	if (!error) {
+ 		native_cryptex_os_stage = 2;
+@@ -9348,6 +9419,7 @@
+ 	}
+ 	native_cryptex_os_status = error;
+ 	printf("owner Data: cryptex view stage %d, status %d\n", native_cryptex_os_stage, error);
++	return error;
+ }
+ 
+ /*
+@@ -9703,7 +9775,7 @@
+ 		native_owner_rosv_state = 2;
+ 	}
+ 	if (!error) error = native_owner_macos_vm_volume(p, scratch);
+-	if (!error) native_owner_macos_cryptex_view(p, scratch);
++	if (!error) error = native_owner_macos_cryptex_view(p, scratch);
+ #ifdef XNU_OWNER_APP_VOLUME_UUID
+ 	if (!error) native_owner_macos_app_cryptex(p, scratch);
+ #endif
