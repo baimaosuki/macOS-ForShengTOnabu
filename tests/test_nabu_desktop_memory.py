@@ -110,15 +110,17 @@ class DesktopMemory(unittest.TestCase):
                  patch('assemble_nabu_desktop_candidate.symbols',
                        return_value={'_native_owner_watchdog_policy_status': 0x1234,
                                      '_native_owner_watchdog_spawn_blocked': 0x1238,
-                                     '_native_owner_watchdog_proxy_blocked': 0x123c}) as kernel_symbols, \
+                                     '_native_owner_watchdog_proxy_blocked': 0x123c,
+                                     '_nabu_lifecycle_trace_events': 0x1240}) as kernel_symbols, \
                  patch('assemble_nabu_desktop_candidate.validate', return_value=dict(manifest_sha256='fixture',
                      windows=[dict(name='OS', volume_uuid='47719f50-5527-44a3-9f59-8170528d8c14')])):
                 generated = {}
                 for name, size in (('default', 2 << 30), ('override', 1 << 30), ('trust', 2 << 30),
-                                   ('watchdog', 2 << 30)):
+                                   ('watchdog', 2 << 30), ('trace', 2 << 30)):
                     kwargs = {} if name == 'default' else dict(owned_memory_size=size)
                     if name == 'trust': kwargs['trust_cache'] = trust
                     if name == 'watchdog': kwargs['disable_watchdogd'] = True
+                    if name == 'trace': kwargs['trace_boot_processes'] = True
                     out = folder / name
                     result = assemble(kernel, report, policy, data, root, loader, out, **kwargs)
                     tree, _ = parse_adt((out / 'EFI/UniXNU/Payloads/kernel.macho.adt').read_bytes())
@@ -132,6 +134,10 @@ class DesktopMemory(unittest.TestCase):
                     self.assertEqual('disable-watchdogd=1' in result['boot_args'], name == 'watchdog')
                     self.assertEqual('exception_log_max_pid=255' in result['boot_args'], name == 'watchdog')
                     self.assertFalse(result['watchdog_launch_policy']['crash_and_panic_policy_modified'])
+                    self.assertEqual(result['boot_process_trace']['enabled'], name == 'trace')
+                    for option in ('nabu-boot-proc=1', 'sheng-stderr-log=1', 'sheng-stderr-name=boot-filesystems'):
+                        self.assertEqual(option in result['boot_args'], name == 'trace')
+                    self.assertLess(len(result['boot_args'].encode()), 1024)
                     chosen = tree['/device-tree/chosen']
                     identity = '47719F50-5527-44A3-9F59-8170528D8C14'
                     self.assertEqual(plistlib.loads(chosen['root-matching'].rstrip(b'\0'), fmt=plistlib.FMT_XML),
@@ -153,12 +159,16 @@ class DesktopMemory(unittest.TestCase):
                         self.assertIsNone(result['trust_cache'])
                 generated['trust']['/device-tree/chosen/memory-map'].pop('TrustCache')
                 self.assertEqual(generated['trust'], generated['default'])
-                kernel_symbols.assert_called_once_with(kernel)
+                self.assertEqual(kernel_symbols.call_count, 2)
                 kernel_symbols.return_value = {'_native_owner_watchdog_policy_status': 0x1234,
                                                '_native_owner_watchdog_spawn_blocked': 0x1238}
                 out = folder / 'missing-watchdog-reader'
                 with self.assertRaisesRegex(ValueError, 'watchdog policy reader'):
                     assemble(kernel, report, policy, data, root, loader, out, disable_watchdogd=True)
+                self.assertFalse(out.exists())
+                out = folder / 'missing-lifecycle-marker'
+                with self.assertRaisesRegex(ValueError, 'lifecycle trace marker'):
+                    assemble(kernel, report, policy, data, root, loader, out, trace_boot_processes=True)
                 self.assertFalse(out.exists())
                 trust.write_bytes(b'invalid trust bundle')
                 out = folder / 'bad-trust'

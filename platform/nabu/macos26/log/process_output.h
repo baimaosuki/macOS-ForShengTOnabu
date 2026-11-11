@@ -2,6 +2,47 @@
 #ifndef SHENG_PROCESS_OUTPUT_H
 #define SHENG_PROCESS_OUTPUT_H
 
+#include <kern/clock.h>
+#include <kern/locks.h>
+
+/* This selector is intentionally inert without the NABU lifecycle opt-in. */
+static TUNABLE(unsigned, nabu_boot_filesystem_output, "nabu-boot-proc", 0);
+static LCK_GRP_DECLARE(nabu_output_group, "nabu boot stderr");
+static LCK_MTX_DECLARE(nabu_output_lock, &nabu_output_group);
+static struct {
+    uint64_t last_ns, suppressed;
+    unsigned initial;
+} nabu_output_buckets[6];
+
+static int nabu_output_kind(const char *name)
+{
+    const char *const names[] = {"mount", "mount_apfs", "fskitd", "WindowServer",
+                               "diskarbitrationd", "cryptexd"};
+    for (unsigned i = 0; i < sizeof(names) / sizeof(names[0]); i++)
+        if (!strncmp(name, names[i], MAXCOMLEN + 1)) return (int)i;
+    return -1;
+}
+
+static int nabu_output_admit(int kind, uint64_t *suppressed)
+{
+    uint64_t ns = 0;
+    int emit = 0;
+    absolutetime_to_nanoseconds(mach_absolute_time(), &ns);
+    lck_mtx_lock(&nabu_output_lock);
+    if (nabu_output_buckets[kind].initial < 8 ||
+        ns - nabu_output_buckets[kind].last_ns >= 5000000000ULL) {
+        if (nabu_output_buckets[kind].initial < 8) nabu_output_buckets[kind].initial++;
+        *suppressed = nabu_output_buckets[kind].suppressed;
+        nabu_output_buckets[kind].suppressed = 0;
+        nabu_output_buckets[kind].last_ns = ns;
+        emit = 1;
+    } else {
+        nabu_output_buckets[kind].suppressed++;
+    }
+    lck_mtx_unlock(&nabu_output_lock);
+    return emit;
+}
+
 /* Adapted from DroidVM ba207d7's bounded stdout/stderr diagnostic.
  * Records attempted output; a concurrent writer can change the user buffer.
  * The original write still owns its validation, side effects and return value.
@@ -9,6 +50,8 @@
 static int sheng_process_output_enabled(struct proc *process, int fd, unsigned mode, const char *name)
 {
     if (!mode || mode > 2 || (fd != 2 && (mode != 2 || fd != 1))) return 0;
+    if (!strncmp(name, "boot-filesystems", MAXCOMLEN + 1))
+        return nabu_boot_filesystem_output == 1 && nabu_output_kind(process->p_comm) >= 0;
     if (!strncmp(name, "recovery-ui", MAXCOMLEN + 1)) {
         const char *const services[] = {"recoveryosd", "RecoveryOS Agent", "Language Chooser", "Recovery Springb"};
         for (unsigned i = 0; i < sizeof(services) / sizeof(services[0]); i++)
@@ -18,14 +61,24 @@ static int sheng_process_output_enabled(struct proc *process, int fd, unsigned m
     return !name[0] || !strncmp(process->p_comm, name, MAXCOMLEN + 1);
 }
 
-static void sheng_process_output_text(struct proc *process, int fd, char text[160], size_t count, int truncated)
+static void sheng_process_output_text(struct proc *process, int fd, char text[160], size_t count, int truncated, const char *selector)
 {
+    uint64_t suppressed = 0;
+    int bounded = !strncmp(selector, "boot-filesystems", MAXCOMLEN + 1);
+    if (bounded) {
+        int kind = nabu_output_kind(process->p_comm);
+        if (kind < 0 || !nabu_output_admit(kind, &suppressed)) return;
+    }
     for (size_t i = 0; i < count; i++)
         if ((unsigned char)text[i] < 32 || text[i] == 127)
             text[i] = ' ';
     text[count] = 0;
-    printf("NABU: fd%d pid %d %s - %s%s\n", fd, proc_getpid(process),
-        process->p_comm, text, truncated ? " [truncated]" : "");
+    if (bounded)
+        printf("SHENG: fd%d pid %d %s suppressed=%llu - %s%s\n", fd, proc_getpid(process),
+            process->p_comm, suppressed, text, truncated ? " [truncated]" : "");
+    else
+        printf("SHENG: fd%d pid %d %s - %s%s\n", fd, proc_getpid(process),
+            process->p_comm, text, truncated ? " [truncated]" : "");
 }
 
 static void
@@ -36,7 +89,7 @@ sheng_process_output(struct proc *process, int fd, user_addr_t address,
     char text[160];
     size_t count = bytes < sizeof(text) - 1 ? (size_t)bytes : sizeof(text) - 1;
     if (copyin(address, text, count) != 0) return;
-    sheng_process_output_text(process, fd, text, count, bytes > count);
+    sheng_process_output_text(process, fd, text, count, bytes > count, name);
 }
 
 /* Inspect the validated UIO without advancing it; cap the entire vector write. */
@@ -55,7 +108,7 @@ static void sheng_process_outputv(struct proc *process, int fd, uio_t uio, unsig
         if (bytes > take) { truncated = 1; break; }
         if (count == 159) { index++; break; }
     }
-    if (count) sheng_process_output_text(process, fd, text, count, truncated || index < vectors);
+    if (count) sheng_process_output_text(process, fd, text, count, truncated || index < vectors, name);
 }
 
 #endif

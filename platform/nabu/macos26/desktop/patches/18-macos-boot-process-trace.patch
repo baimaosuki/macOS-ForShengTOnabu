@@ -1,0 +1,235 @@
+Explicit opt-in bounded boot process exec/exit diagnostics; no behavior overrides.
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -945,6 +945,208 @@
+ 		p->p_crash_behavior |= POSIX_SPAWN_PANIC_ON_SPAWN_FAIL;
+ 	}
+ }
++
++#if defined(NABU) && NABU && defined(XNU_OWNER_DATA_MOUNT) && XNU_OWNER_DATA_MOUNT
++/* Explicit, observational bring-up trace. No syscall result or policy changes. */
++#include <kern/clock.h>
++#include <sys/wait.h>
++void nabu_lifecycle_exit(proc_t);
++#define NABU_LIFE_SLOTS 64
++#define NABU_LIFE_KINDS 12
++struct nabu_life_record {
++	uint64_t uniqueid, sequence;
++	pid_t pid, ppid, gpid;
++	unsigned int kind;
++	int argc, argv_truncated, path_error;
++	char parent[32], grandparent[32], path[MAXPATHLEN], args[512];
++};
++struct nabu_life_bucket { uint64_t seen, suppressed, last_ns; };
++static LCK_MTX_DECLARE(nabu_life_lock, &proc_lck_grp);
++static struct nabu_life_record nabu_life_records[NABU_LIFE_SLOTS];
++static struct nabu_life_bucket nabu_life_buckets[NABU_LIFE_KINDS][3];
++static uint64_t nabu_life_sequence, nabu_life_evicted;
++volatile unsigned int nabu_lifecycle_trace_events;
++
++static bool
++nabu_life_enabled(void)
++{
++	uint32_t enabled = 0;
++	return PE_parse_boot_argn("nabu-boot-proc", &enabled, sizeof(enabled)) && enabled == 1;
++}
++
++static unsigned int
++nabu_life_kind(const char *name)
++{
++	static const char *const names[] = { "mount", "mount_apfs", "fskitd", "WindowServer",
++		"diskarbitrationd", "cryptexd" };
++	for (unsigned int i = 0; i < 6; i++) if (!strcmp(name, names[i])) return i + 1;
++	return 0;
++}
++
++static unsigned int
++nabu_life_proxy_kind(const char *label)
++{
++	if (!strcmp(label, "com.apple.filesystems.fskitd")) return 9;
++	if (!strcmp(label, "com.apple.WindowServer")) return 10;
++	if (!strcmp(label, "com.apple.diskarbitrationd")) return 11;
++	if (!strcmp(label, "com.apple.security.cryptexd")) return 12;
++	return 0;
++}
++
++/* Kernel-copied argv only: never dereference argv in the newly switched map. */
++static const char *
++nabu_life_arg(struct image_params *imgp, unsigned int index)
++{
++	const char *arg = imgp->ip_startargv;
++	for (unsigned int i = 0; i <= index; i++) {
++		if (!arg || arg >= imgp->ip_endargv || i >= (unsigned int)imgp->ip_argc) return NULL;
++		size_t len = strnlen(arg, imgp->ip_endargv - arg);
++		if (len == (size_t)(imgp->ip_endargv - arg)) return NULL;
++		if (i == index) return arg;
++		arg += len + 1;
++	}
++	return NULL;
++}
++
++static void
++nabu_life_args(struct image_params *imgp, struct nabu_life_record *r)
++{
++	size_t out = 0;
++	r->argc = imgp->ip_argc;
++	for (unsigned int i = 0; i < (unsigned int)imgp->ip_argc; i++) {
++		const char *arg = nabu_life_arg(imgp, i);
++		if (!arg || i == 24) { r->argv_truncated = 1; break; }
++		if (out + 2 >= sizeof(r->args)) { r->argv_truncated = 1; break; }
++		r->args[out++] = '[';
++		while (*arg && out + 3 < sizeof(r->args)) {
++			unsigned char c = (unsigned char)*arg++;
++			r->args[out++] = c >= 32 && c < 127 && c != '[' && c != ']' ? c : '?';
++		}
++		if (*arg) r->argv_truncated = 1;
++		r->args[out++] = ']';
++		r->args[out] = 0;
++		if (r->argv_truncated) break;
++	}
++}
++
++/* Called with our trace mutex held, never with a proc lock held. First failures
++ * have their own bucket. Every later 5-second window remains observable. */
++static bool
++nabu_life_admit(struct nabu_life_bucket *b, uint64_t ns, uint64_t *suppressed)
++{
++	b->seen++;
++	if (b->seen <= 4 || ns - b->last_ns >= 5000000000ULL) {
++		*suppressed = b->suppressed;
++		b->suppressed = 0;
++		b->last_ns = ns;
++		return true;
++	}
++	b->suppressed++;
++	return false;
++}
++
++static void
++nabu_life_emit(struct nabu_life_record *r, bool exiting, int status, os_reason_t reason)
++{
++	uint64_t ns = 0, skipped = 0, evicted;
++	unsigned int event = exiting ? ((status || reason != OS_REASON_NULL) ? 2 : 1) : 0;
++	absolutetime_to_nanoseconds(mach_absolute_time(), &ns);
++	lck_mtx_lock(&nabu_life_lock);
++	bool emit = nabu_life_admit(&nabu_life_buckets[r->kind - 1][event], ns, &skipped);
++	evicted = nabu_life_evicted;
++	lck_mtx_unlock(&nabu_life_lock);
++	if (!emit) return;
++	os_atomic_inc(&nabu_lifecycle_trace_events, relaxed);
++	printf("NABU-PROC t_ns=%llu event=%s pid=%d uid=%llu exec=%llu ppid=%d parent=%s gpid=%d grandparent=%s suppressed=%llu evicted=%llu\n",
++	    ns, exiting ? "exit" : "exec", r->pid, r->uniqueid, r->sequence,
++	    r->ppid, r->parent, r->gpid, r->grandparent, skipped, evicted);
++	printf("NABU-PROC uid=%llu exec=%llu path=%s path_error=%d argc=%d argv_truncated=%d argv=%s\n",
++	    r->uniqueid, r->sequence, r->path, r->path_error, r->argc, r->argv_truncated, r->args);
++	if (exiting) {
++		printf("NABU-PROC uid=%llu exec=%llu wait=0x%x exit=%d signal=%d core=%d reason_ns=%u reason_code=0x%llx reason_flags=0x%llx\n",
++		    r->uniqueid, r->sequence, status, WIFEXITED(status) ? WEXITSTATUS(status) : -1,
++		    WIFSIGNALED(status) ? WTERMSIG(status) : 0, !!WCOREDUMP(status),
++		    reason ? reason->osr_namespace : 0, reason ? reason->osr_code : 0,
++		    reason ? reason->osr_flags : 0);
++	}
++}
++
++static void
++nabu_lifecycle_exec(proc_t p, struct image_params *imgp)
++{
++	if (!nabu_life_enabled()) return;
++	unsigned int kind = nabu_life_kind(p->p_comm);
++	if (!kind && !strcmp(p->p_comm, "xpcproxy")) {
++		const char *label = nabu_life_arg(imgp, 1);
++		if (label) kind = nabu_life_proxy_kind(label);
++	}
++	uint64_t uid = proc_uniqueid(p);
++	/* Clear a selected proxy's history if it execs an unrelated image. */
++	if (!kind) {
++		lck_mtx_lock(&nabu_life_lock);
++		for (unsigned int i = 0; i < NABU_LIFE_SLOTS; i++)
++			if (nabu_life_records[i].uniqueid == uid) nabu_life_records[i].uniqueid = 0;
++		lck_mtx_unlock(&nabu_life_lock);
++		return;
++	}
++	struct nabu_life_record *r = kalloc_type(struct nabu_life_record, Z_WAITOK | Z_ZERO);
++	if (!r) return;
++	r->uniqueid = uid; r->pid = proc_getpid(p); r->kind = kind;
++	r->ppid = proc_ppid(p);
++	proc_t parent = proc_find(r->ppid);
++	if (parent != PROC_NULL) {
++		strlcpy(r->parent, parent->p_comm, sizeof(r->parent));
++		r->gpid = proc_ppid(parent);
++		proc_rele(parent);
++		proc_name(r->gpid, r->grandparent, sizeof(r->grandparent));
++	}
++	int len = sizeof(r->path);
++	r->path_error = vn_getpath(imgp->ip_vp, r->path, &len);
++	if (r->path_error) strlcpy(r->path, imgp->ip_strings + strlen(EXECUTABLE_KEY), sizeof(r->path));
++	nabu_life_args(imgp, r);
++	lck_mtx_lock(&nabu_life_lock);
++	r->sequence = ++nabu_life_sequence;
++	unsigned int slot = NABU_LIFE_SLOTS;
++	for (unsigned int i = 0; i < NABU_LIFE_SLOTS; i++) {
++		if (nabu_life_records[i].uniqueid == uid) { slot = i; break; }
++		if (!nabu_life_records[i].uniqueid) slot = i;
++	}
++	if (slot == NABU_LIFE_SLOTS) {
++		slot = 0;
++		for (unsigned int i = 1; i < NABU_LIFE_SLOTS; i++)
++			if (nabu_life_records[i].sequence < nabu_life_records[slot].sequence) slot = i;
++		nabu_life_evicted++;
++	}
++	nabu_life_records[slot] = *r;
++	lck_mtx_unlock(&nabu_life_lock);
++	nabu_life_emit(r, false, 0, OS_REASON_NULL);
++	kfree_type(struct nabu_life_record, r);
++}
++
++void
++nabu_lifecycle_exit(proc_t p)
++{
++	if (!nabu_life_enabled()) return;
++	uint64_t uid = proc_uniqueid(p);
++	bool tracked = false;
++	lck_mtx_lock(&nabu_life_lock);
++	for (unsigned int i = 0; i < NABU_LIFE_SLOTS; i++)
++		if (nabu_life_records[i].uniqueid == uid) { tracked = true; break; }
++	lck_mtx_unlock(&nabu_life_lock);
++	if (!tracked) return;
++	struct nabu_life_record *r = kalloc_type(struct nabu_life_record, Z_WAITOK | Z_ZERO);
++	if (!r) return;
++	lck_mtx_lock(&nabu_life_lock);
++	for (unsigned int i = 0; i < NABU_LIFE_SLOTS; i++) {
++		if (nabu_life_records[i].uniqueid == uid) {
++			*r = nabu_life_records[i]; nabu_life_records[i].uniqueid = 0; break;
++		}
++	}
++	lck_mtx_unlock(&nabu_life_lock);
++	if (r->uniqueid) nabu_life_emit(r, true, p->p_xstat, p->p_exit_reason);
++	kfree_type(struct nabu_life_record, r);
++}
++#endif
+ 
+ void
+ set_proc_name(struct image_params *imgp, proc_t p)
+@@ -2747,6 +2949,9 @@
+ 	p->p_acflag &= ~AFORK;
+ 
+ 	set_proc_name(imgp, p);
++#if defined(NABU) && NABU && defined(XNU_OWNER_DATA_MOUNT) && XNU_OWNER_DATA_MOUNT
++	nabu_lifecycle_exec(p, imgp);
++#endif
+ #if SHENG
+ 	/* Image activation is observable here; this is not application readiness. */
+ 	sheng_boot_service(p->p_comm, proc_getpid(p), 0, 0);
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -2357,6 +2357,10 @@
+ 	proc_unlock(p);
+ 	pid = proc_getpid(p);
+ 	exitval = p->p_xstat;
++#if defined(NABU) && NABU && defined(XNU_OWNER_DATA_MOUNT) && XNU_OWNER_DATA_MOUNT
++	extern void nabu_lifecycle_exit(proc_t);
++	nabu_lifecycle_exit(p);
++#endif
+ #if SHENG
+ 	sheng_boot_service(p->p_comm, pid, 1, exitval);
+ #endif

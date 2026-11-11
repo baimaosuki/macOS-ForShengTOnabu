@@ -94,13 +94,19 @@
       "upstream": "nabu-local/explicit-pid1-watchdog-spawn-gate",
       "adapted": false,
       "sha256": "6a86b7fd6788792c50d2624f12f129c99caf69018cb7d7ec37f115bdcb3e5817"
+    },
+    {
+      "path": "platform/nabu/macos26/desktop/patches/18-macos-boot-process-trace.patch",
+      "upstream": "nabu-local/explicit-boot-process-diagnostics",
+      "adapted": false,
+      "sha256": "c9a67174ea310a7d6d2ecba7479fc9cf074f4491cd4d7288676b399e5d277f08"
     }
   ],
   "integrated_patch": "platform/nabu/macos26/desktop/integrated.patch",
-  "integrated_sha256": "70e4c77e35bdfc20b31b6344ae2ab5880ea9a76b5e310222fb8dc2b61944b496",
+  "integrated_sha256": "3701ecf36a1699a5b473807ece2c6f7adb1a1f40b9ecf1766582fdeb4c1c2ed3",
   "preimage_sha256": {
     "bsd/kern/bsd_init.c": "c777eb136d9d8de4083225dc3313646d72e6609edd1509d10135f36ab4de058b",
-    "bsd/kern/kern_exec.c": "da6ec882873d6071bd18e17cc7038215eb73c071ee0ee772daa87a56775a313d",
+    "bsd/kern/kern_exec.c": "8d1e81f8d32522f178b2743fa1bea25ff9ca26f13f3931167768fdd99ca00305",
     "bsd/kern/kern_newsysctl.c": "0ef65bc8a7648216d3120f5b8c74863d99a0ce82e4365411c06393046f101a4f",
     "bsd/miscfs/bindfs/bind_vfsops.c": "8075b3ef4451dbe0b01973690063c4417f55e7a8a6d09ee4c41d0248782d6b04",
     "bsd/miscfs/bindfs/bind_vnops.c": "c7d15e5a504dd724f8768ee3e5aa8676907e2145c9b28c15dd629b453a292aae",
@@ -111,7 +117,8 @@
     "bsd/vfs/vfs_syscalls.c": "67cfe165523ac4375504241a418d3cebbb46a4a10b77b22c5d590a31ebd0235d",
     "bsd/vfs/vfs_vnops.c": "d45d4bf1d4e1e8079e1fb6c7275eb73e211833619c0b3f08ed3d637dc3d3e05a",
     "iokit/bsddev/IOKitBSDInit.cpp": "bff16a3c2396b25dbcbc4ec11840370fd3a14390a567fcf0d77794f4d59e2b40",
-    "config/MASTER.arm64.MacOSX": "bab426817e1eb4e93b1207f765e960e6ab2558b688abfb0124ab2a842c0939bb"
+    "config/MASTER.arm64.MacOSX": "bab426817e1eb4e93b1207f765e960e6ab2558b688abfb0124ab2a842c0939bb",
+    "bsd/kern/kern_exit.c": "8460fd64fc711e105a8b406c2a82f5290889bcdb8bd801cbcbaeff0fe458efd1"
   },
   "adaptations": [
     "Place owner cache/Data preparation after allocation of the actual user scratch page.",
@@ -123,6 +130,7 @@
     "Publish /System/Volumes/VM as a firmlink to writable owner Data /private/var/vm after Data mount and firmlinks; preserve mount task execution.",
     "Require successful VM firmlink and addon installation before the opt-in APFS boot shim union; propagate errors to checked Data startup.",
     "Port explicit disable-watchdogd=1 launchd bring-up policy after checked Data/shim setup; exclusively create root:wheel 0644 policy and migration marker, verify metadata/readback, refuse existing strategies and propagate errors before launchd.",
-    "Explicit disable-watchdogd=1 rejects PID1 direct watchdogd execution and the real xpcproxy argv[1]=com.apple.watchdogd route before child creation; all other proxy jobs and crash/panic policies stay intact."
+    "Explicit disable-watchdogd=1 rejects PID1 direct watchdogd execution and the real xpcproxy argv[1]=com.apple.watchdogd route before child creation; all other proxy jobs and crash/panic policies stay intact.",
+    "Explicit nabu-boot-proc=1 records selected final Mach-O activations and committed exit status/reason with bounded argv, ancestry and independent recurring rate limits; no mount, exec, exit or crash policy changes."
   ]
 }

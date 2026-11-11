@@ -25,7 +25,7 @@ def validate_owned_memory_size(owned_memory_size, kernel_span, packed_seed_bytes
 
 def assemble(kernel, prelink_report, policy, data, root, loader_build, output, *,
              owned_memory_size=2 << 30, trust_cache: Path | None = None,
-             boot_addon: Path | None = None, disable_watchdogd=False):
+             boot_addon: Path | None = None, disable_watchdogd=False, trace_boot_processes=False):
     validate_owned_memory_size(owned_memory_size, 0, 0)
     trust_data = trust_cache.read_bytes() if trust_cache is not None else None
     trust_record = None
@@ -48,6 +48,8 @@ def assemble(kernel, prelink_report, policy, data, root, loader_build, output, *
                                   '_native_owner_watchdog_spawn_blocked',
                                   '_native_owner_watchdog_proxy_blocked'} <= symbols(kernel).keys():
         raise ValueError('explicit watchdogd policy requires the kernel watchdog policy reader and spawn gate')
+    if trace_boot_processes and '_nabu_lifecycle_trace_events' not in symbols(kernel):
+        raise ValueError('boot process diagnostics require the kernel lifecycle trace marker')
     storage = report.get('storage_driver', {})
     if (report.get('output_sha256') != hashlib.sha256(raw).hexdigest()
             or report.get('unresolved_sites') != 0 or report.get('loadable') is not True
@@ -130,6 +132,8 @@ def assemble(kernel, prelink_report, policy, data, root, loader_build, output, *
     args = '-v keepsyms=1 debug=0x14e cpus=1 armcpu-self-ipi=1 nabu-source-text=1 native-ufs-root=1 native-ufs-diagnostics=1 rd=uuid boot-uuid=' + root_uuid
     if disable_watchdogd:
         args += ' disable-watchdogd=1 exception_log_max_pid=255'
+    if trace_boot_processes:
+        args += ' nabu-boot-proc=1 sheng-stderr-log=1 sheng-stderr-name=boot-filesystems'
     if addon_data is not None:
         if mm.get('GpuAddon') != bytes(16):
             raise ValueError('boot addon sidecar/ADT slot mismatch')
@@ -149,6 +153,11 @@ def assemble(kernel, prelink_report, policy, data, root, loader_build, output, *
         loader=loader_record,source_module_pointer_formats=storage['pointer_formats'],
         trust_cache=trust_record,
         boot_addon=addon_record,
+        boot_process_trace=dict(enabled=bool(trace_boot_processes), boot_argument='nabu-boot-proc=1',
+            marker='nabu_lifecycle_trace_events', default_off=True, observational_only=True,
+            targets=['mount', 'mount_apfs', 'fskitd', 'WindowServer', 'diskarbitrationd', 'cryptexd'],
+            final_exec_activation=True, exit_wait_status_and_reason=True,
+            stderr_filter='boot-filesystems', hardware_qualified=False),
         watchdog_launch_policy=dict(enabled=bool(disable_watchdogd),
             job='com.apple.watchdogd', explicit_boot_arg='disable-watchdogd=1',
             backend_available=False, crash_and_panic_policy_modified=False,
@@ -182,6 +191,9 @@ if __name__ == '__main__':
     p.add_argument('--boot-addon', type=Path, help='owner boot-layout tool in the loader addon format')
     p.add_argument('--disable-watchdogd', action='store_true',
                    help='explicitly gate watchdogd through a verified root launchd policy when IOWatchdog is unavailable')
+    p.add_argument('--trace-boot-processes', action='store_true',
+                   help='enable bounded selected filesystem/desktop exec, exit and stderr diagnostics')
     a=p.parse_args(); print(json.dumps(assemble(a.kernel,a.prelink_report,a.policy,a.data,a.root,a.loader_build,a.output,
         owned_memory_size=a.owned_memory_size, trust_cache=a.trust_cache,
-        boot_addon=a.boot_addon, disable_watchdogd=a.disable_watchdogd),indent=2))
+        boot_addon=a.boot_addon, disable_watchdogd=a.disable_watchdogd,
+        trace_boot_processes=a.trace_boot_processes),indent=2))

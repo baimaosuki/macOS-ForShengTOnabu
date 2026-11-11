@@ -250,6 +250,32 @@ def audit_desktop_source(source: Path) -> dict:
         raise ValueError('watchdog spawn gate must return before allocation/child crash policy')
     if 'native_owner_publish_boot_manifest(root_device, XNU_OWNER_OS_VOLUME_UUID,' not in text:
         raise ValueError('desktop boot manifest must use the paired candidate OS UUID')
+    lifecycle = text[text.index('struct nabu_life_record {'):text.index('void\nset_proc_name(')]
+    for needle in ('"nabu-boot-proc"', 'enabled == 1', 'vn_getpath(imgp->ip_vp',
+                   'imgp->ip_startargv', 'imgp->ip_endargv', 'proc_uniqueid(p)',
+                   'r->ppid = proc_ppid(p)', 'r->gpid = proc_ppid(parent)',
+                   '"com.apple.filesystems.fskitd"', '"com.apple.WindowServer"',
+                   '"com.apple.diskarbitrationd"', '"com.apple.security.cryptexd"',
+                   '5000000000ULL', 'nabu_life_buckets[NABU_LIFE_KINDS][3]',
+                   'b->suppressed++', 'absolutetime_to_nanoseconds(mach_absolute_time()',
+                   'p->p_xstat, p->p_exit_reason', 'nabu_lifecycle_trace_events'):
+        if needle not in lifecycle:
+            raise ValueError('incomplete bounded boot process diagnostics: ' + needle)
+    activation = text[text.index('p->p_acflag &= ~AFORK;'):]
+    if not activation.index('set_proc_name(imgp, p)') < activation.index('nabu_lifecycle_exec(p, imgp)'):
+        raise ValueError('boot process trace must follow final image identity')
+    exit_source = (source / 'bsd/kern/kern_exit.c').read_text()
+    final_exit = exit_source[exit_source.index('pid = proc_getpid(p);\n\texitval = p->p_xstat;'):]
+    if not final_exit.index('nabu_lifecycle_exit(p)') < final_exit.index('proc_refdrain(p)'):
+        raise ValueError('boot process exit trace must precede proc reference drain')
+    stderr = (source / 'bsd/kern/sheng_process_output.h').read_text()
+    for needle in ('"boot-filesystems"', '"nabu-boot-proc"',
+                   'nabu_boot_filesystem_output == 1', 'nabu_output_buckets[6]',
+                   'initial < 8', '5000000000ULL', 'suppressed++',
+                   '"mount_apfs"', '"fskitd"', '"WindowServer"',
+                   '"diskarbitrationd"', '"cryptexd"'):
+        if needle not in stderr:
+            raise ValueError('incomplete bounded selected boot stderr: ' + needle)
     root = (source / 'bsd/kern/bsd_init.c').read_text()
     if 'native_verified_block_root_authorized(device)' not in root or 'if (autherr && !owner_authorized)' not in root:
         raise ValueError('desktop rootauth must call the actual owner authorization bridge')
@@ -264,7 +290,9 @@ def audit_desktop_source(source: Path) -> dict:
                 watchdog_policy_before_launchd=True, watchdog_policy_exclusive_create=True,
                 watchdog_policy_root_owned_readback=True, watchdog_policy_boolean_true=True,
                 watchdog_spawn_gate_before_child=True, watchdog_spawn_gate_pid1_exact_path=True,
-                watchdog_spawn_gate_xpcproxy_exact_label=True)
+                watchdog_spawn_gate_xpcproxy_exact_label=True,
+                boot_process_trace_final_activation=True, boot_process_trace_recurring_bounded=True,
+                boot_process_trace_committed_exit=True, boot_stderr_trace_recurring_bounded=True)
 
 
 def audit_nabu_arm64e_source(source: Path) -> dict:
@@ -559,6 +587,15 @@ def prepare() -> dict:
         record['arm64e_userspace_compatibility'] = audit_nabu_arm64e_source(source)
     if DESKTOP_CFLAGS:
         record['desktop_source_audit'] = audit_desktop_source(source)
+        record['boot_process_trace'] = dict(default_off=True, boot_argument='nabu-boot-proc=1',
+            marker='nabu_lifecycle_trace_events', observational_only=True,
+            targets=['mount', 'mount_apfs', 'fskitd', 'WindowServer', 'diskarbitrationd', 'cryptexd'],
+            final_exec_activation=True, tracked_processes=64, argv_bytes=512, argv_count=24,
+            first_events_per_bucket=4, recurring_interval_seconds=5,
+            separate_exec_success_exit_failure_exit_buckets=True,
+            stderr_selector='boot-filesystems', stderr_first_events_per_target=8,
+            stderr_recurring_interval_seconds=5,
+            monotonic_nanoseconds=True, hardware_qualified=False)
         record['watchdog_launch_policy'] = dict(default_off=True, boot_argument='disable-watchdogd=1',
             job='com.apple.watchdogd', policy='/private/var/db/com.apple.xpc.launchd/disabled.plist',
             migration_marker='/private/var/db/com.apple.xpc.launchd/disabled.migrated',
@@ -928,7 +965,7 @@ def link_kernel(args, record, common, sdk, source, env):
                     '_nabu_register_storage_start', '_nabu_source_storage_start',
                     '_native_owner_root_accepted', '_native_owner_cache_status',
                     '_native_owner_data_stage', '_native_owner_firmlink_count',
-                    '_native_owner_app_cryptex_stage')
+                    '_native_owner_app_cryptex_stage', '_nabu_lifecycle_trace_events')
         missing = [name for name in required if name not in actual]
         if missing:
             raise ValueError('linked desktop kernel omitted owner/root/Data code: ' + ', '.join(missing))

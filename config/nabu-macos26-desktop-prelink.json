@@ -1,0 +1,21 @@
+{
+  "target_build": "25F71",
+  "architecture": "arm64",
+  "roots": [
+    "com.apple.security.AppleImage4",
+    "com.apple.driver.AppleMobileFileIntegrity",
+    "com.apple.filesystems.apfs",
+    "com.apple.security.sandbox",
+    "com.apple.kec.pthread",
+    "com.apple.AppleFSCompression.AppleFSCompressionTypeZlib",
+    "com.apple.filesystems.lifs"
+  ],
+  "required_personalities": {
+    "com.apple.filesystems.lifs": {
+      "IOClass": "com_apple_filesystems_lifs",
+      "IOUserClientClass": "AppleLIFSUserClient"
+    }
+  },
+  "purpose": "Original 25F71 FSKit calls IOServiceMatching for com_apple_filesystems_lifs; missing service makes fskitd initialization fail with exit 1.",
+  "hardware_validated": false
+}
