@@ -13,18 +13,25 @@ from native_macho import macho
 from prepare_nabu_desktop_policy import validate
 
 
-def validate_owned_memory_size(owned_memory_size, kernel_span, packed_seed_bytes):
+def validate_owned_memory_size(owned_memory_size, kernel_span, packed_seed_bytes, trust_cache_bytes=0):
     if not (256 << 20) <= owned_memory_size <= (5 << 30):
         raise ValueError('owned memory request must be between 256 MiB and 5 GiB')
     if owned_memory_size % (2 << 20):
         raise ValueError('owned memory request must be 2 MiB aligned')
-    if kernel_span + packed_seed_bytes + (2 << 20) > owned_memory_size:
-        raise ValueError('loader owned window too small for kernel, packed Data and 2 MiB headroom')
+    if kernel_span + packed_seed_bytes + trust_cache_bytes + (2 << 20) > owned_memory_size:
+        raise ValueError('loader owned window too small for kernel, packed Data, trust cache and 2 MiB headroom')
     return owned_memory_size
 
 
-def assemble(kernel, prelink_report, policy, data, root, loader_build, output, *, owned_memory_size=2 << 30):
+def assemble(kernel, prelink_report, policy, data, root, loader_build, output, *,
+             owned_memory_size=2 << 30, trust_cache: Path | None = None):
     validate_owned_memory_size(owned_memory_size, 0, 0)
+    trust_data = trust_cache.read_bytes() if trust_cache is not None else None
+    trust_record = None
+    if trust_data is not None:
+        from prepare_nabu_trustcache import validate_bundle
+        trust_record = dict(validate_bundle(trust_data), bytes=len(trust_data),
+                            sha256=hashlib.sha256(trust_data).hexdigest())
     report = json.loads(prelink_report.read_text())
     raw = kernel.read_bytes()
     image = macho(raw, 'arm64')
@@ -56,7 +63,8 @@ def assemble(kernel, prelink_report, policy, data, root, loader_build, output, *
     if cursor != len(seed): raise ValueError('unbounded packed Data')
     base = min(s['va'] for s in image['segments'] if s['size'])
     extent = max(s['va'] + s['size'] for s in image['segments']) - base
-    owned = validate_owned_memory_size(owned_memory_size, extent, len(seed))
+    owned = validate_owned_memory_size(owned_memory_size, extent, len(seed),
+                                       len(trust_data) if trust_data is not None else 0)
     # DarwinBoot keeps PackedRAMDisk compressed, NativeRamBlock imports its
     # bounded nonzero extents into volatile pages. Do not allocate 3 GiB here.
     output.mkdir(parents=True, exist_ok=False)
@@ -75,11 +83,13 @@ def assemble(kernel, prelink_report, policy, data, root, loader_build, output, *
     shutil.copy2(existing / 'UniXNU.efi', entry / 'UniXNU.efi')
     shutil.copy2(kernel, payload / 'kernel.macho')
     shutil.copy2(data, payload / 'data.dbr')
+    if trust_data is not None:
+        (payload / 'kernel.macho.trustcache').write_bytes(trust_data)
     shutil.copy2(policy / 'owner-public.pem', output / 'owner-public.pem')
     (output / 'root_image.bin').symlink_to(root_image.resolve())
     adt = payload / 'kernel.macho.adt'
     make_nabu_adt(adt, owned_memory_size=owned, os_environment='main',
-                  native_ufs=True, packed_ramdisk=True)
+                  native_ufs=True, packed_ramdisk=True, trust_cache=trust_data is not None)
     configure_native_text_state(adt, development_root=True, root_match_volume_uuid=root_identity)
     tree, parsed = parse_adt(adt.read_bytes())
     if parsed != adt.stat().st_size: raise ValueError('ADT has trailing bytes')
@@ -92,6 +102,10 @@ def assemble(kernel, prelink_report, policy, data, root, loader_build, output, *
     if any(ufs.get(k) != v for k,v in expected.items()): raise ValueError('ADT resources differ from NabuUfsResources contract')
     mm = tree['/device-tree/chosen/memory-map']
     if mm.get('PackedRAMDisk') != bytes(16) or 'RAMDisk' in mm: raise ValueError('loader packed slot mismatch')
+    if trust_data is not None:
+        if mm.get('TrustCache') != bytes(16): raise ValueError('loader trust cache slot mismatch')
+    elif 'TrustCache' in mm:
+        raise ValueError('loader trust cache slot has no sidecar')
     # A root-test candidate must expose transport/layout failures on the panic
     # panel instead of silently returning false and waiting forever for its UUID.
     args = '-v keepsyms=1 debug=0x14e cpus=1 armcpu-self-ipi=1 nabu-source-text=1 native-ufs-root=1 native-ufs-diagnostics=1 rd=uuid boot-uuid=' + root_uuid
@@ -108,6 +122,7 @@ def assemble(kernel, prelink_report, policy, data, root, loader_build, output, *
         owned_memory_request_bytes=owned,
         owned_memory_contract='ADT request only; DarwinBoot must successfully AllocatePages for the complete contiguous window before passing it to XNU. Host assembly does not prove runtime ownership.',
         loader=loader_record,source_module_pointer_formats=storage['pointer_formats'],
+        trust_cache=trust_record,
         ufs_pointer_readback_count=len(storage['pointer_relocations']),
         external_branch_readback_count=report['branch_relocation_count'],constructors=storage['constructors'],
         esp_bundle_bytes=sum(p['bytes'] for n,p in files.items() if n.startswith('EFI/')),
@@ -129,5 +144,6 @@ if __name__ == '__main__':
     for n in ('kernel','prelink-report','policy','data','root','loader-build','output'):p.add_argument('--'+n,type=Path,required=True)
     p.add_argument('--owned-memory-size', type=lambda value: int(value, 0), default=2 << 30,
                    help='contiguous memory request in bytes (decimal or 0x hex); default 2 GiB, subject to real firmware allocation')
+    p.add_argument('--trust-cache', type=Path, help='validated original trust module bundle for the loader sidecar')
     a=p.parse_args(); print(json.dumps(assemble(a.kernel,a.prelink_report,a.policy,a.data,a.root,a.loader_build,a.output,
-        owned_memory_size=a.owned_memory_size),indent=2))
+        owned_memory_size=a.owned_memory_size, trust_cache=a.trust_cache),indent=2))

@@ -33,6 +33,28 @@ class DesktopMemory(unittest.TestCase):
         validate_owned_memory_size(512 << 20, (512 << 20) - (23 << 20), 21 << 20)
         with self.assertRaisesRegex(ValueError, 'too small'):
             validate_owned_memory_size(512 << 20, (512 << 20) - (23 << 20) + 1, 21 << 20)
+        with self.assertRaisesRegex(ValueError, 'too small'):
+            validate_owned_memory_size(512 << 20, (512 << 20) - (23 << 20), 21 << 20, 1)
+
+    def test_trust_slot_is_explicit_and_preserves_other_adt_properties(self):
+        with tempfile.TemporaryDirectory() as folder:
+            for packed in (False, True):
+                trees = []
+                for enabled in (False, True):
+                    path = Path(folder) / ('%s-%s.adt' % (packed, enabled))
+                    make_nabu_adt(path, owned_memory_size=2 << 30, os_environment='main',
+                                  native_ufs=True, packed_ramdisk=packed, trust_cache=enabled)
+                    configure_native_text_state(path, development_root=True,
+                        root_match_volume_uuid='47719F50-5527-44A3-9F59-8170528D8C14')
+                    raw = path.read_bytes()
+                    tree, end = parse_adt(raw)
+                    self.assertEqual(end, len(raw))
+                    trees.append(tree)
+                memory = '/device-tree/chosen/memory-map'
+                self.assertNotIn('TrustCache', trees[0][memory])
+                self.assertEqual(trees[1][memory].pop('TrustCache'), bytes(16))
+                self.assertEqual(trees[0], trees[1])
+                self.assertEqual('PackedRAMDisk' in trees[1][memory], packed)
 
     def test_only_requested_memory_field_changes_in_actual_adt(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -79,14 +101,22 @@ class DesktopMemory(unittest.TestCase):
             driver.write_bytes(b'PackedRAMDisk DBRDISK1 loader fixture')
             (loader / 'build.json').write_text(json.dumps(dict(efi_sha256=hashlib.sha256(driver.read_bytes()).hexdigest())))
             image = dict(segments=[dict(va=0xfffffe0007000000, size=300 << 20)])
+            trust = folder / 'original.bundle'
+            modules = [struct.pack('<I16sI', 2, bytes([i]) * 16, 1) +
+                       bytes([i]) * 20 + bytes((2, 0, 0, 0)) for i in (1, 2, 3)]
+            trust.write_bytes(struct.pack('<4I', 3, 16, 16 + len(modules[0]),
+                                         16 + len(modules[0]) + len(modules[1])) + b''.join(modules))
             with patch('assemble_nabu_desktop_candidate.macho', return_value=image), \
                  patch('assemble_nabu_desktop_candidate.validate', return_value=dict(manifest_sha256='fixture',
                      windows=[dict(name='OS', volume_uuid='47719f50-5527-44a3-9f59-8170528d8c14')])):
-                for name, size in (('default', 2 << 30), ('override', 1 << 30)):
+                generated = {}
+                for name, size in (('default', 2 << 30), ('override', 1 << 30), ('trust', 2 << 30)):
                     kwargs = {} if name == 'default' else dict(owned_memory_size=size)
+                    if name == 'trust': kwargs['trust_cache'] = trust
                     out = folder / name
                     result = assemble(kernel, report, policy, data, root, loader, out, **kwargs)
                     tree, _ = parse_adt((out / 'EFI/UniXNU/Payloads/kernel.macho.adt').read_bytes())
+                    generated[name] = tree
                     self.assertEqual(tree['/device-tree/chosen']['darwinboot-memory-size'], struct.pack('<Q', size))
                     self.assertEqual(result['owned_memory_request_bytes'], size)
                     self.assertEqual(result['owned_memory_bytes'], size)
@@ -100,6 +130,24 @@ class DesktopMemory(unittest.TestCase):
                     self.assertEqual(chosen['apfs-preboot-uuid'], chosen['boot-uuid'])
                     self.assertEqual(result['root_uuid'], identity)
                     self.assertIn('boot-uuid=' + identity, result['boot_args'])
+                    sidecar = out / 'EFI/UniXNU/Payloads/kernel.macho.trustcache'
+                    mm = tree['/device-tree/chosen/memory-map']
+                    self.assertEqual('TrustCache' in mm, name == 'trust')
+                    self.assertEqual(sidecar.exists(), name == 'trust')
+                    if name == 'trust':
+                        self.assertEqual(mm['TrustCache'], bytes(16))
+                        self.assertEqual(sidecar.read_bytes(), trust.read_bytes())
+                        self.assertEqual(result['trust_cache']['sha256'], hashlib.sha256(trust.read_bytes()).hexdigest())
+                        self.assertEqual(result['files']['EFI/UniXNU/Payloads/kernel.macho.trustcache']['bytes'], trust.stat().st_size)
+                    else:
+                        self.assertIsNone(result['trust_cache'])
+                generated['trust']['/device-tree/chosen/memory-map'].pop('TrustCache')
+                self.assertEqual(generated['trust'], generated['default'])
+                trust.write_bytes(b'invalid trust bundle')
+                out = folder / 'bad-trust'
+                with self.assertRaises(ValueError):
+                    assemble(kernel, report, policy, data, root, loader, out, trust_cache=trust)
+                self.assertFalse(out.exists())
                 out = folder / 'bad'
                 with self.assertRaisesRegex(ValueError, 'too small'):
                     assemble(kernel, report, policy, data, root, loader, out, owned_memory_size=256 << 20)
