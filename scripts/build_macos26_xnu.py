@@ -212,6 +212,26 @@ def audit_desktop_source(source: Path) -> dict:
            'native_gpu_addon_files < 1 || native_gpu_addon_failed || native_gpu_addon_error',
            'apfs.fs/Contents/Resources/apfs_checkseal', 'return native_owner_boot_shim_status;')):
         raise ValueError('desktop APFS boot shim must validate VM, addon installation and mount visibility')
+    watchdog = text[text.index('native_owner_watchdog_file('):text.index(
+        'native_owner_macos_data_prepare(proc_t p')]
+    for needle in ('"disable-watchdogd"', 'enabled != 1',
+                   '/private/var/db/com.apple.xpc.launchd/disabled.plist',
+                   '/private/var/db/com.apple.xpc.launchd/disabled.migrated',
+                   '<key>com.apple.watchdogd</key><true/>',
+                   'error = EEXIST;', 'O_CREAT | O_EXCL | O_NOFOLLOW',
+                   'va.va_uid != 0 || va.va_gid != 0', '(va.va_mode & 07777) != 0644',
+                   '(va.va_mode & 07777) != 0755', 'VNOP_FSYNC(vp, MNT_WAIT, ctx)',
+                   'memcmp(data, readback, size)', 'native_owner_watchdog_policy_status = error'):
+        if needle not in watchdog:
+            raise ValueError('desktop watchdog launch policy omitted: ' + needle)
+    if not (data.index('error = mount(p, &request, &result)')
+            < data.index('native_owner_data_firmlinks(vfs_context_current())')
+            < data.index('error = native_owner_macos_boot_shims(p, scratch)')
+            < data.index('if (!error) error = native_owner_macos_watchdog_policy(p, scratch)')):
+        raise ValueError('watchdog launch policy must follow checked Data mount and boot shims')
+    if not watchdog.index('native_owner_watchdog_file(policy, contents, sizeof(contents) - 1, ctx)') < watchdog.index(
+            'native_owner_watchdog_file(marker, (const uint8_t *)"", 0, ctx)'):
+        raise ValueError('watchdog migration marker must follow verified policy publication')
     if 'native_owner_publish_boot_manifest(root_device, XNU_OWNER_OS_VOLUME_UUID,' not in text:
         raise ValueError('desktop boot manifest must use the paired candidate OS UUID')
     root = (source / 'bsd/kern/bsd_init.c').read_text()
@@ -224,7 +244,9 @@ def audit_desktop_source(source: Path) -> dict:
                 cache_before_data_before_launchd=True, data_firmlinks=True,
                 app_called_from_data=True, root_uuid_from_paired_build=True,
                 storage_start_after_vfsinit=True, vm_path_on_owner_data=True,
-                checked_apfs_boot_shim=True)
+                checked_apfs_boot_shim=True, watchdog_policy_explicit_opt_in=True,
+                watchdog_policy_before_launchd=True, watchdog_policy_exclusive_create=True,
+                watchdog_policy_root_owned_readback=True, watchdog_policy_boolean_true=True)
 
 
 def audit_nabu_arm64e_source(source: Path) -> dict:
@@ -517,6 +539,13 @@ def prepare() -> dict:
                       ['git', '-C', source, 'diff', 'HEAD', '--binary'])).hexdigest())
     if BOARD == 'nabu' and ARCH == 'arm64':
         record['arm64e_userspace_compatibility'] = audit_nabu_arm64e_source(source)
+    if DESKTOP_CFLAGS:
+        record['desktop_source_audit'] = audit_desktop_source(source)
+        record['watchdog_launch_policy'] = dict(default_off=True, boot_argument='disable-watchdogd=1',
+            job='com.apple.watchdogd', policy='/private/var/db/com.apple.xpc.launchd/disabled.plist',
+            migration_marker='/private/var/db/com.apple.xpc.launchd/disabled.migrated',
+            existing_policy_replaced=False, hardware_watchdog_available=False,
+            crash_and_panic_policy_modified=False, hardware_qualified=False)
     save(record)
     return record
 

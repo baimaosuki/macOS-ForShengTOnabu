@@ -80,10 +80,18 @@
       "upstream": "profiles/os/macos-27.3-26C5035r/patches/xnu-12377/macos-apfs-boot-shim.patch",
       "sha256": "6e86844257f7671812627e1f42c6653177a798457909b2e68e9f61eb770108c0",
       "revision": "268bfa1c587db5ee616e955cdfd97a281500a6fb"
+    },
+    {
+      "path": "platform/nabu/macos26/desktop/patches/16-macos-watchdog-policy.patch",
+      "upstream": "UniXNU-sheng/package/BootWatchdogPolicy.c",
+      "revision": "81f43ebaaa3317a5917b76093f7bc44c4949bc02",
+      "upstream_blob": "80b46336a74f102301180cc1d6c09a484f29a5f2",
+      "adapted": true,
+      "sha256": "410931999dabde7fcf3aaa06bd525365aa2bea25b727dabdfde6a6c030ef7a49"
     }
   ],
   "integrated_patch": "platform/nabu/macos26/desktop/integrated.patch",
-  "integrated_sha256": "22c1f893f270cebc060a77e39218b5d8e938119ce76ff472ca40840e0de6eeca",
+  "integrated_sha256": "3bbdcafa5c351bd204382b6dd4a2ef78d85b3e386600fe245e086e146abfc7c9",
   "preimage_sha256": {
     "bsd/kern/bsd_init.c": "c777eb136d9d8de4083225dc3313646d72e6609edd1509d10135f36ab4de058b",
     "bsd/kern/kern_exec.c": "da6ec882873d6071bd18e17cc7038215eb73c071ee0ee772daa87a56775a313d",
@@ -107,6 +115,7 @@
     "Keep paired CodeSignature entitlement constants alongside the CoreEntitlements public API.",
     "Enable actual bindfs sources in the macOS machine configuration for cryptex views.",
     "Publish /System/Volumes/VM as a firmlink to writable owner Data /private/var/vm after Data mount and firmlinks; preserve mount task execution.",
-    "Require successful VM firmlink and addon installation before the opt-in APFS boot shim union; propagate errors to checked Data startup."
+    "Require successful VM firmlink and addon installation before the opt-in APFS boot shim union; propagate errors to checked Data startup.",
+    "Port explicit disable-watchdogd=1 launchd bring-up policy after checked Data/shim setup; exclusively create root:wheel 0644 policy and migration marker, verify metadata/readback, refuse existing strategies and propagate errors before launchd."
   ]
 }

@@ -9,7 +9,7 @@ import struct
 import uuid
 from audit_adt import parse_adt
 from native_devtree import make_nabu_adt, configure_native_text_state
-from native_macho import macho
+from native_macho import macho, symbols
 from prepare_nabu_desktop_policy import validate
 
 
@@ -25,7 +25,7 @@ def validate_owned_memory_size(owned_memory_size, kernel_span, packed_seed_bytes
 
 def assemble(kernel, prelink_report, policy, data, root, loader_build, output, *,
              owned_memory_size=2 << 30, trust_cache: Path | None = None,
-             boot_addon: Path | None = None):
+             boot_addon: Path | None = None, disable_watchdogd=False):
     validate_owned_memory_size(owned_memory_size, 0, 0)
     trust_data = trust_cache.read_bytes() if trust_cache is not None else None
     trust_record = None
@@ -44,6 +44,8 @@ def assemble(kernel, prelink_report, policy, data, root, loader_build, output, *
     report = json.loads(prelink_report.read_text())
     raw = kernel.read_bytes()
     image = macho(raw, 'arm64')
+    if disable_watchdogd and '_native_owner_watchdog_policy_status' not in symbols(kernel):
+        raise ValueError('explicit watchdogd policy requires the kernel watchdog policy reader')
     storage = report.get('storage_driver', {})
     if (report.get('output_sha256') != hashlib.sha256(raw).hexdigest()
             or report.get('unresolved_sites') != 0 or report.get('loadable') is not True
@@ -124,6 +126,8 @@ def assemble(kernel, prelink_report, policy, data, root, loader_build, output, *
     # A root-test candidate must expose transport/layout failures on the panic
     # panel instead of silently returning false and waiting forever for its UUID.
     args = '-v keepsyms=1 debug=0x14e cpus=1 armcpu-self-ipi=1 nabu-source-text=1 native-ufs-root=1 native-ufs-diagnostics=1 rd=uuid boot-uuid=' + root_uuid
+    if disable_watchdogd:
+        args += ' disable-watchdogd=1 exception_log_max_pid=255'
     if addon_data is not None:
         if mm.get('GpuAddon') != bytes(16):
             raise ValueError('boot addon sidecar/ADT slot mismatch')
@@ -143,6 +147,9 @@ def assemble(kernel, prelink_report, policy, data, root, loader_build, output, *
         loader=loader_record,source_module_pointer_formats=storage['pointer_formats'],
         trust_cache=trust_record,
         boot_addon=addon_record,
+        watchdog_launch_policy=dict(enabled=bool(disable_watchdogd),
+            job='com.apple.watchdogd', explicit_boot_arg='disable-watchdogd=1',
+            backend_available=False, crash_and_panic_policy_modified=False),
         ufs_pointer_readback_count=len(storage['pointer_relocations']),
         external_branch_readback_count=report['branch_relocation_count'],constructors=storage['constructors'],
         esp_bundle_bytes=sum(p['bytes'] for n,p in files.items() if n.startswith('EFI/')),
@@ -166,6 +173,8 @@ if __name__ == '__main__':
                    help='contiguous memory request in bytes (decimal or 0x hex); default 2 GiB, subject to real firmware allocation')
     p.add_argument('--trust-cache', type=Path, help='validated original trust module bundle for the loader sidecar')
     p.add_argument('--boot-addon', type=Path, help='owner boot-layout tool in the loader addon format')
+    p.add_argument('--disable-watchdogd', action='store_true',
+                   help='explicitly gate watchdogd through a verified root launchd policy when IOWatchdog is unavailable')
     a=p.parse_args(); print(json.dumps(assemble(a.kernel,a.prelink_report,a.policy,a.data,a.root,a.loader_build,a.output,
         owned_memory_size=a.owned_memory_size, trust_cache=a.trust_cache,
-        boot_addon=a.boot_addon),indent=2))
+        boot_addon=a.boot_addon, disable_watchdogd=a.disable_watchdogd),indent=2))

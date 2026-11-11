@@ -86,7 +86,7 @@
  
  #include <mach/exclaves.h>
  
-@@ -7944,8 +7945,1410 @@
+@@ -7944,8 +7945,1522 @@
   *		word width of the kernel. Once the self-exec completes, the
   *		initproc might be different.
   */
@@ -1415,6 +1415,117 @@
 +	return native_owner_boot_shim_status;
 +}
 +
++/* Explicit board bring-up policy for an unavailable IOWatchdog backend.
++ * This gates the launchd job; it does not change crash/panic handling or claim
++ * hardware watchdog support. Never replace an existing launchd policy. */
++volatile int native_owner_watchdog_policy_status = -1;
++static int
++native_owner_watchdog_file(const char *path, const uint8_t *data, size_t size, vfs_context_t ctx)
++{
++	vnode_t vp = NULLVP;
++	struct vnode_attr va;
++	uint8_t readback[256];
++	int resid = 0;
++	if (size > sizeof(readback)) return EINVAL;
++	int flags = FREAD | FWRITE | O_CREAT | O_EXCL | O_NOFOLLOW;
++	int error = vnode_open(path, flags, 0644, 0, &vp, ctx);
++	if (error) return error;
++	VATTR_INIT(&va);
++	VATTR_SET(&va, va_uid, 0);
++	VATTR_SET(&va, va_gid, 0);
++	VATTR_SET(&va, va_mode, 0644);
++	error = vnode_setattr(vp, &va, ctx);
++	if (!error && size) {
++		error = vn_rdwr(UIO_WRITE, vp, (caddr_t)(uintptr_t)data, (int)size, 0, UIO_SYSSPACE,
++		    IO_NOAUTH | IO_UNIT, vfs_context_ucred(ctx), &resid, vfs_context_proc(ctx));
++		if (!error && resid) error = EIO;
++	}
++	if (!error) error = VNOP_FSYNC(vp, MNT_WAIT, ctx);
++	VATTR_INIT(&va);
++	VATTR_WANTED(&va, va_type);
++	VATTR_WANTED(&va, va_uid);
++	VATTR_WANTED(&va, va_gid);
++	VATTR_WANTED(&va, va_mode);
++	VATTR_WANTED(&va, va_data_size);
++	if (!error) error = vnode_getattr(vp, &va, ctx);
++	if (!error && (!VATTR_IS_SUPPORTED(&va, va_type) || !VATTR_IS_SUPPORTED(&va, va_uid) ||
++	    !VATTR_IS_SUPPORTED(&va, va_gid) || !VATTR_IS_SUPPORTED(&va, va_mode) ||
++	    !VATTR_IS_SUPPORTED(&va, va_data_size))) error = EINVAL;
++	if (!error && (va.va_type != VREG || va.va_uid != 0 || va.va_gid != 0 ||
++	    (va.va_mode & 07777) != 0644 || va.va_data_size != size)) error = EINVAL;
++	if (!error && size) {
++		resid = 0;
++		error = vn_rdwr(UIO_READ, vp, (caddr_t)readback, (int)size, 0, UIO_SYSSPACE,
++		    IO_NOAUTH, vfs_context_ucred(ctx), &resid, vfs_context_proc(ctx));
++		if (!error && (resid || memcmp(data, readback, size))) error = EIO;
++	}
++	int close_error = vnode_close(vp, FREAD | FWRITE, ctx);
++	return error ? error : close_error;
++}
++
++static int
++native_owner_macos_watchdog_policy(proc_t p, user_addr_t scratch)
++{
++	uint32_t enabled = 0;
++	if (!PE_parse_boot_argn("disable-watchdogd", &enabled, sizeof(enabled)) || enabled != 1)
++		return 0;
++	static const char directory[] = "/private/var/db/com.apple.xpc.launchd";
++	static const char policy[] = "/private/var/db/com.apple.xpc.launchd/disabled.plist";
++	static const char marker[] = "/private/var/db/com.apple.xpc.launchd/disabled.migrated";
++	static const uint8_t contents[] =
++	    "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
++	    "<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n"
++	    "<plist version=\"1.0\"><dict><key>com.apple.watchdogd</key><true/></dict></plist>\n";
++	_Static_assert(sizeof(contents) - 1 <= 256, "watchdog policy readback bound");
++	vfs_context_t ctx = vfs_context_current();
++	const char *paths[] = {policy, marker};
++	vnode_t vp = NULLVP;
++	int error = 0;
++	/* Refuse any existing strategy, including an incomplete migration. The
++	 * exclusive opens below also protect against changes after this check. */
++	for (unsigned i = 0; i < sizeof(paths) / sizeof(paths[0]); ++i) {
++		error = vnode_lookup(paths[i], VNODE_LOOKUP_NOFOLLOW, &vp, ctx);
++		if (!error) {
++			vnode_put(vp);
++			vp = NULLVP;
++			error = EEXIST;
++			printf("owner Data: watchdog policy refuses existing %s: %d\n", paths[i], error);
++			goto done;
++		}
++		if (error != ENOENT) goto done;
++	}
++	struct mkdir_args request = {.path = scratch + 0xc00, .mode = 0755};
++	int32_t result = 0;
++	error = copyout(directory, request.path, sizeof(directory));
++	if (!error) error = mkdir(p, &request, &result);
++	if (error == EEXIST) error = 0;
++	if (error) goto done;
++	error = vnode_lookup(directory, VNODE_LOOKUP_NOFOLLOW, &vp, ctx);
++	if (error) goto done;
++	struct vnode_attr va;
++	VATTR_INIT(&va);
++	VATTR_WANTED(&va, va_type);
++	VATTR_WANTED(&va, va_uid);
++	VATTR_WANTED(&va, va_gid);
++	VATTR_WANTED(&va, va_mode);
++	error = vnode_getattr(vp, &va, ctx);
++	if (!error && (!VATTR_IS_SUPPORTED(&va, va_type) || !VATTR_IS_SUPPORTED(&va, va_uid) ||
++	    !VATTR_IS_SUPPORTED(&va, va_gid) || !VATTR_IS_SUPPORTED(&va, va_mode))) error = EINVAL;
++	if (!error && (va.va_type != VDIR || va.va_uid != 0 || va.va_gid != 0 ||
++	    (va.va_mode & 07777) != 0755)) error = EINVAL;
++	vnode_put(vp);
++	vp = NULLVP;
++	if (!error) error = native_owner_watchdog_file(policy, contents, sizeof(contents) - 1, ctx);
++	/* Publish the migration marker only after the complete policy is synced
++	 * and its metadata and contents have been read back successfully. */
++	if (!error) error = native_owner_watchdog_file(marker, (const uint8_t *)"", 0, ctx);
++done:
++	if (vp) vnode_put(vp);
++	native_owner_watchdog_policy_status = error;
++	printf("owner Data: explicit watchdogd launch policy status %d (IOWatchdog backend unavailable)\n", error);
++	return error;
++}
++
 +static int
 +native_owner_macos_data_prepare(proc_t p, user_addr_t scratch)
 +{
@@ -1486,6 +1597,7 @@
 +
 +	if (!error) native_owner_macos_gpu_addon(p, scratch);
 +	if (!error) error = native_owner_macos_boot_shims(p, scratch);
++	if (!error) error = native_owner_macos_watchdog_policy(p, scratch);
 +done:
 +	if (data_root) vnode_put(data_root);
 +	native_owner_data_status = error;
@@ -1498,7 +1610,7 @@
  {
  	int retval[2];
  	int error;
-@@ -8017,7 +9345,7 @@
+@@ -8017,7 +9532,7 @@
  	 */
  	init_exec_args.fname = argv0;
  	init_exec_args.argp = scratch_addr;
@@ -1507,7 +1619,7 @@
  
  	/*
  	 * So that init task is set with uid,gid 0 token
-@@ -8039,6 +9367,8 @@
+@@ -8039,6 +9554,8 @@
  #endif
  	"/sbin/launchd",
  };
@@ -1516,7 +1628,7 @@
  
  /*
   * load_init_program
-@@ -8108,11 +9438,28 @@
+@@ -8108,11 +9625,28 @@
  	exec_log_handle = os_log_create("com.apple.xnu.bsd", "exec");
  #endif /* DEVELOPMENT || DEBUG */
  
@@ -1546,7 +1658,7 @@
  
  #if DEBUG || DEVELOPMENT
  	/* Check for boot-arg suffix first */
-@@ -8124,7 +9471,7 @@
+@@ -8124,7 +9658,7 @@
  
  		if (is_release_suffix) {
  			printf("load_init_program: attempting to load /sbin/launchd\n");
@@ -1555,7 +1667,7 @@
  			if (!error) {
  				return;
  			}
-@@ -8135,7 +9482,7 @@
+@@ -8135,7 +9669,7 @@
  			strlcat(launchd_path, launchd_suffix, sizeof(launchd_path));
  
  			printf("load_init_program: attempting to load %s\n", launchd_path);
@@ -1564,7 +1676,7 @@
  			if (!error) {
  				return;
  			} else if (error != ENOENT) {
-@@ -8148,7 +9495,7 @@
+@@ -8148,7 +9682,7 @@
  	error = ENOENT;
  	for (i = 0; i < sizeof(init_programs) / sizeof(init_programs[0]); i++) {
  		printf("load_init_program: attempting to load %s\n", init_programs[i]);
@@ -1954,6 +2066,17 @@
  	mode = va.va_mode;
  	switch (vp->v_type) {
  	case VREG:
+--- a/config/MASTER.arm64.MacOSX
++++ b/config/MASTER.arm64.MacOSX
+@@ -34,7 +34,7 @@
+ #  BSD_RELEASE =    [ BSD_BASE ]
+ #  BSD_DEV =        [ BSD_BASE config_vnguard ]
+ #  BSD_DEBUG =      [ BSD_BASE config_vnguard ]
+-#  FILESYS_BASE =   [ devfs fdesc fifo fs_compression config_protect config_mnt_rootsnap config_rosv_startup config_mount_vm config_mount_prebootrecovery config_basesystemroot config_fse quota namedstreams config_imgsrc_access config_triggers config_ext_resolver config_searchfs config_volfs config_appledouble nullfs config_mnt_suid config_firmlinks config_dataless_files config_union_mounts config_file_leases ]
++#  FILESYS_BASE =   [ devfs fdesc fifo fs_compression config_protect config_mnt_rootsnap config_rosv_startup config_mount_vm config_mount_prebootrecovery config_basesystemroot config_fse quota namedstreams config_imgsrc_access config_triggers config_ext_resolver config_searchfs config_volfs config_appledouble nullfs bindfs config_mnt_suid config_firmlinks config_dataless_files config_union_mounts config_file_leases ]
+ #  FILESYS_RELEASE= [ FILESYS_BASE ]
+ #  FILESYS_DEV =    [ FILESYS_BASE config_iocount_trace ]
+ #  FILESYS_DEBUG =  [ FILESYS_BASE config_iocount_trace ]
 --- a/iokit/bsddev/IOKitBSDInit.cpp
 +++ b/iokit/bsddev/IOKitBSDInit.cpp
 @@ -577,6 +577,69 @@
@@ -2026,14 +2149,3 @@
  /*
   * Set NVRAM to boot into the right flavor of Recovery,
   * optionally passing a UUID of a volume that failed to boot.
---- a/config/MASTER.arm64.MacOSX
-+++ b/config/MASTER.arm64.MacOSX
-@@ -34,7 +34,7 @@
- #  BSD_RELEASE =    [ BSD_BASE ]
- #  BSD_DEV =        [ BSD_BASE config_vnguard ]
- #  BSD_DEBUG =      [ BSD_BASE config_vnguard ]
--#  FILESYS_BASE =   [ devfs fdesc fifo fs_compression config_protect config_mnt_rootsnap config_rosv_startup config_mount_vm config_mount_prebootrecovery config_basesystemroot config_fse quota namedstreams config_imgsrc_access config_triggers config_ext_resolver config_searchfs config_volfs config_appledouble nullfs config_mnt_suid config_firmlinks config_dataless_files config_union_mounts config_file_leases ]
-+#  FILESYS_BASE =   [ devfs fdesc fifo fs_compression config_protect config_mnt_rootsnap config_rosv_startup config_mount_vm config_mount_prebootrecovery config_basesystemroot config_fse quota namedstreams config_imgsrc_access config_triggers config_ext_resolver config_searchfs config_volfs config_appledouble nullfs bindfs config_mnt_suid config_firmlinks config_dataless_files config_union_mounts config_file_leases ]
- #  FILESYS_RELEASE= [ FILESYS_BASE ]
- #  FILESYS_DEV =    [ FILESYS_BASE config_iocount_trace ]
- #  FILESYS_DEBUG =  [ FILESYS_BASE config_iocount_trace ]
