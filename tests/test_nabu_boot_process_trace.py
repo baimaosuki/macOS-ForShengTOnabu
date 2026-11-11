@@ -43,6 +43,8 @@ struct reason {unsigned osr_namespace; uint64_t osr_code, osr_flags;};
 typedef struct reason *os_reason_t;
 struct proc {int pid,ppid; uint64_t uid; const char *p_comm; int p_xstat; os_reason_t p_exit_reason;};
 typedef struct proc *proc_t;
+static proc_t retired_shadow;
+static bool proc_is_shadow(proc_t p){return p==retired_shadow;}
 struct image_params {const char *ip_startargv,*ip_endargv,*ip_strings,*ip_vp; int ip_argc;};
 static int present, enabled, path_error, refs;
 static uint64_t now;
@@ -80,8 +82,14 @@ int main(void){
  struct proc shadow=p;
  const char fsk[]="fskitd\0";
  image(&shadow,"fskitd","/usr/libexec/fskitd",fsk,sizeof(fsk)-1,1);
+ /* Exec replacement preserves uid: retiring the old proc must neither emit
+  * a false exit0 nor consume the final image's saved args/reason record. */
+ unsigned before_shadow=nabu_lifecycle_trace_events;
+ retired_shadow=&p;p.p_xstat=0;p.p_exit_reason=0;
+ nabu_lifecycle_exit(&p);retired_shadow=0;
+ assert(nabu_lifecycle_trace_events==before_shadow);
  struct reason reason={3,0xabc,4};shadow.p_exit_reason=&reason;shadow.p_xstat=SIGKILL;
- nabu_lifecycle_exit(&shadow);assert(!refs);
+ nabu_lifecycle_exit(&shadow);assert(!refs&&nabu_lifecycle_trace_events==before_shadow+1);
  /* Independent success/failure buckets: initial successful churn cannot hide
   * first failure; later failures recur after the interval with omitted count. */
  for(int i=0;i<100;i++){p.pid=100+i;p.uid=1000+i;p.ppid=40;

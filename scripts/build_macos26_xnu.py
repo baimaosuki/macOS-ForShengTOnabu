@@ -264,7 +264,26 @@ def audit_desktop_source(source: Path) -> dict:
     activation = text[text.index('p->p_acflag &= ~AFORK;'):]
     if not activation.index('set_proc_name(imgp, p)') < activation.index('nabu_lifecycle_exec(p, imgp)'):
         raise ValueError('boot process trace must follow final image identity')
+    lifecycle_exit = lifecycle[lifecycle.index('nabu_lifecycle_exit(proc_t p)\n{'):]
+    if not lifecycle_exit.index('if (proc_is_shadow(p) || !nabu_life_enabled()) return;') < lifecycle_exit.index('proc_uniqueid(p)'):
+        raise ValueError('boot process exit trace must ignore exec shadows before consuming live records')
     exit_source = (source / 'bsd/kern/kern_exit.c').read_text()
+    abort_trace = exit_source[exit_source.index('static LCK_MTX_DECLARE(nabu_abort_trace_lock'):exit_source.index('static int\nabort_with_payload_internal(')]
+    for needle in ('"nabu-boot-proc"', 'enabled != 1', 'nabu_abort_buckets[6]',
+                   'initial < 4', '5000000000ULL', 'nabu_abort_trace_events',
+                   'copyinstr(reason_string, text, sizeof(text), &copied)',
+                   'get_user_regs(current_thread())', 'is_saved_state64(state)',
+                   'get_saved_state_pc(state)', 'get_saved_state_lr(state)',
+                   'get_saved_state_fp(state)', 'get_saved_state_sp(state)',
+                   'i < 6', '(frame & 15)', 'frame < user_sp', 'next <= frame',
+                   'copyin((user_addr_t)frame, pair, sizeof(pair))'):
+        if needle not in abort_trace:
+            raise ValueError('incomplete bounded abort forensics: ' + needle)
+    abort = exit_source[exit_source.index('static int\nabort_with_payload_internal('):]
+    if not (abort.index('abort_should_be_throttled(') < abort.index('nabu_abort_trace(p,')
+            < abort.index('exit_reason = build_userspace_exit_reason(')
+            < abort.index('psignal_try_thread_with_reason(p, current_thread(), SIGABRT, exit_reason)')):
+        raise ValueError('abort forensics must observe before reason construction and preserve abort policy')
     final_exit = exit_source[exit_source.index('pid = proc_getpid(p);\n\texitval = p->p_xstat;'):]
     if not final_exit.index('nabu_lifecycle_exit(p)') < final_exit.index('proc_refdrain(p)'):
         raise ValueError('boot process exit trace must precede proc reference drain')
@@ -292,7 +311,9 @@ def audit_desktop_source(source: Path) -> dict:
                 watchdog_spawn_gate_before_child=True, watchdog_spawn_gate_pid1_exact_path=True,
                 watchdog_spawn_gate_xpcproxy_exact_label=True,
                 boot_process_trace_final_activation=True, boot_process_trace_recurring_bounded=True,
-                boot_process_trace_committed_exit=True, boot_stderr_trace_recurring_bounded=True)
+                boot_process_trace_committed_exit=True, boot_stderr_trace_recurring_bounded=True,
+                boot_process_trace_ignores_retired_exec_shadows=True,
+                abort_trace_saved_user_state_and_reason=True, abort_trace_recurring_bounded=True)
 
 
 def audit_nabu_arm64e_source(source: Path) -> dict:
@@ -596,6 +617,12 @@ def prepare() -> dict:
             stderr_selector='boot-filesystems', stderr_first_events_per_target=8,
             stderr_recurring_interval_seconds=5,
             monotonic_nanoseconds=True, hardware_qualified=False)
+        record['boot_process_trace']['abort_forensics'] = dict(marker='nabu_abort_trace_events',
+            before_reason_creation=True, reason_string_bytes=192, max_frame_candidates=6,
+            frame_bytes=16, max_frame_distance_from_sp=1 << 20,
+            saved_user_registers=['PC', 'LR', 'FP', 'SP'], first_events_per_target=4,
+            recurring_interval_seconds=5, original_abort_results_preserved=True,
+            stripped_addresses_are_diagnostic_candidates=True)
         record['watchdog_launch_policy'] = dict(default_off=True, boot_argument='disable-watchdogd=1',
             job='com.apple.watchdogd', policy='/private/var/db/com.apple.xpc.launchd/disabled.plist',
             migration_marker='/private/var/db/com.apple.xpc.launchd/disabled.migrated',
@@ -965,7 +992,8 @@ def link_kernel(args, record, common, sdk, source, env):
                     '_nabu_register_storage_start', '_nabu_source_storage_start',
                     '_native_owner_root_accepted', '_native_owner_cache_status',
                     '_native_owner_data_stage', '_native_owner_firmlink_count',
-                    '_native_owner_app_cryptex_stage', '_nabu_lifecycle_trace_events')
+                    '_native_owner_app_cryptex_stage', '_nabu_lifecycle_trace_events',
+                    '_nabu_abort_trace_events')
         missing = [name for name in required if name not in actual]
         if missing:
             raise ValueError('linked desktop kernel omitted owner/root/Data code: ' + ', '.join(missing))

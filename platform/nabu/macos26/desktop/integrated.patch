@@ -86,7 +86,7 @@
  
  #include <mach/exclaves.h>
  
-@@ -944,6 +945,208 @@
+@@ -944,6 +945,209 @@
  		p->p_crash_behavior |= POSIX_SPAWN_PANIC_ON_SPAWN_FAIL;
  	}
  }
@@ -271,7 +271,8 @@
 +void
 +nabu_lifecycle_exit(proc_t p)
 +{
-+	if (!nabu_life_enabled()) return;
++	/* Exec retires an old shadow with the same uniqueid as the live image. */
++	if (proc_is_shadow(p) || !nabu_life_enabled()) return;
 +	uint64_t uid = proc_uniqueid(p);
 +	bool tracked = false;
 +	lck_mtx_lock(&nabu_life_lock);
@@ -295,7 +296,7 @@
  
  void
  set_proc_name(struct image_params *imgp, proc_t p)
-@@ -2746,6 +2949,9 @@
+@@ -2746,6 +2950,9 @@
  	p->p_acflag &= ~AFORK;
  
  	set_proc_name(imgp, p);
@@ -305,7 +306,7 @@
  #if SHENG
  	/* Image activation is observable here; this is not application readiness. */
  	sheng_boot_service(p->p_comm, proc_getpid(p), 0, 0);
-@@ -4341,9 +4547,54 @@
+@@ -4341,9 +4548,54 @@
   *		Handle posix_spawnattr_t
   *		Handle posix_spawn_file_actions_t
   */
@@ -360,7 +361,7 @@
  	proc_t p = ap;
  	user_addr_t pid = uap->pid;
  	int ival[2];            /* dummy retval for setpgid() */
-@@ -7952,8 +8203,1522 @@
+@@ -7952,8 +8204,1522 @@
   *		word width of the kernel. Once the self-exec completes, the
   *		initproc might be different.
   */
@@ -1884,7 +1885,7 @@
  {
  	int retval[2];
  	int error;
-@@ -8025,7 +9790,7 @@
+@@ -8025,7 +9791,7 @@
  	 */
  	init_exec_args.fname = argv0;
  	init_exec_args.argp = scratch_addr;
@@ -1893,7 +1894,7 @@
  
  	/*
  	 * So that init task is set with uid,gid 0 token
-@@ -8047,6 +9812,8 @@
+@@ -8047,6 +9813,8 @@
  #endif
  	"/sbin/launchd",
  };
@@ -1902,7 +1903,7 @@
  
  /*
   * load_init_program
-@@ -8116,11 +9883,28 @@
+@@ -8116,11 +9884,28 @@
  	exec_log_handle = os_log_create("com.apple.xnu.bsd", "exec");
  #endif /* DEVELOPMENT || DEBUG */
  
@@ -1932,7 +1933,7 @@
  
  #if DEBUG || DEVELOPMENT
  	/* Check for boot-arg suffix first */
-@@ -8132,7 +9916,7 @@
+@@ -8132,7 +9917,7 @@
  
  		if (is_release_suffix) {
  			printf("load_init_program: attempting to load /sbin/launchd\n");
@@ -1941,7 +1942,7 @@
  			if (!error) {
  				return;
  			}
-@@ -8143,7 +9927,7 @@
+@@ -8143,7 +9928,7 @@
  			strlcat(launchd_path, launchd_suffix, sizeof(launchd_path));
  
  			printf("load_init_program: attempting to load %s\n", launchd_path);
@@ -1950,7 +1951,7 @@
  			if (!error) {
  				return;
  			} else if (error != ENOENT) {
-@@ -8156,7 +9940,7 @@
+@@ -8156,7 +9941,7 @@
  	error = ENOENT;
  	for (i = 0; i < sizeof(init_programs) / sizeof(init_programs[0]); i++) {
  		printf("load_init_program: attempting to load %s\n", init_programs[i]);
@@ -1961,7 +1962,110 @@
  		} else if (error != ENOENT) {
 --- a/bsd/kern/kern_exit.c
 +++ b/bsd/kern/kern_exit.c
-@@ -2357,6 +2357,10 @@
+@@ -1514,6 +1514,91 @@
+ }
+ 
+ 
++#if defined(NABU) && NABU && defined(XNU_OWNER_DATA_MOUNT) && XNU_OWNER_DATA_MOUNT && defined(__arm64__)
++#include <arm/thread.h>
++#include <mach/arm/thread_status.h>
++#include <kern/clock.h>
++/* Observational only. The original reason creation, signal and result follow. */
++static LCK_MTX_DECLARE(nabu_abort_trace_lock, &proc_lck_grp);
++static struct { unsigned int initial; uint64_t last_ns, suppressed; } nabu_abort_buckets[6];
++volatile unsigned int nabu_abort_trace_events;
++
++static int
++nabu_abort_trace_kind(const char *name)
++{
++	static const char *const names[] = { "cryptexd", "fskitd", "mount", "mount_apfs",
++		"WindowServer", "diskarbitrationd" };
++	for (unsigned int i = 0; i < 6; i++) if (!strcmp(name, names[i])) return (int)i;
++	return -1;
++}
++
++/* Candidate userspace addresses only; never write a stripped value to state. */
++static uint64_t
++nabu_abort_user_address(uint64_t raw)
++{
++	return raw & 0x00007fffffffffffULL;
++}
++
++static void
++nabu_abort_trace(proc_t p, uint32_t reason_namespace, uint64_t reason_code,
++    uint32_t payload_size, user_addr_t reason_string, uint64_t reason_flags, uint32_t internal_flags)
++{
++	uint32_t enabled = 0;
++	if (!PE_parse_boot_argn("nabu-boot-proc", &enabled, sizeof(enabled)) || enabled != 1) return;
++	int kind = nabu_abort_trace_kind(p->p_comm);
++	if (kind < 0) return;
++	uint64_t ns = 0, suppressed = 0;
++	bool emit = false;
++	absolutetime_to_nanoseconds(mach_absolute_time(), &ns);
++	lck_mtx_lock(&nabu_abort_trace_lock);
++	if (nabu_abort_buckets[kind].initial < 4 || ns - nabu_abort_buckets[kind].last_ns >= 5000000000ULL) {
++		if (nabu_abort_buckets[kind].initial < 4) nabu_abort_buckets[kind].initial++;
++		suppressed = nabu_abort_buckets[kind].suppressed;
++		nabu_abort_buckets[kind].suppressed = 0;
++		nabu_abort_buckets[kind].last_ns = ns;
++		emit = true;
++	} else nabu_abort_buckets[kind].suppressed++;
++	lck_mtx_unlock(&nabu_abort_trace_lock);
++	if (!emit) return;
++	os_atomic_inc(&nabu_abort_trace_events, relaxed);
++	uint64_t uid = proc_uniqueid(p);
++	char text[192] = {0};
++	size_t copied = 0;
++	int text_error = reason_string ? copyinstr(reason_string, text, sizeof(text), &copied) : 0;
++	text[sizeof(text) - 1] = 0;
++	for (unsigned int i = 0; i < sizeof(text) - 1 && text[i]; i++)
++		if ((unsigned char)text[i] < 32 || text[i] == 127) text[i] = '?';
++	printf("NABU-ABORT t_ns=%llu pid=%d uid=%llu name=%s ns=%u code=0x%llx flags=0x%llx internal=0x%x payload_size=%u suppressed=%llu\n",
++	    ns, proc_getpid(p), uid, p->p_comm, reason_namespace, reason_code, reason_flags,
++	    internal_flags, payload_size, suppressed);
++	printf("NABU-ABORT uid=%llu reason_ptr=0x%llx copy_error=%d truncated=%d copied=%lu text=%s\n",
++	    uid, (uint64_t)reason_string, text_error, text_error == ENAMETOOLONG,
++	    (unsigned long)copied, text);
++	arm_saved_state_t *state = get_user_regs(current_thread());
++	if (!state || !is_saved_state64(state)) {
++		printf("NABU-ABORT uid=%llu user_state64=0\n", uid);
++		return;
++	}
++	uint64_t pc = get_saved_state_pc(state), lr = get_saved_state_lr(state);
++	uint64_t fp = get_saved_state_fp(state), sp = get_saved_state_sp(state);
++	printf("NABU-ABORT uid=%llu pc=0x%llx lr=0x%llx fp=0x%llx sp=0x%llx pc_user=0x%llx lr_user=0x%llx\n",
++	    uid, pc, lr, fp, sp, nabu_abort_user_address(pc), nabu_abort_user_address(lr));
++	uint64_t user_sp = nabu_abort_user_address(sp), frame = nabu_abort_user_address(fp);
++	for (unsigned int i = 0; i < 6; i++) {
++		if (!frame || (frame & 15) || frame < user_sp || frame - user_sp > 0x100000 ||
++		    frame > 0x00007ffffdfffff0ULL) break;
++		uint64_t pair[2] = {0};
++		int error = copyin((user_addr_t)frame, pair, sizeof(pair));
++		printf("NABU-ABORT uid=%llu frame=%u fp_user=0x%llx copy_error=%d next_raw=0x%llx lr_raw=0x%llx caller_user=0x%llx\n",
++		    uid, i, frame, error, pair[0], pair[1], nabu_abort_user_address(pair[1]));
++		if (error) break;
++		uint64_t next = nabu_abort_user_address(pair[0]);
++		if (next <= frame) break;
++		frame = next;
++	}
++}
++#endif
++
+ static int
+ abort_with_payload_internal(proc_t p,
+     uint32_t reason_namespace, uint64_t reason_code,
+@@ -1531,6 +1616,10 @@
+ 	KERNEL_DEBUG_CONSTANT(BSDDBG_CODE(DBG_BSD_PROC, BSD_PROC_EXITREASON_CREATE) | DBG_FUNC_NONE,
+ 	    proc_getpid(p), reason_namespace,
+ 	    reason_code, 0, 0);
++
++#if defined(NABU) && NABU && defined(XNU_OWNER_DATA_MOUNT) && XNU_OWNER_DATA_MOUNT && defined(__arm64__)
++	nabu_abort_trace(p, reason_namespace, reason_code, payload_size, reason_string, reason_flags, internal_flags);
++#endif
+ 
+ 	exit_reason = build_userspace_exit_reason(reason_namespace, reason_code,
+ 	    payload, payload_size, reason_string, reason_flags | OS_REASON_FLAG_ABORT);
+@@ -2357,6 +2446,10 @@
  	proc_unlock(p);
  	pid = proc_getpid(p);
  	exitval = p->p_xstat;

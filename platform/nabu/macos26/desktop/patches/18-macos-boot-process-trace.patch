@@ -1,7 +1,7 @@
 Explicit opt-in bounded boot process exec/exit diagnostics; no behavior overrides.
 --- a/bsd/kern/kern_exec.c
 +++ b/bsd/kern/kern_exec.c
-@@ -945,6 +945,208 @@
+@@ -945,6 +945,209 @@
  		p->p_crash_behavior |= POSIX_SPAWN_PANIC_ON_SPAWN_FAIL;
  	}
  }
@@ -186,7 +186,8 @@ Explicit opt-in bounded boot process exec/exit diagnostics; no behavior override
 +void
 +nabu_lifecycle_exit(proc_t p)
 +{
-+	if (!nabu_life_enabled()) return;
++	/* Exec retires an old shadow with the same uniqueid as the live image. */
++	if (proc_is_shadow(p) || !nabu_life_enabled()) return;
 +	uint64_t uid = proc_uniqueid(p);
 +	bool tracked = false;
 +	lck_mtx_lock(&nabu_life_lock);
@@ -210,7 +211,7 @@ Explicit opt-in bounded boot process exec/exit diagnostics; no behavior override
  
  void
  set_proc_name(struct image_params *imgp, proc_t p)
-@@ -2747,6 +2949,9 @@
+@@ -2747,6 +2950,9 @@
  	p->p_acflag &= ~AFORK;
  
  	set_proc_name(imgp, p);
