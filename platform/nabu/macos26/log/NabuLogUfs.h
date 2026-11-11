@@ -297,14 +297,14 @@ static void nabuLogThread(void *,wait_result_t)
         bool first=nabu_log_writer_rounds==0;
         newest=slot;sequence++;last_end=snapshot.end;last_lost=snapshot.lost;
         __atomic_store_n(&nabu_log_committed_end,snapshot.end,__ATOMIC_RELEASE);
-        nabu_log_writer_rounds++;
+        __atomic_fetch_add(&nabu_log_writer_rounds,1u,__ATOMIC_RELAXED);
         if(first) IOLog("NABULOG2: first snapshot committed slot=%u bytes=%u\n",slot,snapshot.length);
       }
       nabuLogPause(1000);
     }
   }
 stop:
-  nabu_log_writer_state=3;nabu_log_writer_failures++;
+  nabu_log_writer_state=3;__atomic_fetch_add(&nabu_log_writer_failures,1u,__ATOMIC_RELAXED);
   IOLog("NABULOG2: writer stopped reason=%s; RAM capture continues; no fallback write window\n",stop_reason);
   thread_terminate(current_thread());
 }
@@ -326,7 +326,7 @@ static void nabuLogStart(void) {
     IOLog("NABULOG2: writer thread created lun_blocks=%u\n",(unsigned)gHost.blocks);
   }
   else {
-    nabu_log_writer_state=3;nabu_log_writer_failures++;
+    nabu_log_writer_state=3;__atomic_fetch_add(&nabu_log_writer_failures,1u,__ATOMIC_RELAXED);
     IOLog("NABULOG2: writer thread start failed; RAM capture continues\n");
   }
 }
