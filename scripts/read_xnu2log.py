@@ -1,110 +1,101 @@
 #!/usr/bin/env python3
-"""Decode the kernel journal written into XNU2LOG.BIN on the nabu ESP.
+"""Decode a CRC-validated NABULOG2 journal from the nabu ESP.
 
-Mirrors `nb_slot_valid()` from platform/nabu/macos26/log/NabuLogFormat.h:
-
-  slot  = 4096 header + 4 MiB payload ring
-  file  = 4096 config + slot A + slot B
-
-A slot is trusted only when magic/version/geometry/token match, the header CRC
-over bytes [0,4096) with field 80 zeroed matches, end-first == length, and the
-payload CRC over the committed bytes matches. The newer valid slot wins.
+The writer linearizes each RAM-ring snapshot into its on-disk slot, including
+snapshots taken after the 4 MiB RAM ring wraps. The config and both slots use
+the shared nabu_log_volume contract; the newest valid sequence wins.
 """
 from __future__ import annotations
 
 import argparse
-import struct
+import json
 import sys
-import zlib
 from pathlib import Path
 
-BLOCK = 4096
-CAPACITY = 4 * 1024 * 1024
-SLOT_BYTES = BLOCK + CAPACITY
-FILE_BYTES = BLOCK + 2 * SLOT_BYTES
+# Keep these names available to existing callers of this script.
+from nabu_log_volume import (
+    BLOCK, CAPACITY, SLOT_BYTES, FILE_BYTES, check_config, decode_container,
+    header_crc, make_config, u32, u64,
+)
+
 SLOTS = (BLOCK, BLOCK + SLOT_BYTES)
 
 
-def header_crc(block: bytes, zero_at: int) -> int:
-    """crc32 over the block with a 4-byte field treated as zero."""
-    buf = bytearray(block)
-    struct.pack_into("<I", buf, zero_at, 0)
-    return zlib.crc32(bytes(buf)) & 0xFFFFFFFF
-
-
-def u32(p: bytes, at: int) -> int:
-    return struct.unpack_from("<I", p, at)[0]
-
-
-def u64(p: bytes, at: int) -> int:
-    return struct.unpack_from("<Q", p, at)[0]
+def _legacy_slot(data: bytes, info: dict) -> dict:
+    """Preserve the public parse_slot result fields."""
+    return {
+        "sequence": info["sequence"],
+        "boot_id": info["boot_id"],
+        "end": info["committed_total"],
+        "first": info["ring_overwritten"],
+        "length": info["payload_bytes"],
+        "overwritten": info["ring_overwritten"],
+        "lock_lost": info["lost_on_contention"],
+        "build": bytes.fromhex(info["build_id"]).rstrip(b"\0").decode("ascii", "replace"),
+        "data": data,
+    }
 
 
 def parse_slot(image: bytes, base: int, token: bytes) -> dict | None:
-    head = image[base:base + BLOCK]
-    if len(head) < BLOCK or head[0:8] != b"NABULOG2":
+    """Validate one slot independently, retaining the historical public API.
+
+    This helper deliberately does not validate the source container's config or
+    its other slot. Use decode_image for complete-container validation.
+    """
+    if base < 0 or base + SLOT_BYTES > len(image):
         return None
-    if u32(head, 8) != 2 or u32(head, 12) != BLOCK or u32(head, 16) != 1:
+    try:
+        # Reuse the shared validator with this slot alone and the caller's token.
+        container = make_config(token) + image[base:base + SLOT_BYTES] + bytes(SLOT_BYTES)
+        data, info = decode_container(container)
+    except ValueError:
         return None
-    if u32(head, 20) != CAPACITY or u32(head, 84) != 0:
-        return None
-    if u32(head, 80) != header_crc(head, 80):
-        return None
-    if head[96:112] != token:
-        return None
-    end, first, length = u64(head, 48), u64(head, 64), u32(head, 72)
-    if first > end or end - first != length or length != min(end, CAPACITY):
-        return None
-    if u64(head, 88) != first:
-        return None
-    payload = image[base + BLOCK:base + SLOT_BYTES]
-    start = (end - length) % CAPACITY
-    data = payload[start:start + length]
-    if start + length > CAPACITY:
-        data += payload[:(start + length) - CAPACITY]
-    if u32(head, 76) != (zlib.crc32(data) & 0xFFFFFFFF):
-        return None
-    return {
-        "sequence": u64(head, 24),
-        "boot_id": head[32:48].hex(),
-        "end": end,
-        "first": first,
-        "length": length,
-        "overwritten": u64(head, 88),
-        "lock_lost": u64(head, 56),
-        "build": head[112:144].rstrip(b"\0").decode("ascii", "replace"),
-        "data": data,
-    }
+    return _legacy_slot(data, info)
+
+
+def decode_image(image: bytes, token: bytes | None = None) -> tuple[bytes, dict]:
+    """Validate the full container and, if supplied, the expected allocation token."""
+    data, info = decode_container(image)
+    if token is not None and token != bytes.fromhex(info["allocation_token"]):
+        raise ValueError("supplied token does not match the validated NABUCFG2 config")
+    return data, info
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("image", type=Path)
-    ap.add_argument("--token", required=True, help="32 hex digits used in the boot argument")
+    ap.add_argument("--token", help="expected 32 hex digits; defaults to the CRC-validated config token")
     ap.add_argument("--out", type=Path, help="write the decoded text stream here")
+    ap.add_argument("--info-json", type=Path, help="write validation metadata or a decode error as JSON")
     args = ap.parse_args()
 
-    image = args.image.read_bytes()
-    token = bytes.fromhex(args.token)
-    if len(image) != FILE_BYTES:
-        print(f"warn: size {len(image)} != {FILE_BYTES} (expected; continuing)", file=sys.stderr)
-
-    found = [s for s in (parse_slot(image, base, token) for base in SLOTS) if s]
-    if not found:
-        print("no valid slot (writer never committed, or token mismatch)", file=sys.stderr)
+    try:
+        token = None
+        if args.token is not None:
+            token = bytes.fromhex(args.token)
+            if len(token) != 16:
+                raise ValueError("--token must contain exactly 32 hex digits")
+        data, info = decode_image(args.image.read_bytes(), token)
+    except (OSError, ValueError) as error:
+        print(f"cannot decode NABULOG2: {error}", file=sys.stderr)
+        if args.info_json:
+            args.info_json.write_text(json.dumps(dict(decoded=False, error=str(error)), indent=2) + "\n")
         return 1
-    slot = max(found, key=lambda s: s["sequence"])
+
+    slot = _legacy_slot(data, info)
     print(f"slot sequence : {slot['sequence']}")
     print(f"boot id       : {slot['boot_id']}")
     print(f"committed     : {slot['length']} bytes (end={slot['end']}, first={slot['first']})")
     print(f"overwritten   : {slot['overwritten']}   lock_lost: {slot['lock_lost']}")
     print(f"build         : {slot['build'] or '(unset)'}")
-    print(f"valid slots   : {len(found)}")
+    print(f"valid slots   : {sum(entry['valid'] for entry in info['slots'])}")
+    if args.info_json:
+        args.info_json.write_text(json.dumps(dict(info, decoded=True), indent=2) + "\n")
     if args.out:
-        args.out.write_bytes(slot["data"])
+        args.out.write_bytes(data)
         print(f"wrote {args.out}")
     else:
-        sys.stdout.write(slot["data"].decode("utf-8", "backslashreplace"))
+        sys.stdout.write(data.decode("utf-8", "backslashreplace"))
     return 0
 
 

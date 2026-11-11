@@ -1,0 +1,27 @@
+Connect the explicit NABULOG2 journal after successful checked root preparation.
+--- a/drivers/NativeUfs/NativeUfs.cpp
++++ b/drivers/NativeUfs/NativeUfs.cpp
+@@ -1045,6 +1045,10 @@
+ 
+ #if defined(NATIVE_MACOSLOG) && NATIVE_MACOSLOG
+ #include NATIVE_MACOSLOG_WORKER
++#endif
++#if defined(NATIVE_NABULOG) && NATIVE_NABULOG
++static uint64_t nabu_log_root_first, nabu_log_root_blocks;
++#include "NabuLogUfs.h"
+ #endif
+ 
+ // ---- Persistent Data store window (sheng-data-persist; closed on nabu) -------------------------------------------
+@@ -2234,6 +2238,12 @@
+ #if defined(NATIVE_MACOSLOG) && NATIVE_MACOSLOG
+   mlStart();
+ #endif
++#if defined(NATIVE_NABULOG) && NATIVE_NABULOG
++  // Checked 4K GPT userdata range, containing every authenticated root window.
++  nabu_log_root_first = gStoreGeometry.first;
++  nabu_log_root_blocks = gStoreGeometry.last - gStoreGeometry.first + 1;
++  nabuLogStart();
++#endif
+   return true;
+ }
+ 

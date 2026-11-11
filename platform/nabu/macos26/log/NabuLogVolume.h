@@ -24,6 +24,7 @@ struct nb_log_volume {
   uint8_t token[16], fat[1024*1024], scratch[4096], entries[128*128];
   uint32_t directories[1024], reads;
   uint32_t failure; uint64_t failure_lba; uint32_t failure_blocks;
+  uint32_t validated;
 };
 static inline const char *nb_volume_failure_name(uint32_t failure) {
   switch(failure) {
@@ -122,6 +123,7 @@ static inline int nb_no_aliases(struct nb_log_volume *v) {
 static inline int nb_volume_open(struct nb_log_volume *v,nb_log_read_fn read,void *ctx,
                                  uint64_t lun_blocks,const uint8_t token[16]) {
   static const uint8_t esp_type[16]={0x28,0x73,0x2a,0xc1,0x1f,0xf8,0xd2,0x11,0xba,0x4b,0,0xa0,0xc9,0x3e,0xc9,0x3b};
+  v->validated=0;
   v->read=read;v->context=ctx;v->lun_blocks=lun_blocks;v->reads=0;
   v->esp_first=0;v->file_cluster=0;
   v->failure=NBV_OK;v->failure_lba=0;v->failure_blocks=0;
@@ -187,11 +189,11 @@ static inline int nb_volume_open(struct nb_log_volume *v,nb_log_read_fn read,voi
     return nb_volume_fail(v,NBV_CONFIG_READ);
   if(!nb_vread(v,v->file_first,1,p)) return nb_volume_fail(v,NBV_CONFIG_READ);
   if(!nb_config_valid(p,token)) return nb_volume_fail(v,NBV_CONFIG);
-  nb_copy(v->token,token,16); return 1;
+  nb_copy(v->token,token,16); v->validated=1; return 1;
 }
 static inline int nb_volume_write_allowed(const struct nb_log_volume *v,uint64_t lba,uint32_t n) {
   /* Config at relative block 0 is immutable. Everything else is an A/B slot. */
-  return n && lba>v->file_first && lba-v->file_first<NB_LOG_FILE_BYTES/4096 &&
+  return v->validated && n && lba>v->file_first && lba-v->file_first<NB_LOG_FILE_BYTES/4096 &&
     n<=NB_LOG_FILE_BYTES/4096-(lba-v->file_first);
 }
 #endif

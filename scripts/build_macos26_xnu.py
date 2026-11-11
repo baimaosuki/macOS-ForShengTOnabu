@@ -482,6 +482,11 @@ def prepare() -> dict:
     stage_file(framebuffer_owner, source / 'pexpert/arm/pe_sheng_framebuffer.h')
     retained_log = PLATFORM / 'log/retained_log.h'
     stage_file(retained_log, source / 'pexpert/arm/pe_sheng_log.h')
+    if BOARD == 'nabu':
+        for name in ('NabuLogCore.h', 'NabuLogFormat.h'):
+            stage_file(PLATFORM / 'log' / name, source / 'pexpert/arm' / name)
+        subprocess.run(['git', '-C', source, 'add', '-N',
+                        'pexpert/arm/NabuLogCore.h', 'pexpert/arm/NabuLogFormat.h'], check=True)
     smp_log = PLATFORM / 'log/smp_log.h'
     stage_file(smp_log, source / 'pexpert/arm/pe_sheng_smp_log.h')
     boot_progress = PLATFORM / 'log/boot_progress.h'
@@ -565,6 +570,11 @@ def prepare() -> dict:
                   patches={str(p.relative_to(ROOT)): sha(p) for p in PATCHES},
                   io_zero_source_sha256=sha(io_zero),
                   retained_log_source_sha256=sha(retained_log),
+                  esp_log_capture=(dict(capacity_bytes=4 << 20, ram_only_producer=True,
+                      default_disk_writes=False, requires_enable_and_allocation_token=True,
+                      headers_sha256={name: sha(PLATFORM / 'log' / name)
+                                      for name in ('NabuLogCore.h', 'NabuLogFormat.h')})
+                      if BOARD == 'nabu' else None),
                   framebuffer_owner=dict(version=1, source_sha256=sha(framebuffer_owner),
                       panic_bypasses_writer=True, late_panic_redraw=True, max_cpus=8),
                   smp_log=dict(source_sha256=sha(smp_log), interval_seconds=30, per_core=True),
@@ -626,6 +636,11 @@ def prepare() -> dict:
         record['arm64e_userspace_compatibility'] = audit_nabu_arm64e_source(source)
     if DESKTOP_CFLAGS:
         record['desktop_source_audit'] = audit_desktop_source(source)
+        if BOARD == 'nabu':
+            journal_capture = (source / 'pexpert/arm/pe_sheng_log.h').read_text()
+            if '#include "NabuLogCore.h"' not in journal_capture or 'nabu_capture_append(&byte, 1)' not in journal_capture:
+                raise ValueError('NABU ESP journal requires the actual retained-console producer')
+            record['desktop_source_audit']['esp_log_console_producer_connected'] = True
         record['preboot_state_view'] = dict(path='/System/Volumes/Preboot',
             marker='native_owner_preboot_status',
             target='/private/var/ngpu/preboot', mechanism='checked owner Data firmlink',

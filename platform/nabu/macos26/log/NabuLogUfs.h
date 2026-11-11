@@ -10,7 +10,7 @@
 #include "NabuLogCore.h"
 #include "NabuLogVolume.h"
 #include "NabuLogBuild.h"
-#include "NabuLogWatch.h"
+
 static struct nb_log_volume nabu_log_volume;
 static uint8_t nabu_log_payload[NB_LOG_CAPACITY] __attribute__((aligned(4096)));
 static uint8_t nabu_log_headers[2][4096],nabu_log_header[4096];
@@ -25,8 +25,8 @@ uint64_t nabu_log_committed_end=0;
  * read path stays read-only. Only this function can emit the bounded WRITE(10). */
 static int nabuLogIo(bool write,uint64_t lba,uint32_t blocks,uint8_t *data,bool sync=false)
 {
-  if(!gHost.ready || gHost.poisoned || !gHost.lock || lba>=nabu_log_lun_blocks ||
-     blocks>nabu_log_lun_blocks-lba || blocks>kDataMax/4096) {nabu_log_io_reason="host";return -1;}
+  if(!gHost.ready || gHost.poisoned || !gHost.lock || lba>=gHost.blocks ||
+     blocks>gHost.blocks-lba || blocks>kDataMax/4096) {nabu_log_io_reason="host";return -1;}
   if(write && !nb_volume_write_allowed(&nabu_log_volume,lba,blocks)) {nabu_log_io_reason="write-gate";return -1;}
   if(!sync && (!blocks || !data)) {nabu_log_io_reason="bad-args";return -1;}
   if(!IOLockTryLock(gHost.lock)) {nabu_log_io_reason="busy";return 0;}
@@ -56,7 +56,6 @@ static void nabuLogPause(unsigned milliseconds)
   clock_interval_to_deadline(milliseconds,kMillisecondScale,&deadline);
   unsigned budget=milliseconds>1000?1000000:milliseconds*1000;
   do {
-    nabu_boot_watch_poll();
     thread_yield_internal(1);
   } while(budget-- && mach_absolute_time()<deadline);
 }
@@ -123,35 +122,38 @@ static int nabuLogTokenParse(uint8_t token[16]) {
   }
   if(value==nullptr)
     return NB_TOKEN_MISSING;
+  unsigned token_bytes=0;
+  while(value[token_bytes] && value[token_bytes]!=' ' && token_bytes<33) token_bytes++;
+  if(token_bytes!=32) return NB_TOKEN_BAD_HEX;
+  unsigned nonzero=0;
   for(unsigned i=0;i<16;i++) {
     int a=nabuLogHex(value[2*i]),b=nabuLogHex(value[2*i+1]);
     if(a<0 || b<0) return NB_TOKEN_BAD_HEX;
-    token[i]=(uint8_t)(a*16+b);
+    token[i]=(uint8_t)(a*16+b);nonzero|=token[i];
   }
-  if(value[32] && value[32]!=' ') return NB_TOKEN_BAD_HEX;
+  if(!nonzero) return NB_TOKEN_BAD_HEX;
   return NB_TOKEN_OK;
 }
 static __attribute__((unused)) bool nabuLogToken(uint8_t token[16]) {
   return nabuLogTokenParse(token)==NB_TOKEN_OK;
 }
 static bool nabuLogWindowsClear(void) {
-  const char *keys[4]={"native-ufs-os-lba","native-ufs-os-sectors","native-ufs-systemos-lba","native-ufs-systemos-sectors"};
-  uint32_t n[4]={0};
-  for(unsigned i=0;i<4;i++) if(!PE_parse_boot_argn(keys[i],n+i,sizeof(n[i])) || !n[i]) {
-    IOLog("NABULOG2: writer stop reason=boot-windows detail=missing-%s\n",keys[i]);
+  /* Desktop windows all lie in the checked userdata GPT partition. The ESP
+   * must be disjoint from that entire partition, not legacy guessed bootargs. */
+  if (!nabu_log_root_blocks || nabu_log_root_first >= gHost.blocks ||
+      nabu_log_root_blocks > gHost.blocks - nabu_log_root_first) {
+    IOLog("NABULOG2: writer stop reason=root-layout-unavailable\n");
     return false;
   }
-  const uint64_t first=nabu_log_volume.esp_first*4096,end=(nabu_log_volume.esp_first+nabu_log_volume.esp_blocks)*4096;
-  for(unsigned i=0;i<4;i+=2) {
-    uint64_t a=(uint64_t)n[i]*4096,b=a+(uint64_t)n[i+1]*512;
-    if(a<end && first<b) {
-      IOLog("NABULOG2: writer stop reason=boot-windows detail=esp-overlap esp=%u..%u window=%u..%u\n",
-            (unsigned)first,(unsigned)end,(unsigned)a,(unsigned)b);
-      return false;
-    }
+  uint64_t esp_end=nabu_log_volume.esp_first+nabu_log_volume.esp_blocks;
+  uint64_t root_end=nabu_log_root_first+nabu_log_root_blocks;
+  if(nabu_log_volume.esp_first < root_end && nabu_log_root_first < esp_end) {
+    IOLog("NABULOG2: writer stop reason=esp-root-overlap\n");
+    return false;
   }
   return true;
 }
+
 static int nabuLogSlot(unsigned slot,uint8_t *header) {
   uint64_t base=nabu_log_volume.file_first+1+(uint64_t)slot*(NB_LOG_SLOT_BYTES/4096);
   if(!nabuLogRead(nullptr,base,1,header)) return -1;
@@ -185,7 +187,7 @@ static void nabuLogThread(void *,wait_result_t)
     unsigned attempts=0;
     stop_reason="volume-open";
     for(;attempts<30;attempts++) {
-      if(nb_volume_open(&nabu_log_volume,nabuLogRead,nullptr,nabu_log_lun_blocks,token)) {opened=true;break;}
+      if(nb_volume_open(&nabu_log_volume,nabuLogRead,nullptr,gHost.blocks,token)) {opened=true;break;}
       IOLog("NABULOG2: volume open failed attempt=%u reason=%s lba=%u blocks=%u reads=%u poisoned=%u ready=%u\n",
             attempts+1,nb_volume_failure_name(nabu_log_volume.failure),
             (unsigned)nabu_log_volume.failure_lba,nabu_log_volume.failure_blocks,
@@ -314,7 +316,7 @@ static void nabuLogStart(void) {
   nabu_log_writer_state=1;
   if(kernel_thread_start(nabuLogThread,nullptr,&thread)==KERN_SUCCESS) {
     thread_deallocate(thread);
-    IOLog("NABULOG2: writer thread created lun_blocks=%u\n",(unsigned)nabu_log_lun_blocks);
+    IOLog("NABULOG2: writer thread created lun_blocks=%u\n",(unsigned)gHost.blocks);
   }
   else {
     nabu_log_writer_state=3;nabu_log_writer_failures++;

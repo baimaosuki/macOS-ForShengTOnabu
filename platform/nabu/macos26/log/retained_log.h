@@ -4,6 +4,9 @@
 #define SHENG_RETAINED_LOG_H
 #include <stddef.h>
 #include <stdint.h>
+#define NABU_LOG_IMPLEMENTATION
+#include "NabuLogCore.h"
+#undef NABU_LOG_IMPLEMENTATION
 
 #define SHENG_LOG_PREFIX 16384u
 #define SHENG_LOG_TAIL 65536u
@@ -76,6 +79,8 @@ static void sheng_log_restore_async(uint64_t state)
 
 void sheng_log_putc(char byte)
 {
+    /* Independent 4 MiB disk-journal stream; RAM only, never waits for UFS. */
+    nabu_capture_append(&byte, 1);
     struct sheng_log_record *r = &sheng_log_buffer;
     /* Do not let a same-CPU preemption hold the RAM writer across another thread's output. */
     uint64_t interrupt_state = sheng_log_mask_async();

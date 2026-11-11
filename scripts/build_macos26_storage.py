@@ -67,7 +67,7 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
         if not defer_desktop_policy:
             desktop_policy = Path(desktop_policy).resolve(strict=True)
             owner_policy = validate(desktop_policy, record['build'])
-        recovery_prefix = '#define NATIVE_UFS_DESKTOP_ROOT 1\n#define NATIVE_VERIFIED_BLOCK 1\n'
+        recovery_prefix = '#define NATIVE_UFS_DESKTOP_ROOT 1\n#define NATIVE_VERIFIED_BLOCK 1\n#define NATIVE_NABULOG 1\n'
     if transport == 'ufs' and root_mode == 'recovery':
         recovery_root = json.loads((root / 'config/macos26-recovery-root.json').read_text())
         digest = bytes.fromhex(recovery_root['sha256'])
@@ -303,6 +303,15 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
                     explicit_qemu_scratch_writes=transport == 'virtio',
                     hardware_enable_required=transport == 'ufs', root_transport_read_only=True,
                     original_storage_runtime_qualified=False, hardware_admitted=False)
+    if transport == 'ufs' and board == 'nabu' and root_mode == 'desktop':
+        evidence['esp_log'] = dict(default_off=True, boot_argument='nabu-log=1',
+            allocation_token_argument='nabu-log-token', format='NABULOG2', lun=0, block_bytes=4096,
+            capture_capacity_bytes=4 << 20, writer_after_checked_root_preparation=True,
+            target='GPT/BPB/FAT/config validated preallocated XNU2LOG.BIN',
+            filesystem_metadata_writes=False, root_transport_read_only=True,
+            headers_sha256={p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+                            for p in sorted(upstream.parent.glob('NabuLog*.h'))},
+            hardware_qualified=False)
     if display:
         evidence['native_gop_display'] = display
     if input_driver:

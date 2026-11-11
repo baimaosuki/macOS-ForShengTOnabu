@@ -29,7 +29,7 @@ def stage(root: Path, destination: Path, *, board: str) -> tuple[Path, dict]:
     for patch in sorted((root / 'patches/UniXNU').glob('*.patch')):
         if 'a/drivers/NativeUfs/' not in patch.read_text():
             continue
-        if patch.name.startswith(('0040-', '0041-', '0042-', '0043-', '0044-', '0046-')) and board != 'nabu':
+        if patch.name.startswith(('0040-', '0041-', '0042-', '0043-', '0044-', '0046-', '0047-')) and board != 'nabu':
             continue
         subprocess.run(['git', 'apply', '--include=drivers/NativeUfs/*', str(patch.resolve())],
                        cwd=destination, check=True, capture_output=True,
@@ -39,6 +39,11 @@ def stage(root: Path, destination: Path, *, board: str) -> tuple[Path, dict]:
         for header in (root / 'platform/nabu/macos26/storage').glob('Nabu*.h'):
             if header.name != 'NabuBoard.h':
                 shutil.copy2(header, target / header.name)
+        for header in (root / 'platform/nabu/macos26/log').glob('NabuLog*.h'):
+            shutil.copy2(header, target / header.name)
+        build_id = hashlib.sha256((root / 'platform/nabu/macos26/desktop/integrated.patch').read_bytes()).digest()
+        (target / 'NabuLogBuild.h').write_text('static const unsigned char nabu_log_build_id[32] = {' +
+            ','.join(str(byte) for byte in build_id) + '};\n')
     return target / 'NativeUfs.cpp', dict(board=board, revision=revision, patches=patches,
         headers_sha256={str(p.relative_to(destination)): hashlib.sha256(p.read_bytes()).hexdigest()
                         for p in sorted(destination.rglob('*.h'))}, nested_checkouts_modified=False)
