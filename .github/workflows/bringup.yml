@@ -28,6 +28,11 @@ on:
         type: choice
         options: [arm64, arm64e]
         default: arm64
+      native_runner:
+        description: Native build runner; macos-26 uses stable Xcode 26.5 instead of the Xcode 27 preview
+        type: choice
+        options: [configured, macos-26, xcode-27]
+        default: configured
       board:
         description: Board target; nabu is the Xiaomi Pad 5 / SM8150 port
         type: choice
@@ -236,7 +241,7 @@ jobs:
 
   macos26-xnu:
     if: inputs.target == 'macos26-xnu' || inputs.target == 'macos26-kernel'
-    runs-on: ${{ vars.MACOS_RUNNER || 'xcode-27' }}
+    runs-on: ${{ inputs.native_runner != 'configured' && inputs.native_runner || vars.MACOS_RUNNER || 'xcode-27' }}
     timeout-minutes: 90
     env:
       NATIVE_ARCH: ${{ inputs.native_arch || 'arm64' }}
@@ -294,20 +299,31 @@ jobs:
       - name: Select stable KDK staging path
         run: echo "SHENG_KDK_EXPANDED=$RUNNER_TEMP/sheng-kdk-25F71" >> "$GITHUB_ENV"
       - run: bash scripts/verify_kdk.sh config/macos26.json
-      - name: Select the recorded Xcode 27.0 toolchain
+      - name: Select the native build toolchain
+        env:
+          NATIVE_RUNNER_OVERRIDE: ${{ inputs.native_runner }}
         run: |
-          pick=$(ls -d /Applications/Xcode_27.0*.app 2>/dev/null | sort -V | tail -1)
-          if [ -z "$pick" ]; then
-            pick=$(ls -d /Applications/Xcode_27*.app 2>/dev/null | sort -V | tail -1)
-            echo "no Xcode 27.0 on this image; allowing SDK drift"
+          if [ "$NATIVE_RUNNER_OVERRIDE" = "macos-26" ]; then
+            pick=/Applications/Xcode_26.5.app
+            test -d "$pick"
+            echo "stable runner fallback: Xcode 26.5; recording the toolchain change"
             echo "MACOS26_ALLOW_SDK_DRIFT=1" >> "$GITHUB_ENV"
+          else
+            pick=$( { ls -d /Applications/Xcode_27.0*.app 2>/dev/null || true; } | sort -V | tail -1)
+            if [ -z "$pick" ]; then
+              pick=$( { ls -d /Applications/Xcode_27*.app 2>/dev/null || true; } | sort -V | tail -1)
+              echo "no Xcode 27.0 on this image; allowing SDK drift"
+              echo "MACOS26_ALLOW_SDK_DRIFT=1" >> "$GITHUB_ENV"
+            fi
           fi
-          if [ -n "$pick" ]; then
-            echo "selected: $pick"
-            sudo xcode-select -s "$pick"
+          if [ -z "$pick" ]; then
+            echo "::error::requested Xcode toolchain is not installed"
+            exit 1
           fi
-          xcodebuild -version || true
-          xcrun --sdk macosx --show-sdk-version || true
+          echo "selected: $pick"
+          sudo xcode-select -s "$pick"
+          xcodebuild -version
+          xcrun --sdk macosx --show-sdk-version
       - name: Identify native build toolchain
         id: native-toolchain
         run: |
