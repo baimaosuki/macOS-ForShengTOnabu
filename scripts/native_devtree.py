@@ -290,7 +290,8 @@ def make_nabu_adt(path: Path, *, dram_base: int = 0xc0000000,
                   native_gop_display: bool = False,
                   native_ufs: bool = False,
                   packed_ramdisk: bool = False,
-                  trust_cache: bool = False) -> None:
+                  trust_cache: bool = False,
+                  boot_addon: bool = False) -> None:
     """Emit the Xiaomi Pad 5 (nabu / SM8150) Apple DeviceTree (.adt)."""
     # Nabu has 3 physical DRAM banks separated by the TrustZone hole 0xb9900000..0xc0000000.
     # XNU owns the upper contiguous 5 GiB window [0xc0000000, 0x200000000), while stock UEFI GOP
@@ -406,7 +407,8 @@ def make_nabu_adt(path: Path, *, dram_base: int = 0xc0000000,
         _adt_node('chosen', tuple(chosen_props),
                   (_adt_node('memory-map',
                              ((('PackedRAMDisk', bytes(16)),) if packed_ramdisk else ()) +
-                             ((('TrustCache', bytes(16)),) if trust_cache else ())),
+                             ((('TrustCache', bytes(16)),) if trust_cache else ()) +
+                             ((('GpuAddon', bytes(16)),) if boot_addon else ())),
                    _adt_node('manifest-properties'))),
         _adt_node('defaults', (('model', b'Xiaomi Pad 5\0'), ('target-type', b'Mac\0'))),
         _adt_node('options'),

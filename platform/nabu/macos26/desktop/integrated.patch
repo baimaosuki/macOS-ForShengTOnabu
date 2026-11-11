@@ -86,7 +86,7 @@
  
  #include <mach/exclaves.h>
  
-@@ -7944,8 +7945,1335 @@
+@@ -7944,8 +7945,1410 @@
   *		word width of the kernel. Once the self-exec completes, the
   *		initproc might be different.
   */
@@ -1237,6 +1237,36 @@
 +	printf("owner Data: cryptex view stage %d, status %d\n", native_cryptex_os_stage, error);
 +}
 +
++/*
++ * /System/Volumes/VM: a Mac mounts the root container's VM role volume there and the kernel creates its swap files in it
++ * (SWAP_FILE_NAME, /System/Volumes/VM/swapfile). The owner layout has no such volume, so the first swap file failed with EROFS
++ * ("Failed to open swap file 30") and, with the compressor full, the swap threads ran without pause: two cores busy, the
++ * desktop unusable under memory pressure (sheng macOS run49). The mount point becomes a firmlink to /private/var/vm of the owner
++ * Data volume, the directory the Data template ships for it. Failure blocks checked Data startup.
++ */
++volatile int native_owner_vm_volume_status = -1;
++static int
++native_owner_macos_vm_volume(proc_t p, user_addr_t scratch)
++{
++	vnode_t source = NULLVP, target = NULLVP;
++	vfs_context_t ctx = vfs_context_current();
++	static const char directory[] = "/private/var/vm";
++	struct mkdir_args request = {.path = scratch + 0xc00, .mode = 0755};
++	int32_t result = 0;
++	int error = copyout(directory, request.path, sizeof(directory));
++	/* The Data template has the directory; a store without it gets one. */
++	if (!error) error = mkdir(p, &request, &result);
++	if (error == EEXIST) error = 0;
++	if (!error) error = vnode_lookup("/System/Volumes/VM", VNODE_LOOKUP_NOFOLLOW, &source, ctx);
++	if (!error) error = vnode_lookup("/private/var/vm", VNODE_LOOKUP_NOFOLLOW, &target, ctx);
++	if (!error) error = vnode_setasfirmlink(source, target);
++	if (target) vnode_put(target);
++	if (source) vnode_put(source);
++	native_owner_vm_volume_status = error;
++	printf("owner Data: /System/Volumes/VM -> /private/var/vm: %d\n", error);
++	return error;
++}
++
 +#ifdef XNU_OWNER_APP_VOLUME_UUID
 +/*
 + * The application cryptex (Cryptex1,AppOS: Safari). Data's /Applications/Safari.app links to
@@ -1342,6 +1372,49 @@
 +
 +/* The owner Data mount of native_owner_data_prepare at the macOS mount point, then the firmlinks. The
 + * iPadOS layers it adds over the mounted Data (GPU addon, staged system apps) are not used here. */
++/*
++ * apfs-boot-shim=1: launchd's boot tasks mount-phase-1/2 (RequireSuccess) run apfs_boot_util, which creates and mounts the
++ * root container's role volumes (VM first). The root container here is the unchanged, owner-verified OS image: System
++ * only, read-only. The payload's addon carries an owner apfs_boot_util (below bootshim/, its CDHash in the owner trust
++ * cache) that has nothing to mount; it is shown over apfs.fs/Contents/Resources as a read-only union, the other tools
++ * there stay the original ones. Failures propagate to the Data startup check before launchd.
++ */
++volatile int native_owner_boot_shim_stage = 0;
++volatile int native_owner_boot_shim_status = -1;
++static int
++native_owner_macos_boot_shims(proc_t p, user_addr_t scratch)
++{
++	uint32_t enabled = 0;
++	if (!PE_parse_boot_argn("apfs-boot-shim", &enabled, sizeof(enabled)) || enabled != 1) {
++		return 0;
++	}
++	if (native_owner_vm_volume_status) {
++		native_owner_boot_shim_status = native_owner_vm_volume_status;
++		return native_owner_boot_shim_status;
++	}
++	native_gpu_addon_install(p, scratch);
++	if (native_gpu_addon_files < 1 || native_gpu_addon_failed || native_gpu_addon_error) {
++		native_owner_boot_shim_status = native_gpu_addon_error ? native_gpu_addon_error : ENOENT;
++		printf("owner Data: apfs_boot_util addon failed: %d\n", native_owner_boot_shim_status);
++		return native_owner_boot_shim_status;
++	}
++	vnode_t shim = NULLVP;
++	int error = vnode_lookup("/private/var/ngpu/bootshim/apfs_boot_util", VNODE_LOOKUP_NOFOLLOW, &shim, vfs_context_current());
++	if (error) {
++		native_owner_boot_shim_status = error;
++		printf("owner Data: apfs_boot_util source missing: %d\n", error);
++		return error;
++	}
++	vnode_put(shim);
++	static const char source[] = "/private/var/ngpu/bootshim", point[] = "/System/Library/Filesystems/apfs.fs/Contents/Resources";
++	native_gpu_addon_mount(p, scratch, 0xc00, source, sizeof(source), point, sizeof(point),
++	    "/System/Library/Filesystems/apfs.fs/Contents/Resources/apfs_checkseal",
++	    "/System/Library/Filesystems/apfs.fs/Contents/Resources/apfs_boot_util", &native_owner_boot_shim_stage,
++	    &native_owner_boot_shim_status);
++	printf("owner Data: apfs_boot_util shim stage %d, status %d\n", native_owner_boot_shim_stage, native_owner_boot_shim_status);
++	return native_owner_boot_shim_status;
++}
++
 +static int
 +native_owner_macos_data_prepare(proc_t p, user_addr_t scratch)
 +{
@@ -1405,12 +1478,14 @@
 +		extern volatile int native_owner_rosv_state;
 +		native_owner_rosv_state = 2;
 +	}
++	if (!error) error = native_owner_macos_vm_volume(p, scratch);
 +	if (!error) native_owner_macos_cryptex_view(p, scratch);
 +#ifdef XNU_OWNER_APP_VOLUME_UUID
 +	if (!error) native_owner_macos_app_cryptex(p, scratch);
 +#endif
 +
 +	if (!error) native_owner_macos_gpu_addon(p, scratch);
++	if (!error) error = native_owner_macos_boot_shims(p, scratch);
 +done:
 +	if (data_root) vnode_put(data_root);
 +	native_owner_data_status = error;

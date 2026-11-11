@@ -32,3 +32,18 @@ separation, branch/load behavior and actual exception-adapter state checks.
 The full100-patch isolated source prepare and both source audits pass.
 The original 25F71 trust bundle and paired2GiB root-match ADT stay in the
 resulting package. Successful exec and desktop boot require device evidence.
+
+Independent replay after source freeze: execute original libobjc code at
+0x180098e78..0x180098ec0 (AUTDB/XPACD, flag update, PACDB, atomic CAS),
+then original safe_ro/class_rw_t::ro helpers. Only PAC instructions use the
+actual compiled old/new no-PAuth helper; the CAS instruction uses its explicit
+compare/exchange memory semantics. All other original instructions execute
+under Unicorn. Given a class RW marker and representative RW/RO objects,
+the old helper writes class bits 0x7d4c00802, then misreads baseMethods as
+0x80080001 and produces address0x80080000. The corrected helper writes
+0x80000007d4c00802 and returns the valid RO object's baseMethods instead.
+The reconstructed original cache text subfile passed all103934 CodeDirectory
+page hashes (16384-byte pages), confirming its unchanged original code bytes.
+Replay: out/nabu-pid1-cache-fault/objc-machine-code-replay.json.
+CI source commit: 7d9ee45d370e5ac72fbc58bdd8aa3096488b3eac.
+CI run: 42986483605.

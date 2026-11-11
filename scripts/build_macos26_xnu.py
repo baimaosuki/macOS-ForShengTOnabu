@@ -192,9 +192,26 @@ def audit_desktop_source(source: Path) -> dict:
         raise ValueError('desktop App cryptex helper must be declared before the Data caller')
     data = text[text.index('native_owner_macos_data_prepare(proc_t p'):text.index('static int\nload_init_program_at_path')]
     for required in ('NATIVE_OWNER_DATA_MOUNT_POINT', 'native_owner_data_firmlinks',
-                     'native_owner_macos_cryptex_view(p, scratch)', 'native_owner_macos_app_cryptex(p, scratch)'):
+                     'native_owner_macos_vm_volume(p, scratch)',
+                     'native_owner_macos_cryptex_view(p, scratch)', 'native_owner_macos_app_cryptex(p, scratch)',
+                     'error = native_owner_macos_boot_shims(p, scratch)'):
         if required not in data:
             raise ValueError('desktop Data path omitted: ' + required)
+    if not (data.index('native_owner_data_firmlinks(vfs_context_current())')
+            < data.index('native_owner_macos_vm_volume(p, scratch)')
+            < data.index('native_owner_macos_cryptex_view(p, scratch)')):
+        raise ValueError('desktop VM firmlink must follow the writable Data mount and firmlinks')
+    vm = text[text.index('native_owner_macos_vm_volume(proc_t p'):text.index('#ifdef XNU_OWNER_APP_VOLUME_UUID',
+        text.index('native_owner_macos_vm_volume(proc_t p'))]
+    if any(needle not in vm for needle in ('"/System/Volumes/VM"', '"/private/var/vm"',
+           'vnode_setasfirmlink(source, target)', 'native_owner_vm_volume_status = error')):
+        raise ValueError('desktop VM path must expose and report the actual owner Data firmlink')
+    shim = text[text.index('native_owner_macos_boot_shims(proc_t p'):text.index(
+        'native_owner_macos_data_prepare(proc_t p')]
+    if any(needle not in shim for needle in ('"apfs-boot-shim"', 'native_owner_vm_volume_status',
+           'native_gpu_addon_files < 1 || native_gpu_addon_failed || native_gpu_addon_error',
+           'apfs.fs/Contents/Resources/apfs_checkseal', 'return native_owner_boot_shim_status;')):
+        raise ValueError('desktop APFS boot shim must validate VM, addon installation and mount visibility')
     if 'native_owner_publish_boot_manifest(root_device, XNU_OWNER_OS_VOLUME_UUID,' not in text:
         raise ValueError('desktop boot manifest must use the paired candidate OS UUID')
     root = (source / 'bsd/kern/bsd_init.c').read_text()
@@ -206,7 +223,8 @@ def audit_desktop_source(source: Path) -> dict:
     return dict(scratch_allocation_before_mount=True, owner_query_in_rootauth=True,
                 cache_before_data_before_launchd=True, data_firmlinks=True,
                 app_called_from_data=True, root_uuid_from_paired_build=True,
-                storage_start_after_vfsinit=True)
+                storage_start_after_vfsinit=True, vm_path_on_owner_data=True,
+                checked_apfs_boot_shim=True)
 
 
 def audit_nabu_arm64e_source(source: Path) -> dict:

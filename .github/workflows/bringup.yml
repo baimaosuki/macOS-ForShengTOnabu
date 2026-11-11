@@ -326,6 +326,9 @@ jobs:
       - name: Link native macOS 26 SHENG kernel
         if: inputs.target == 'macos26-kernel'
         run: python3 scripts/build_macos26_xnu.py --board "${{ inputs.board }}" --arch "$NATIVE_ARCH" --link-kernel ${{ (inputs.native_ufs || inputs.native_ufs_desktop) && '--build-ufs-driver' || '' }} ${{ inputs.native_ufs_desktop && '--ufs-root-mode desktop --ufs-defer-desktop-policy' || '' }} ${{ inputs.native_gop && '--build-gop-display' || '' }} ${{ inputs.native_input && '--build-recovery-input' || '' }} --kdk-root "$SHENG_KDK_EXPANDED/KDK.pkg/Payload" -j 4
+      - name: Build NABU read-only-root boot layout tool
+        if: inputs.target == 'macos26-kernel' && inputs.board == 'nabu' && inputs.native_ufs_desktop
+        run: python3 scripts/build_nabu_boot_shim.py --output "$NATIVE_OUT/boot-shim"
       - uses: actions/cache/save@v4
         if: always() && inputs.native_ufs_desktop != true && steps.native-cache.outputs.cache-hit != 'true'
         with:
@@ -343,6 +346,7 @@ jobs:
             ${{ env.NATIVE_OUT }}/kernel.development.${{ inputs.board }}.dSYM/
             ${{ env.NATIVE_OUT }}/storage-driver/
             ${{ env.NATIVE_OUT }}/ufs-driver/
+            ${{ env.NATIVE_OUT }}/boot-shim/
           retention-days: 7
       - uses: actions/upload-artifact@v4
         if: always()

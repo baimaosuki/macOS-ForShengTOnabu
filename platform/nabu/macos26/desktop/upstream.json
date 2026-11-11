@@ -68,10 +68,22 @@
       "path": "platform/nabu/macos26/desktop/patches/13-macos-app-cryptex.patch",
       "upstream": "profiles/os/macos-27.3-26C5035r/patches/xnu-12377/macos-app-cryptex.patch",
       "sha256": "9d7d516c15e06ff9674ef2a840333f96136eef0bc4abe54cb050e85face9c343"
+    },
+    {
+      "path": "platform/nabu/macos26/desktop/patches/14-macos-vm-volume.patch",
+      "upstream": "profiles/os/macos-27.3-26C5035r/patches/xnu-12377/macos-vm-volume.patch",
+      "sha256": "57f4a4a0660486c4475f9588ee1375726fad3f87e4ce4e40db870eb1f7a40d67",
+      "revision": "268bfa1c587db5ee616e955cdfd97a281500a6fb"
+    },
+    {
+      "path": "platform/nabu/macos26/desktop/patches/15-macos-apfs-boot-shim.patch",
+      "upstream": "profiles/os/macos-27.3-26C5035r/patches/xnu-12377/macos-apfs-boot-shim.patch",
+      "sha256": "6e86844257f7671812627e1f42c6653177a798457909b2e68e9f61eb770108c0",
+      "revision": "268bfa1c587db5ee616e955cdfd97a281500a6fb"
     }
   ],
   "integrated_patch": "platform/nabu/macos26/desktop/integrated.patch",
-  "integrated_sha256": "66af63a5e294a40b3669c346d19da917f1c0dcb60cd43d33b09a2c93ac0e0029",
+  "integrated_sha256": "22c1f893f270cebc060a77e39218b5d8e938119ce76ff472ca40840e0de6eeca",
   "preimage_sha256": {
     "bsd/kern/bsd_init.c": "c777eb136d9d8de4083225dc3313646d72e6609edd1509d10135f36ab4de058b",
     "bsd/kern/kern_exec.c": "da6ec882873d6071bd18e17cc7038215eb73c071ee0ee772daa87a56775a313d",
@@ -93,6 +105,8 @@
     "Bind owner boot manifest to this candidate OS UUID, never the iPadOS reference UUID.",
     "Preserve pinned filesystem/owner semantics with ordinary ARM64 callback bridges; no Darwin26 syscall/KPI changes.",
     "Keep paired CodeSignature entitlement constants alongside the CoreEntitlements public API.",
-    "Enable actual bindfs sources in the macOS machine configuration for cryptex views."
+    "Enable actual bindfs sources in the macOS machine configuration for cryptex views.",
+    "Publish /System/Volumes/VM as a firmlink to writable owner Data /private/var/vm after Data mount and firmlinks; preserve mount task execution.",
+    "Require successful VM firmlink and addon installation before the opt-in APFS boot shim union; propagate errors to checked Data startup."
   ]
 }
