@@ -248,6 +248,8 @@ def reachable_instructions(data, segments, seeds):
                                        relative_target, NON_RETURNING_BRANCHES)
     spans = code_spans(segments)
     excluded, switches = [], []
+    from nabu_macos26_libm_tables import libm_literal_tables
+    excluded.extend(libm_literal_tables(data, segments))
     # Apple's function-start table also indexes these assembler literals.
     # Identify all 64 standard SHA-256 constants by their complete digest,
     # rather than accepting/rejecting bytes according to their opcode shape.
@@ -647,10 +649,10 @@ def run(args):
     selected_ranges, group_parts = [], {g[0]: [] for g in GROUPS}
     for identifier in selected:
         for segment in components[identifier]['segments']:
-            if segment['name'] == '__LINKEDIT' or not segment['filesize']:
+            if segment['name'] == '__LINKEDIT' or not segment['vmsize']:
                 continue
             selected_ranges.append((segment['vmaddr'],
-                                    segment['vmaddr'] + segment['filesize'],
+                                    segment['vmaddr'] + segment['vmsize'],
                                     identifier, segment['name']))
             for group_name, component_name, _prot in GROUPS:
                 if segment['name'] == component_name:
@@ -758,7 +760,7 @@ def run(args):
 
         parts = [segment for identifier in selected
                  for segment in components[identifier]['segments']
-                 if segment['name'] == component_name and segment['filesize']]
+                 if segment['name'] == component_name and segment['vmsize']]
         if not parts:
             continue
 
@@ -771,7 +773,10 @@ def run(args):
             begin = part['vmaddr'] - low
             part['new_vmaddr'] = group_va + begin
             part['group_offset'] = begin
-            placed_parts.append((part['vmaddr'], part['vmaddr'] + part['filesize'], part['new_vmaddr']))
+            # References to a module's zero-fill tail are real references to
+            # allocated data. Translate its full VM range, while copying only
+            # the file-backed bytes into the initially zeroed aggregate.
+            placed_parts.append((part['vmaddr'], part['vmaddr'] + part['vmsize'], part['new_vmaddr']))
             blob[begin:begin + part['filesize']] = kc[part['fileoff']:part['fileoff'] + part['filesize']]
 
         table_offset = None
@@ -1632,6 +1637,9 @@ def run(args):
             imports=storage['imports'], pointer_formats=storage['pointer_formats'],
             vtable_abi=storage['vtable_abi'], build=storage['evidence'],
             ram_data_vtable_abi=storage.get('ram_data_vtable_abi'),
+            display_vtable_abi=storage.get('display_vtable_abi'),
+            timesync_vtable_abi=storage.get('timesync_vtable_abi'),
+            display_private_vtable_bindings=storage.get('display_private_vtable_bindings'),
             constructors=storage['constructors'],
             pointer_relocations=storage['relocations'], kernel_integrated=True,
             runtime_qualified=False, hardware_qualified=False)

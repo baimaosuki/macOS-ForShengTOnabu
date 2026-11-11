@@ -7,6 +7,7 @@
 #include <libkern/c++/OSData.h>
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#pragma clang diagnostic ignored "-Wdeprecated-anon-enum-enum-conversion"
 #define __PRIVATE_SPI__
 #include <IOKit/network/IOEthernetController.h>
 #include <IOKit/network/IONetworkMedium.h>
