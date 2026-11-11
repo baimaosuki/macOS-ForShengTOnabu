@@ -4,6 +4,10 @@
 // OSKext owns all existing constructors; no preModLoad or manual ctor calls.
 #include "NabuStorageLifecycle.h"
 #include <libkern/c++/OSSymbol.h>
+#if NABU_DESKTOP_SERVICES
+#include "NabuKeyStore.h"
+#include "NabuTimeSyncIdentity.h"
+#endif
 
 extern "C" int nabu_register_storage_start(NabuStorageStart);
 extern "C" const char *nabu_storage_module_start();
@@ -85,5 +89,15 @@ struct NabuStorageModuleOperations {
 extern "C" const char *nabu_storage_module_start()
 {
   NabuStorageModuleOperations operations;
-  return nabuStartStorageModuleOnce(gNabuStorageModuleState, operations);
+  const char *failure = nabuStartStorageModuleOnce(gNabuStorageModuleState, operations);
+#if NABU_DESKTOP_SERVICES
+  if (!failure) {
+    // OSKext has completed dependency and ordinary metaclass initialization.
+    // Run outside its load lock, before launchd; neither service waits for BSD.
+    IOReturn status = nabu_keystore_start(IOService::getResourceService());
+    IOLog("NABU services: AppleKeyStore software start status=%x\n", status);
+    nabu_timesync_identity_start();
+  }
+#endif
+  return failure;
 }

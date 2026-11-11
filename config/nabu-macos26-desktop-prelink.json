@@ -9,7 +9,13 @@
     "com.apple.security.quarantine",
     "com.apple.kec.pthread",
     "com.apple.AppleFSCompression.AppleFSCompressionTypeZlib",
-    "com.apple.filesystems.lifs"
+    "com.apple.filesystems.lifs",
+    "com.apple.iokit.IOMobileGraphicsFamily",
+    "com.apple.iokit.IOSurface",
+    "com.apple.iokit.IOAVFamily",
+    "com.apple.iokit.IONetworkingFamily",
+    "com.apple.iokit.IOTimeSyncFamily",
+    "com.apple.plugin.IOgPTPPlugin"
   ],
   "required_personalities": {
     "com.apple.filesystems.lifs": {
@@ -17,6 +23,6 @@
       "IOUserClientClass": "AppleLIFSUserClient"
     }
   },
-  "purpose": "Original 25F71 FSKit calls IOServiceMatching for com_apple_filesystems_lifs; missing service makes fskitd initialization fail with exit 1. Original 25F71 cfprefsd requires the Quarantine MAC policy at startup; absent policy returns ENOPOLICY=103 and libquarantine maps it to -2.",
+  "purpose": "Original 25F71 FSKit calls IOServiceMatching for com_apple_filesystems_lifs; missing service makes fskitd initialization fail with exit 1. Original 25F71 cfprefsd requires the Quarantine MAC policy at startup; absent policy returns ENOPOLICY=103 and libquarantine maps it to -2. Include original 25F71 framebuffer, TimeSync and networking families for the NABU CPU scanout and stable local clock-identity companions; no GPU or network connectivity is implemented.",
   "hardware_validated": false
 }

@@ -381,6 +381,7 @@ def make_nabu_adt(path: Path, *, dram_base: int = 0xc0000000,
         arm_io_children.append(_adt_node('native-gop', (
             ('device_type', b'display-subsystem\0'),
             ('compatible', b'nabu,gop-framebuffer\0'),
+            ('display-uuid', b'4E414255-2D47-4F50-8000-000000000001\0'),
             ('reg', struct.pack('<QQ', 0x9c000000, 0x01000000)),
             ('width', struct.pack('<I', 1600)),
             ('height', struct.pack('<I', 2560)),

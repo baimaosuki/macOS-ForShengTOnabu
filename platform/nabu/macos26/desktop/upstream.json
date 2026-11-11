@@ -112,10 +112,16 @@
       "upstream": "nabu-local/writable-preboot-state-view",
       "adapted": false,
       "sha256": "3d36680b60564617a6d71a9913475bf2cb87c45234228dbf87b64c2a765f8dcb"
+    },
+    {
+      "path": "platform/nabu/macos26/desktop/patches/22-macos-writable-hardware-state.patch",
+      "upstream": "https://github.com/UniXNU/UniXNU/blob/268bfa1c587db5ee616e955cdfd97a281500a6fb/profiles/os/macos-27.3-26C5035r/patches/xnu-12377/macos-hardware-volume.patch",
+      "adapted": true,
+      "sha256": "97d290668f39218d020f95d32626c2a26d3a7b928d5708607275584d4045fa1a"
     }
   ],
   "integrated_patch": "platform/nabu/macos26/desktop/integrated.patch",
-  "integrated_sha256": "f437dbf0204b8d295bdc9256a28844c682aacffc446bc1a03c0e9e00cc4f72eb",
+  "integrated_sha256": "31c53b0f84833c2f5bafcc7df6c542f9cb4a4ffa5b93c247002a4418f0f21017",
   "preimage_sha256": {
     "bsd/kern/bsd_init.c": "c777eb136d9d8de4083225dc3313646d72e6609edd1509d10135f36ab4de058b",
     "bsd/kern/kern_exec.c": "8d1e81f8d32522f178b2743fa1bea25ff9ca26f13f3931167768fdd99ca00305",
@@ -147,6 +153,7 @@
     "Explicit nabu-boot-proc=1 records selected final Mach-O activations and committed exit status/reason with bounded argv, ancestry and independent recurring rate limits; no mount, exec, exit or crash policy changes. Ignore retired exec shadow procs before looking up or consuming the live uniqueid trace record.",
     "Explicit nabu-boot-proc=1 records selected abort reason input and saved user registers, with at most six copyin-only frame candidates and independent recurring limits; leaves original abort result and signal policy intact.",
     "Expose the outer macOS Preboot state directory through a validated owner Data firmlink, verify published lookup and exclusive create/write/readback/remove, and propagate failures before launchd. Keep SystemOS /System,/usr binds and authenticated App cryptex readonly.",
-    "Expand bounded lifecycle, abort/fatal-signal and stderr diagnostics to cfprefsd, digest-service, eligibilityd, endpointsecurityd (including MAXCOMLEN truncation), opendirectoryd and loginwindow. Verify xpcproxy labels against original 25F71 launchd cache; snapshot referenced real/effective credentials at exec and exit. Observe selected default fatal ABRT/ILL/SEGV/BUS/TRAP delivery after dropping proc lock and before coredump, preserving original signal handling and existing per-target budgets."
+    "Expand bounded lifecycle, abort/fatal-signal and stderr diagnostics to cfprefsd, digest-service, eligibilityd, endpointsecurityd (including MAXCOMLEN truncation), opendirectoryd and loginwindow. Verify xpcproxy labels against original 25F71 launchd cache; snapshot referenced real/effective credentials at exec and exit. Observe selected default fatal ABRT/ILL/SEGV/BUS/TRAP delivery after dropping proc lock and before coredump, preserving original signal handling and existing per-target budgets.",
+    "Expose /System/Volumes/Hardware through a checked firmlink to /private/var/db/hardware-volume on verified writable owner Data after Data firmlinks and before launchd. Verify APFS root/device, parent and target mount identity, then exclusive public-path create/write/readback/close/remove; propagate failures and roll back a newly installed link. Adapt fixed UniXNU 268bfa1 Hardware role mapping without changing volume permissions or daemon-owned state."
   ]
 }

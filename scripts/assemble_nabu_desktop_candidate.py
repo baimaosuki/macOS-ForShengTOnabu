@@ -25,8 +25,13 @@ def validate_owned_memory_size(owned_memory_size, kernel_span, packed_seed_bytes
 
 def assemble(kernel, prelink_report, policy, data, root, loader_build, output, *,
              owned_memory_size=2 << 30, trust_cache: Path | None = None,
-             boot_addon: Path | None = None, disable_watchdogd=False, trace_boot_processes=False):
+             boot_addon: Path | None = None, disable_watchdogd=False, trace_boot_processes=False,
+             native_gop_display=False, platform_uuid=None):
     validate_owned_memory_size(owned_memory_size, 0, 0)
+    if platform_uuid is not None:
+        platform_uuid = uuid.UUID(str(platform_uuid))
+        if platform_uuid.int == 0:
+            raise ValueError('platform UUID must be nonzero')
     trust_data = trust_cache.read_bytes() if trust_cache is not None else None
     trust_record = None
     if trust_data is not None:
@@ -56,6 +61,8 @@ def assemble(kernel, prelink_report, policy, data, root, loader_build, output, *
             or storage.get('kernel_integrated') is not True
             or storage.get('build', {}).get('root_mode') != 'desktop'):
         raise ValueError('requires the actual owner-linked ARM64 desktop storage image')
+    if native_gop_display and not storage.get('build', {}).get('native_gop_display'):
+        raise ValueError('GOP candidate requires the linked display backend evidence')
     contract = validate(policy, '25F71')
     root_identity = uuid.UUID(next(w['volume_uuid'] for w in contract['windows'] if w['name'] == 'OS'))
     root_uuid = str(root_identity).upper()
@@ -110,8 +117,9 @@ def assemble(kernel, prelink_report, policy, data, root, loader_build, output, *
     adt = payload / 'kernel.macho.adt'
     make_nabu_adt(adt, owned_memory_size=owned, os_environment='main',
                   native_ufs=True, packed_ramdisk=True, trust_cache=trust_data is not None,
-                  boot_addon=addon_data is not None)
-    configure_native_text_state(adt, development_root=True, root_match_volume_uuid=root_identity)
+                  boot_addon=addon_data is not None, native_gop_display=native_gop_display)
+    configure_native_text_state(adt, development_root=True, root_match_volume_uuid=root_identity,
+                                native_gop_display=native_gop_display, platform_uuid=platform_uuid)
     tree, parsed = parse_adt(adt.read_bytes())
     if parsed != adt.stat().st_size: raise ValueError('ADT has trailing bytes')
     ufs = tree['/device-tree/arm-io/ufs']
@@ -130,6 +138,8 @@ def assemble(kernel, prelink_report, policy, data, root, loader_build, output, *
     # A root-test candidate must expose transport/layout failures on the panic
     # panel instead of silently returning false and waiting forever for its UUID.
     args = '-v keepsyms=1 debug=0x14e cpus=1 armcpu-self-ipi=1 nabu-source-text=1 native-ufs-root=1 native-ufs-diagnostics=1 rd=uuid boot-uuid=' + root_uuid
+    if native_gop_display:
+        args += ' native-gop-display=1'
     if disable_watchdogd:
         args += ' disable-watchdogd=1 exception_log_max_pid=255'
     if trace_boot_processes:
@@ -152,6 +162,8 @@ def assemble(kernel, prelink_report, policy, data, root, loader_build, output, *
         owned_memory_contract='ADT request only; DarwinBoot must successfully AllocatePages for the complete contiguous window before passing it to XNU. Host assembly does not prove runtime ownership.',
         loader=loader_record,source_module_pointer_formats=storage['pointer_formats'],
         trust_cache=trust_record,
+        native_gop_display=bool(native_gop_display),
+        platform_uuid=str(platform_uuid).upper() if platform_uuid is not None else None,
         boot_addon=addon_record,
         boot_process_trace=dict(enabled=bool(trace_boot_processes), boot_argument='nabu-boot-proc=1',
             marker='nabu_lifecycle_trace_events', default_off=True, observational_only=True,
@@ -195,7 +207,10 @@ if __name__ == '__main__':
                    help='explicitly gate watchdogd through a verified root launchd policy when IOWatchdog is unavailable')
     p.add_argument('--trace-boot-processes', action='store_true',
                    help='enable bounded selected filesystem/desktop exec, exit and stderr diagnostics')
+    p.add_argument('--native-gop-display', action='store_true', help='enable the paired CPU framebuffer backend; does not qualify a desktop')
+    p.add_argument('--platform-uuid', type=uuid.UUID, help='stable owner platform identity for /options/platform-uuid')
     a=p.parse_args(); print(json.dumps(assemble(a.kernel,a.prelink_report,a.policy,a.data,a.root,a.loader_build,a.output,
         owned_memory_size=a.owned_memory_size, trust_cache=a.trust_cache,
         boot_addon=a.boot_addon, disable_watchdogd=a.disable_watchdogd,
-        trace_boot_processes=a.trace_boot_processes),indent=2))
+        trace_boot_processes=a.trace_boot_processes, native_gop_display=a.native_gop_display,
+        platform_uuid=a.platform_uuid),indent=2))

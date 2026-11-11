@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 import plistlib
+import shutil
 import subprocess
 import tempfile
 import uuid
@@ -43,7 +44,7 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
     input_driver = None
     if gop_display:
         from prepare_macos26_gop import prepare
-        display = prepare(root, destination / 'gop-display')
+        display = prepare(root, destination / 'gop-display', board=board)
     if recovery_input:
         from prepare_macos26_input import prepare
         input_driver = prepare(root, destination / 'recovery-input')
@@ -143,6 +144,8 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
         command[1:1] = ['-I', str(root / 'UniXNU/kits/VerifiedRoot/include'),
                         '-I', str(root / 'UniXNU/drivers/NativeVirtioBlock'),
                         '-I', str(upstream.parent)]
+        command[1:1] = ['-DNABU_DESKTOP_SERVICES=1',
+                        '-I', str(root / 'platform/nabu/macos26/services')]
     if transport == 'virtio':
         command[1:1] = ['-DNATIVE_QEMU_SCRATCH_BLOCK=1']
     else:
@@ -160,7 +163,33 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
             compile_failures.append(label + ': ' + str(error))
     compile_unit(command, directory + '-compile')
     objects = [str(obj)]
+    services = None
     if transport == 'ufs' and root_mode == 'desktop':
+        service_dir = destination / 'services'
+        service_dir.mkdir(exist_ok=True)
+        sources = {}
+        for name in ('NabuKeyStoreComponent.cpp', 'NabuKeyStore.cpp', 'NabuKeyStore.h',
+                     'NabuTimeSyncIdentity.cpp', 'NabuTimeSyncIdentity.h'):
+            original = root / 'platform/nabu/macos26/services' / name
+            shutil.copyfile(original, service_dir / name)
+            sources[name] = hashlib.sha256(original.read_bytes()).hexdigest()
+        service_objects = []
+        for name, label in (('NabuKeyStoreComponent', 'keystore-component'),
+                            ('NabuKeyStore', 'keystore'),
+                            ('NabuTimeSyncIdentity', 'timesync-identity')):
+            target = destination / (name + '.o')
+            recipe = [str(service_dir / (name + '.cpp')) if arg == str(wrapper)
+                      else str(target) if arg == str(obj) else arg for arg in command]
+            # Networking headers live in the paired SDK's Kernel framework;
+            # XNU's own IOKit/libkern headers keep priority in the recipe.
+            recipe += ['-I', str(sdk / 'System/Library/Frameworks/Kernel.framework/Versions/A/Headers')]
+            compile_unit(recipe, directory + '-' + label)
+            objects.append(str(target))
+            service_objects.append(target.name)
+        services = dict(build='25F71', sources=sources, objects=service_objects,
+                        keystore=dict(software_only=True, identity='/options/platform-uuid'),
+                        timesync=dict(identity_only=True, carrier=False))
+        (service_dir / 'source.json').write_text(json.dumps(services, indent=2) + '\n')
         from prepare_nabu_desktop_policy import assembly
         if not defer_desktop_policy:
             policy_source = destination / 'owner-policies.S'
@@ -239,20 +268,6 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
         run(input_command, directory + '-input-compile', record,
             cwd=Path(compile_record['directory']), env=env)
         objects.append(str(input_object))
-    if compile_failures:
-        raise ValueError('; '.join(compile_failures))
-    binary = destination / (component + '.macho')
-    run(['xcrun', 'ld', '-arch', architecture, '-kext', '-kexts_use_stubs',
-         '-platform_version', 'macos', '26.5', '26.5',
-         '-undefined', 'dynamic_lookup', '-fixup_chains',
-         '-no_adhoc_codesign', '-headerpad', '0x1000',
-         *objects, '-o', str(binary)], directory + '-link', record, env=env)
-    image = macho(binary.read_bytes(), architecture)
-    has_chains = any(c == 0x80000034 for c, _, _ in image['commands'])
-    deferred_classic = architecture == 'arm64' and root_mode == 'desktop' and defer_desktop_policy
-    if (image['kind'] != 11 or (architecture == 'arm64e' and not image['subtype'] & 0x40000000)
-            or not has_chains and not deferred_classic):
-        raise ValueError('standalone transport requires the actual architecture and supported chained imports')
     info = dict(CFBundleIdentifier=bundle, CFBundleVersion='1.0.0',
                 CFBundlePackageType='KEXT', CFBundleExecutable=component,
                 OSBundleRequired='Root', OSBundleLibraries={
@@ -287,6 +302,11 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
         info['OSBundleLibraries'].update({
             'com.apple.iokit.IOMobileGraphicsFamily': '1.0.0',
             'com.apple.iokit.IOSurface': '1.0.0', 'com.apple.iokit.IOAVFamily': '1.0.0'})
+    if services:
+        info['OSBundleLibraries'].update({
+            'com.apple.iokit.IONetworkingFamily': '1.0.0',
+            'com.apple.iokit.IOTimeSyncFamily': '1.0.0',
+            'com.apple.plugin.IOgPTPPlugin': '1.0.0'})
     if input_driver:
         info['IOKitPersonalities']['NativeRecoveryInput'] = dict(
             CFBundleIdentifier=bundle, IOClass='NativeRecoveryInput',
@@ -297,6 +317,20 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
             IOProviderClass='IOHIDInterface', VendorID=6900, ProductID=4178, IOProbeScore=3000)
         info['OSBundleLibraries']['com.apple.iokit.IOHIDFamily'] = '2.0.0'
     (destination / 'Info.plist').write_bytes(plistlib.dumps(info))
+    if compile_failures:
+        raise ValueError('; '.join(compile_failures))
+    binary = destination / (component + '.macho')
+    run(['xcrun', 'ld', '-arch', architecture, '-kext', '-kexts_use_stubs',
+         '-platform_version', 'macos', '26.5', '26.5',
+         '-undefined', 'dynamic_lookup', '-fixup_chains',
+         '-no_adhoc_codesign', '-headerpad', '0x1000',
+         *objects, '-o', str(binary)], directory + '-link', record, env=env)
+    image = macho(binary.read_bytes(), architecture)
+    has_chains = any(c == 0x80000034 for c, _, _ in image['commands'])
+    deferred_classic = architecture == 'arm64' and root_mode == 'desktop' and defer_desktop_policy
+    if (image['kind'] != 11 or (architecture == 'arm64e' and not image['subtype'] & 0x40000000)
+            or not has_chains and not deferred_classic):
+        raise ValueError('standalone transport requires the actual architecture and supported chained imports')
     evidence = dict(bundle=bundle, upstream_source_sha256=hashlib.sha256(upstream.read_bytes()).hexdigest(),
                     binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
                     architecture=architecture, deployment='macOS 26.5', read_only_transport=transport == 'ufs',
@@ -314,6 +348,8 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
             hardware_qualified=False)
     if display:
         evidence['native_gop_display'] = display
+    if services:
+        evidence['desktop_services'] = services
     if input_driver:
         evidence['native_recovery_input'] = input_driver
     if transport == 'ufs':

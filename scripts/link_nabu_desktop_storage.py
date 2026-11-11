@@ -54,7 +54,7 @@ def compiled_evidence(compiled):
         'com.apple.iokit.IOStorageFamily':'2.1','com.apple.kpi.iokit':'25.0',
         'com.apple.kpi.libkern':'25.0','com.apple.kpi.mach':'25.0','com.apple.kpi.private':'25.0'},
         IOKitPersonalities={})
-    return dict(bundle=bundle,architecture='arm64',root_mode='desktop',board='nabu',
+    evidence = dict(bundle=bundle,architecture='arm64',root_mode='desktop',board='nabu',
         source_integration=dict(board='nabu',source_sha256=hashlib.sha256(source.read_bytes()).hexdigest()),
         desktop_policy_deferred=True,root_partition='macosroot',root_lun=0,android_userdata_used=False,
         read_only_transport=True,hardware_enable_required=True,
@@ -62,6 +62,28 @@ def compiled_evidence(compiled):
         derived_from_actual_ci=dict(build_sha256=hashlib.sha256((compiled.parent/'build.json').read_bytes()).hexdigest(),
             previous_failure=parent.get('error'),compiled_tus_verified=True),
         generated_info=info,runtime_qualified=False,hardware_qualified=False)
+    # Compilation can finish before Apple's -kext linker fails. Preserve the
+    # actual personalities and companions instead of fabricating a bare bundle.
+    real_info = compiled / 'Info.plist'
+    if real_info.exists():
+        evidence.pop('generated_info')
+        actual_info = plistlib.loads(real_info.read_bytes())
+        if actual_info.get('CFBundleIdentifier') != bundle:
+            raise ValueError('compiled Info.plist has unexpected bundle identity')
+    for directory, key in (('gop-display', 'native_gop_display'),
+                           ('services', 'desktop_services')):
+        source_json = compiled / directory / 'source.json'
+        if source_json.exists():
+            if not real_info.exists():
+                raise ValueError('compiled desktop companions require the actual Info.plist')
+            evidence[key] = json.loads(source_json.read_text())
+    if evidence.get('desktop_services'):
+        for label in ('keystore-component', 'keystore', 'timesync-identity'):
+            found = [c for c in parent['commands']
+                     if c.get('log') == 'logs/ufs-driver-' + label + '.log']
+            if len(found) != 1 or found[0].get('returncode') != 0:
+                raise ValueError('CI did not compile actual service TU: ' + label)
+    return evidence
 
 
 def link(compiled: Path, policy: Path, destination: Path) -> dict:
@@ -73,7 +95,14 @@ def link(compiled: Path, policy: Path, destination: Path) -> dict:
     contract = validate(policy, '25F71')
     destination.mkdir(parents=True, exist_ok=False)
     objects = []
-    for name in ('NativeUfs.o', 'verified-root.o', 'verified-crypto.o', 'NativeRamBlock.o'):
+    object_names = ['NativeUfs.o', 'verified-root.o', 'verified-crypto.o', 'NativeRamBlock.o']
+    services = evidence.get('desktop_services')
+    if services:
+        required_objects = ['NabuKeyStoreComponent.o', 'NabuKeyStore.o', 'NabuTimeSyncIdentity.o']
+        if services.get('build') != '25F71' or services.get('objects') != required_objects:
+            raise ValueError('unexpected paired desktop service objects')
+        object_names.extend(required_objects)
+    for name in object_names:
         path = compiled / name
         if macho(path.read_bytes(), 'arm64')['kind'] != 1:
             raise ValueError('requires actual ordinary ARM64 runtime objects')
@@ -125,6 +154,13 @@ def link(compiled: Path, policy: Path, destination: Path) -> dict:
         (destination / 'Info.plist').write_bytes(plistlib.dumps(evidence.pop('generated_info')))
     else:
         shutil.copy2(compiled / 'Info.plist', destination / 'Info.plist')
+    for directory, key in (('gop-display', 'native_gop_display'),
+                           ('services', 'desktop_services')):
+        if evidence.get(key):
+            source_json = compiled / directory / 'source.json'
+            if json.loads(source_json.read_text()) != evidence[key]:
+                raise ValueError('compiled companion evidence differs: ' + directory)
+            shutil.copytree(compiled / directory, destination / directory)
     info = plistlib.loads((destination / 'Info.plist').read_bytes())
     if any(p.get('IOClass') in ('NativeUfs', 'NativeRamBlock')
            for p in info.get('IOKitPersonalities', {}).values()):

@@ -16,7 +16,7 @@ on:
         type: boolean
         default: false
       native_gop:
-        description: Compile the default-off CPU GOP display; requires native_ufs and arm64e
+        description: Compile the default-off CPU GOP display; requires native_ufs or native_ufs_desktop
         type: boolean
         default: false
       native_input:

@@ -1060,7 +1060,8 @@ def link_kernel(args, record, common, sdk, source, env):
                     '_native_owner_root_accepted', '_native_owner_cache_status',
                     '_native_owner_data_stage', '_native_owner_firmlink_count',
                     '_native_owner_app_cryptex_stage', '_nabu_lifecycle_trace_events',
-                    '_nabu_abort_trace_events', '_native_owner_preboot_status')
+                    '_nabu_abort_trace_events', '_native_owner_preboot_status',
+                    '_native_owner_hardware_volume_status')
         missing = [name for name in required if name not in actual]
         if missing:
             raise ValueError('linked desktop kernel omitted owner/root/Data code: ' + ', '.join(missing))

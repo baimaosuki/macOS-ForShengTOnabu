@@ -15,7 +15,9 @@ def digest(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def prepare(root: Path, destination: Path) -> dict:
+def prepare(root: Path, destination: Path, *, board: str = "sheng") -> dict:
+    if board not in ("sheng", "nabu"):
+        raise ValueError("unsupported GOP board")
     manifest = json.loads((root / 'config/macos26-gop-reference.json').read_text())
     repository, revision = manifest['repository'], manifest['revision']
     if repository != 'Droid-VM/macOS-DroidVM' or not re.fullmatch(r'[0-9a-f]{40}', revision):
@@ -49,13 +51,35 @@ def prepare(root: Path, destination: Path) -> dict:
         raise ValueError('paired framebuffer header adaptation is missing or changed')
     source = destination / 'NativeGOPDisplay.cpp'
     (destination / 'DroidVMDisplay.cpp').replace(source)
+    board_inputs = {}
+    if board == 'nabu':
+        # Reuse only the reviewed 25F71 ABI and swap lifecycle. The current
+        # GopFramebuffer OriginalMobileFramebufferABI is iOS17, not this family.
+        text = source.read_text()
+        marker = '    IOMemoryDescriptor *memory = IOMemoryDescriptor::withPhysicalAddress('
+        if text.count(marker) != 1:
+            raise ValueError('paired scanout mapping entry changed')
+        if text.count('"5348454E-472D-474F-5000-000000000001"') != 1:
+            raise ValueError('paired display identity changed')
+        text = text.replace('#include "gop_scanout.h"',
+                            '#include "gop_scanout.h"\n#include "nabu_display_policy.h"')
+        text = text.replace(marker, '    if (!nabuDisplayConsoleValid(fVideo.v_baseAddr, fVideo.v_width, fVideo.v_height, fVideo.v_rowBytes)) return false;\n' + marker)
+        text = text.replace('"5348454E-472D-474F-5000-000000000001"', 'NABU_DISPLAY_UUID')
+        text = text.replace('Sheng Boot Framebuffer', 'Xiaomi Pad 5 Boot Framebuffer')
+        source.write_text(text)
+        for name in ('nabu_display_policy.h', 'nabu_gop_scanout.h'):
+            path = root / 'platform/nabu/macos26/display' / name
+            shutil.copyfile(path, destination / name)
+            board_inputs[name] = digest(path.read_bytes())
     scanout = root / 'platform/sheng/macos26/display/gop_scanout.h'
     shutil.copyfile(scanout, destination / scanout.name)
     layers = root / 'platform/sheng/macos26/display/gop_layers.h'
     shutil.copyfile(layers, destination / layers.name)
     owner = root / 'platform/sheng/macos26/log/framebuffer_owner.h'
     shutil.copyfile(owner, destination / owner.name)
-    evidence = dict(reference=f'https://github.com/{repository}/tree/{revision}',
+    evidence = dict(board=board, board_input_sha256=board_inputs,
+                    display_uuid='4E414255-2D47-4F50-8000-000000000001' if board == 'nabu' else '5348454E-472D-474F-5000-000000000001',
+                    reference=f'https://github.com/{repository}/tree/{revision}',
                     input_sha256=hashes, patch_sha256=digest(patch.read_bytes()),
                     source_sha256=digest(source.read_bytes()),
                     header_sha256=digest((destination / 'IOMobileFramebufferABI.h').read_bytes()),
@@ -66,6 +90,17 @@ def prepare(root: Path, destination: Path) -> dict:
                     supported_cpus=[1, 2, 4, 8], framebuffer_owner_sha256=digest(owner.read_bytes()),
                     gpu_acceleration=False, publishes_vm_identity=False,
                     runtime_qualified=False, source=str(source))
+    if board == 'nabu':
+        evidence['interface_reference'] = {
+            'UniXNU': '268bfa1c587db5ee616e955cdfd97a281500a6fb',
+            'UniXNU-sheng': '81f43ebaaa3317a5917b76093f7bc44c4949bc02',
+            'lifecycle': 'package/LegacyDisplayProbe.cpp',
+            'abi_reused': False,
+            'reason': 'mainline iOS17 ABI differs from paired 25F71 473-slot family',
+        }
+        evidence['compositor_qualified'] = False
+        evidence['scanout_geometry'] = dict(base=0x9c000000, width=1600,
+                                            height=2560, stride=6400, rotation=0)
     (destination / 'source.json').write_text(json.dumps(evidence, indent=2) + '\n')
     return evidence
 
@@ -73,5 +108,6 @@ def prepare(root: Path, destination: Path) -> dict:
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', required=True, type=Path)
+    parser.add_argument('--board', choices=('sheng', 'nabu'), default='sheng')
     args = parser.parse_args()
-    print(json.dumps(prepare(Path(__file__).resolve().parents[1], args.output.resolve()), indent=2))
+    print(json.dumps(prepare(Path(__file__).resolve().parents[1], args.output.resolve(), board=args.board), indent=2))

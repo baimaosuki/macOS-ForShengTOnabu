@@ -1,0 +1,104 @@
+Checked writable Hardware state view on verified owner Data, with public-path write/readback/remove probe and propagated startup errors.
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -9334,6 +9334,92 @@
+ }
+ 
+ /*
++ * Adapted from UniXNU 268bfa1 macos-hardware-volume.patch: mobileactivationd
++ * and FactoryData use the Hardware role volume. Publish only this state view
++ * on verified writable owner Data; failure propagates before launchd.
++ */
++volatile int native_owner_hardware_volume_status = -1;
++static int
++native_owner_macos_hardware_volume(proc_t p, user_addr_t scratch)
++{
++	vfs_context_t ctx = vfs_context_current();
++	vnode_t source = NULLVP, target = NULLVP, data_root = NULLVP, parent = NULLVP, mapped = NULLVP, probe = NULLVP;
++	mount_t data_mount = NULL;
++	bool linked = false, created = false;
++	int error = native_owner_data_stage >= 5 ? 0 : ENXIO;
++	int32_t result = 0;
++	char path[128], readback[17] = {0};
++	static const char contents[] = "nabu-hardware-rw\n";
++	struct unlink_args remove = {.path = scratch + 0xc00};
++	if (!error) error = vnode_lookup(NATIVE_OWNER_DATA_MOUNT_POINT, VNODE_LOOKUP_NOFOLLOW, &data_root, ctx);
++	if (!error) {
++		data_mount = vnode_mount(data_root);
++		vnode_t device = vfs_devvp(data_mount);
++		dev_t actual = device ? vnode_specrdev(device) : NODEV;
++		if (device) vnode_put(device);
++		if (vnode_vtype(data_root) != VDIR || !vnode_isvroot(data_root) ||
++		    actual == NODEV || actual != native_owner_data_device ||
++		    strcmp(vfs_statfs(data_mount)->f_fstypename, "apfs") ||
++		    (vfs_flags(data_mount) & MNT_RDONLY)) error = EROFS;
++	}
++	/* Validate the existing parent on the verified Data mount before mkdir. */
++	if (!error) error = vnode_lookup("/private/var/db", VNODE_LOOKUP_NOFOLLOW_ANY, &parent, ctx);
++	if (!error && (vnode_vtype(parent) != VDIR || vnode_mount(parent) != data_mount)) error = EXDEV;
++	static const char directory[] = "/private/var/db/hardware-volume";
++	struct mkdir_args make = {.path = scratch + 0xc00, .mode = 0755};
++	if (!error) error = copyout(directory, make.path, sizeof(directory));
++	if (!error) {
++		error = mkdir(p, &make, &result);
++		if (error == EEXIST) error = 0;
++	}
++	if (!error) error = vnode_lookup("/private/var/db/hardware-volume", VNODE_LOOKUP_NOFOLLOW_ANY, &target, ctx);
++	if (!error && (vnode_vtype(target) != VDIR || vnode_mount(target) != data_mount)) error = EXDEV;
++	if (!error) error = vnode_lookup("/System/Volumes/Hardware", VNODE_LOOKUP_NOFOLLOW_ANY, &source, ctx);
++	if (!error && source != target && (vnode_vtype(source) != VDIR || vnode_mount(source) == data_mount ||
++	    !(vfs_flags(vnode_mount(source)) & MNT_RDONLY))) error = EINVAL;
++	/* A repeated call already resolves to target; never create a self-link. */
++	if (!error && source != target) {
++		error = vnode_setasfirmlink(source, target);
++		linked = error == 0;
++	}
++	if (!error) error = vnode_lookup("/System/Volumes/Hardware", 0, &mapped, ctx);
++	if (!error && (mapped != target || vnode_mount(mapped) != data_mount ||
++	    (vfs_flags(vnode_mount(mapped)) & MNT_RDONLY))) error = EROFS;
++	/* Probe the published path without precreating daemon-owned state. */
++	if (!error) {
++		snprintf(path, sizeof(path), "/System/Volumes/Hardware/.nabu-hardware-write-probe-%016llx", mach_absolute_time());
++		error = copyout(path, remove.path, strlen(path) + 1);
++	}
++	if (!error) {
++		error = vnode_open(path, FREAD | FWRITE | O_CREAT | O_EXCL | O_NOFOLLOW, 0600, 0, &probe, ctx);
++		created = error == 0;
++	}
++	if (!error && (vnode_vtype(probe) != VREG || vnode_mount(probe) != data_mount)) error = EXDEV;
++	int resid = 0;
++	if (!error) error = vn_rdwr(UIO_WRITE, probe, (caddr_t)(uintptr_t)contents, sizeof(contents) - 1,
++	    0, UIO_SYSSPACE, IO_UNIT, vfs_context_ucred(ctx), &resid, p);
++	if (!error && resid) error = EIO;
++	if (!error) error = vn_rdwr(UIO_READ, probe, readback, sizeof(contents) - 1,
++	    0, UIO_SYSSPACE, 0, vfs_context_ucred(ctx), &resid, p);
++	if (!error && (resid || memcmp(contents, readback, sizeof(contents) - 1))) error = EIO;
++	if (created) {
++		int close_error = vnode_close(probe, FREAD | FWRITE, ctx);
++		probe = NULLVP;
++		int remove_error = unlink(p, &remove, &result);
++		if (!error) error = close_error ? close_error : remove_error;
++	}
++	if (error && linked) (void)vnode_setasfirmlink(source, NULLVP);
++	if (mapped) vnode_put(mapped);
++	if (source) vnode_put(source);
++	if (target) vnode_put(target);
++	if (parent) vnode_put(parent);
++	if (data_root) vnode_put(data_root);
++	native_owner_hardware_volume_status = error;
++	printf("owner Data: /System/Volumes/Hardware -> /private/var/db/hardware-volume: %d\n", error);
++	return error;
++}
++
++/*
+  * The OS cryptex where macOS looks for it: /System/Cryptexes/OS links to /System/Volumes/Preboot/Cryptexes/OS, and system volume
+  * entries such as /System/Library/Frameworks/WebKit.framework link into it. As native_cryptex_os_view does for iPadOS's
+  * /private/preboot, the outer Preboot view is a checked firmlink to writable owner Data; the SystemOS
+@@ -9798,6 +9884,7 @@
+ 		extern volatile int native_owner_rosv_state;
+ 		native_owner_rosv_state = 2;
+ 	}
++	if (!error) error = native_owner_macos_hardware_volume(p, scratch);
+ 	if (!error) error = native_owner_macos_vm_volume(p, scratch);
+ 	if (!error) error = native_owner_macos_cryptex_view(p, scratch);
+ #ifdef XNU_OWNER_APP_VOLUME_UUID

@@ -63,10 +63,11 @@ def framebuffer_private_slots(original, kc, own, base, slide):
     return bindings, names
 
 
-def validate_private_slot(item, allowed):
+def validate_private_slot(item, allowed, *, require_pac=True):
     matches = [slot for slot in allowed if all(item[key] == slot[key] for key in ('new_site', 'new_target'))
-               and all(item[key] == slot['original'][key]
-                       for key in ('authenticated', 'key', 'diversity', 'address_diversity'))]
+               and (all(item[key] == slot['original'][key]
+                        for key in ('authenticated', 'key', 'diversity', 'address_diversity'))
+                    if require_pac else not item['authenticated'])]
     if len(matches) != 1:
         raise ValueError('private framebuffer method may only bind its exact inherited vtable slot and PAC contract')
     return matches[0]
@@ -141,6 +142,10 @@ def prepare(directory: Path, base: int, native: dict, original: bytes,
                               ('IOMobileFramebufferABI.h', 'header_sha256')):
                 if hashlib.sha256((directory / 'gop-display' / name).read_bytes()).hexdigest() != display.get(key):
                     raise ValueError('GOP display source differs from the compiled record')
+            for name, digest in display.get('board_input_sha256', {}).items():
+                if Path(name).name != name or hashlib.sha256(
+                        (directory / 'gop-display' / name).read_bytes()).hexdigest() != digest:
+                    raise ValueError('GOP board header differs from the compiled record')
             if len(display_cpus(display)) > 1:
                 if hashlib.sha256((directory / 'gop-display/framebuffer_owner.h').read_bytes()).hexdigest() != display.get('framebuffer_owner_sha256'):
                     raise ValueError('GOP framebuffer owner differs from the compiled record')
@@ -189,12 +194,34 @@ def prepare(directory: Path, base: int, native: dict, original: bytes,
     private_slots, private_names = ({}, {})
     if evidence.get('native_gop_display'):
         private_slots, private_names = framebuffer_private_slots(original, kc, own, base, slide)
+    ethernet_names = {}
+    services = evidence.get('desktop_services')
+    if services:
+        required = {'com.apple.iokit.IONetworkingFamily', 'com.apple.iokit.IOTimeSyncFamily',
+                    'com.apple.plugin.IOgPTPPlugin'}
+        if services.get('build') != '25F71' or not required <= selected.keys():
+            raise ValueError('desktop services require the original 25F71 networking/clock families')
+        for name, digest in services['sources'].items():
+            if Path(name).name != name or hashlib.sha256(
+                    (directory / 'services' / name).read_bytes()).hexdigest() != digest:
+                raise ValueError('desktop service source differs from the compiled record')
+        for name in ('_nabu_keystore_start', '_nabu_timesync_identity_start',
+                     '__ZN13AppleKeyStore10gMetaClassE', '__ZN20NabuTimeSyncIdentity10gMetaClassE'):
+            if name not in own:
+                raise ValueError('desktop companion omitted service definition: ' + name)
+        from nabu_timesync_binding import ethernet_private_slots
+        ethernet_slots, ethernet_names = ethernet_private_slots(original, kc, own, base, slide)
+        private_slots.update(ethernet_slots)
     imported = {}
     for name in selected:
         module = kc_macho(original, kc['entries'][name][1])
         for address, names in exports(original, module).items():
             for symbol in names:
                 imported.setdefault(symbol, set()).add(address + slide)
+    # Public methods may also be called directly (through a GOT/stub). Only
+    # unavailable private names need the exact inherited-slot fallback below.
+    private_slots = {name: slots for name, slots in private_slots.items()
+                     if name not in native and name not in imported}
 
     def resolve(name):
         targets = {native[name]} if name in native else imported.get(name, set())
@@ -331,7 +358,8 @@ def prepare(directory: Path, base: int, native: dict, original: bytes,
     private_bindings = []
     for item in relocations:
         if item['import_name'] in private_slots:
-            slot = validate_private_slot(item, private_slots[item['import_name']])
+            slot = validate_private_slot(item, private_slots[item['import_name']],
+                                         require_pac=architecture == 'arm64e')
             private_bindings.append(dict(name=item['import_name'], slot=slot['slot'],
                 site=hex(item['new_site']), target=hex(item['new_target']), pac_metadata_matches=True))
     reserved = '__ZN15OSMetaClassBase25_RESERVEDOSMetaClassBase3Ev'
@@ -362,11 +390,19 @@ def prepare(directory: Path, base: int, native: dict, original: bytes,
         audit = audit_storage_vtable(driver, original, kc, native, slide,
             family_bundle='com.apple.iokit.IOMobileGraphicsFamily',
             base_class='IOMobileFramebufferLegacy', own_class='NativeGOPDisplay', additional_names=private_names,
-            pure_declaration_class='IOMobileFramebuffer')
+            pure_declaration_class='IOMobileFramebuffer', require_pac=architecture == 'arm64e')
         if audit['slots'] != 473:
             raise ValueError('GOP display requires the paired 473-slot legacy ABI')
         driver['display_vtable_abi'] = audit
         driver['display_private_vtable_bindings'] = private_bindings
+    if services:
+        audit = audit_storage_vtable(driver, original, kc, native, slide,
+            family_bundle='com.apple.iokit.IONetworkingFamily',
+            base_class='IOEthernetController', own_class='NabuTimeSyncIdentity',
+            additional_names=ethernet_names, require_pac=architecture == 'arm64e')
+        if audit['slots'] != 400:
+            raise ValueError('TimeSync identity requires the original 400-slot Ethernet ABI')
+        driver['timesync_vtable_abi'] = audit
     if evidence.get('native_recovery_input'):
         audit = audit_storage_vtable(driver, original, kc, native, slide,
             family_bundle='com.apple.iokit.IOHIDFamily', base_class='IOHIDDevice',
