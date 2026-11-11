@@ -36,3 +36,12 @@ cross-device Data/VM, write-probe failure, original8 arm64e compatibility
 checks, and complete100-patch source preparation and audits. The delivery
 must contain the new kernel, paired ADT, trustcache, addon, and boot config.
 Root disk, Data seed, loader, and partition layout need no replacement.
+
+Build result: CI42992038667 succeeded for ca38bc9b8dfb851d5d95e8b085dbf13bddb136ba.
+The macOS-signed tool CDHash is0bb7c7dbd7e2e87006a1ec1ac079f5afa1ed0868;
+its3 CodeDirectory pages verify. Independent final-kernel prelink verification
+passes1000 pointers,20245 branches and1000 kernel bindings. All five ZIP
+payload files read back correctly; the boot config differs from the previous
+one only by the added apfs-boot-shim=1 argument. The ADT differs only by the
+new zero GpuAddon handoff slot. Kernel UUID8452F068-9912-33F5-9FCB-50E9A2F146D2.
+No device test has been performed for this candidate.
