@@ -80,3 +80,27 @@ This maps shared-cache PCs and frame callers to module text offsets, and task
 termination call sites to the nearest native kernel symbol. Executable PCs
 outside the cache remain explicitly unresolved and need that executable's
 load address. The tool is included in the diagnostic ZIP with native_macho.py.
+
+## Successful build, package and installation
+
+CI 43167776272 succeeded at source commit
+`c58b15761bb71221755911076680246866b3cb4e` on the stable macos-26 runner and
+paired KDK. Native symbols include nabu_ws_trace_slide, nabu_capture_append
+and the existing CPU compositor globals. The compiled header hash matches
+the packaged observer source.
+
+The final image retains 35 components. Independent prelink verification passed
+1000 pointers, 56031 branches and 1000 kernel bindings. Kernel UUID:
+`1A1D61BE-3AAF-355F-9EC7-D69EE5F1D3ED`; SHA-256:
+`605762f8864113cb0e9900186d23348130e8cf2909aa6198af37f8212f99c60c`.
+
+Package: `out/nabu-service-startup/nabu-25F71-ws-log-43167776272.zip`,
+172174594 bytes, SHA-256
+`f6f02ad8ca41e0e63f4478048f08a95ffeab3e2a679a55776a7439c970e8252b`.
+ZIP CRC, all payload hashes and the configuration flags were checked.
+
+All five ESP files were installed on ae6c9094 and their readback SHA-256
+values match the package. The old files and original journal are preserved
+under `out/nabu-service-startup/windowserver-log/device-backup/`.
+`XNU2LOG.BIN` remains byte-identical. The device was left in TWRP without a
+reboot. Runtime capture and desktop rendering remain unverified.
