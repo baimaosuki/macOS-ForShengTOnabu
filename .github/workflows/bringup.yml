@@ -31,7 +31,7 @@ on:
       native_runner:
         description: Native build runner; macos-26 uses stable Xcode 26.5 instead of the Xcode 27 preview
         type: choice
-        options: [configured, macos-26, xcode-27]
+        options: [configured, macos-26, macos-15, xcode-27]
         default: configured
       board:
         description: Board target; nabu is the Xiaomi Pad 5 / SM8150 port
@@ -307,6 +307,10 @@ jobs:
             pick=/Applications/Xcode_26.5.app
             test -d "$pick"
             echo "stable runner fallback: Xcode 26.5; recording the toolchain change"
+            echo "MACOS26_ALLOW_SDK_DRIFT=1" >> "$GITHUB_ENV"
+          elif [ "$NATIVE_RUNNER_OVERRIDE" = "macos-15" ]; then
+            pick=$( { ls -d /Applications/Xcode_26*.app 2>/dev/null || true; } | sort -V | tail -1)
+            echo "ARM runner capacity fallback: newest installed Xcode 26; recording SDK drift"
             echo "MACOS26_ALLOW_SDK_DRIFT=1" >> "$GITHUB_ENV"
           else
             pick=$( { ls -d /Applications/Xcode_27.0*.app 2>/dev/null || true; } | sort -V | tail -1)
