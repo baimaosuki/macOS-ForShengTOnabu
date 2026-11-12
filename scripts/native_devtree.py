@@ -42,6 +42,7 @@ def configure_native_text_state(path: Path, *, development_root: bool = False,
                                 root_match_volume_uuid: uuid.UUID | str | None = None,
                                 platform_uuid: uuid.UUID | None = None,
                                 qemu_disable_sleep: bool = False,
+                                native_disable_sleep: bool = False,
                                 native_gop_display: bool = False,
                                 qemu_virtio_input: bool = False) -> None:
     data = path.read_bytes()
@@ -49,6 +50,7 @@ def configure_native_text_state(path: Path, *, development_root: bool = False,
     arm_io = gop_nodes = 0
     defaults = 0
     input_nodes = 0
+    disable_sleep = qemu_disable_sleep or native_disable_sleep
     if qemu_disable_sleep and not development_root:
         raise ValueError('sleep policy is restricted to the development fixture')
     if qemu_virtio_input and not development_root:
@@ -126,7 +128,7 @@ def configure_native_text_state(path: Path, *, development_root: bool = False,
         if platform_uuid is not None and location == ('device-tree', 'options'):
             options += 1
             ensure('platform-uuid', platform_uuid.bytes)
-        if qemu_disable_sleep and location == ('device-tree', 'defaults'):
+        if disable_sleep and location == ('device-tree', 'defaults'):
             defaults += 1
             # IOPMrootDomain reads this policy before accepting idle or demand sleep.
             ensure('sleep-disabled', struct.pack('<I', 1))
@@ -186,7 +188,7 @@ def configure_native_text_state(path: Path, *, development_root: bool = False,
                                    value + bytes(-len(value) % 4))
             children += 1
             input_nodes += 1
-        if qemu_disable_sleep and location == ('device-tree',) and not defaults:
+        if disable_sleep and location == ('device-tree',) and not defaults:
             entries = (('name', b'defaults\0'), ('sleep-disabled', struct.pack('<I', 1)))
             descendants.extend(struct.pack('<II', len(entries), 0))
             for key, value in entries:
@@ -227,7 +229,7 @@ def configure_native_text_state(path: Path, *, development_root: bool = False,
     if (end != len(data) or chosen != 1 or development_root and asmb != 1
             or root_hash is not None and auth != 1
             or platform_uuid is not None and (options != 1 or proxies != 1)
-            or qemu_disable_sleep and defaults != 1
+            or disable_sleep and defaults != 1
             or qemu_virtio_input and input_nodes != 1
             or native_gop_display and (arm_io != 1 or gop_nodes != 1)):
         raise ValueError('requires one complete generated /chosen node')

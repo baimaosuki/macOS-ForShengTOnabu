@@ -32,8 +32,12 @@ def build(output):
     metadata_path = output / 'build.json'
     metadata_path.unlink(missing_ok=True)
     binary = output / 'apfs_boot_util'
+    probe = SOURCE.parent / 'session_probe.sh'
+    generated = output / 'nabu_session_probe_script.h'
+    generated.write_text('static const char nabu_session_probe_script[] = ' +
+                         json.dumps(probe.read_text(), ensure_ascii=True) + ';\n')
     run('xcrun', '--sdk', 'macosx', 'clang', '-target', TARGET,
-        '-std=c11', '-Os', '-Wall', '-Wextra', '-Werror', SOURCE, '-o', binary)
+        '-std=c11', '-Os', '-Wall', '-Wextra', '-Werror', '-I', output, SOURCE, '-o', binary)
     run('codesign', '--force', '--sign', '-', '--timestamp=none',
         '--identifier', IDENTIFIER, '--entitlements', ENTITLEMENTS,
         '--generate-entitlement-der', binary)
@@ -63,6 +67,8 @@ def build(output):
                     architecture='arm64', target=TARGET, identifier=IDENTIFIER,
                     source=str(SOURCE.relative_to(ROOT)),
                     source_sha256=hashlib.sha256(SOURCE.read_bytes()).hexdigest(),
+                    session_probe_script_sha256=hashlib.sha256(probe.read_bytes()).hexdigest(),
+                    session_probe_header_sha256=hashlib.sha256((SOURCE.parent / 'session_probe.h').read_bytes()).hexdigest(),
                     entitlements_sha256=hashlib.sha256(ENTITLEMENTS.read_bytes()).hexdigest(),
                     bindfs_entitlement_verified=True,
                     page_hashes=pages)

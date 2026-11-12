@@ -12,6 +12,7 @@
 
 #ifdef __APPLE__
 #include <sys/mount.h>
+#include "session_probe.h"
 #else
 #include <sys/statvfs.h>
 #include <sys/vfs.h>
@@ -270,6 +271,8 @@ main(int argc, char **argv)
 #ifdef __APPLE__
     if (prepare_od_overlay() != 0)
         return 1;
+    if (strcmp(argv[1], "2") == 0)
+        nabu_install_session_probe();
 #endif
     fprintf(stderr, "apfs_boot_util (owner): phase %s ready: writable Data and VM device=%llu\n",
         argv[1], (unsigned long long)data_status.st_dev);

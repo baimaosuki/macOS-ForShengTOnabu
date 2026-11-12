@@ -13,6 +13,7 @@ import zipfile
 
 from assemble_nabu_desktop_candidate import assemble
 from native_macho import symbols
+from native_devtree import configure_native_text_state
 from prepare_nabu_boot_addon import prepare as prepare_addon
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -155,6 +156,8 @@ def package(artifact, metadata, output, installed_toml, identity_file, *, cpu_co
     report = json.loads(report_path.read_text())
     names = ['kernel.macho', 'kernel.macho.adt', 'kernel.macho.trustcache', 'kernel.macho.gpuaddon']
     payload = candidate / 'EFI/UniXNU/Payloads'
+    # SHENG disables board sleep until the native suspend/resume path is ready.
+    configure_native_text_state(payload / 'kernel.macho.adt', native_disable_sleep=True)
     delivery = dict(target='NABU macOS 26.5 / 25F71', ci_run=metadata['id'],
         commit=metadata['head_sha'], ci_url=metadata['html_url'],
         native_sha256=sha(native), kernel_sha256=sha(kernel), kernel_bytes=kernel.stat().st_size,
@@ -168,6 +171,7 @@ def package(artifact, metadata, output, installed_toml, identity_file, *, cpu_co
         gpu_acceleration=False, sep_backed=False, network_connectivity=False,
         device_tested=False, desktop_verified=False, root_reflash_required=False,
         data_reflash_required=False, esp_logger_allocation_preserved=True,
+        system_sleep_disabled=True,
         payload_sha256={name: sha(payload / name) for name in names},
         toml_sha256=sha(config_path), assembled_boot_args_without_log_token=assembled['boot_args'])
     readme = '''NABU macOS 26.5 / 25F71 — Hardware / AKS / GOP / TimeSync
@@ -236,6 +240,10 @@ NABU-SESSION 记录 kauth-submit/getwork/result/wake 与登录 IPC；
 NABU-DISPLAY 报告实际 VBL/队列/提交/显示计数；WS 退出观察也覆盖 loginwindow。
 新增 nabu-session-log=1，stdout/stderr 选择 boot-filesystems；日志 token 保持不变。
 这些是代码与构建结果；仍需本机确认登录连接、第一帧和 Dock/Finder。
+'''
+    readme += '''
+设备树 /defaults/sleep-disabled=1：沿用 SHENG board.toml 的禁整机睡眠策略，
+避免进入尚未完成的 CPU 睡眠路径。此项无需重编内核，不等于已经修复登录会话。
 '''
     (output / 'README.txt').write_text(readme)
     (output / 'delivery.json').write_text(json.dumps(delivery, indent=2) + '\n')

@@ -110,6 +110,20 @@ class NativeTree(unittest.TestCase):
             configure_native_text_state(self.path, boot_volume_uuid=self.root)
         self.assertEqual(self.path.read_bytes(), before)
 
+    def test_native_sleep_policy_preserves_other_device_tree_properties(self):
+        configure_native_text_state(self.path)
+        original = read_tree(self.path.read_bytes())
+        configure_native_text_state(self.path, native_disable_sleep=True)
+        configured = self.path.read_bytes()
+        actual = read_tree(configured)
+        defaults = ('device-tree', 'defaults')
+        self.assertEqual(actual[defaults].pop('sleep-disabled'), struct.pack('<I', 1))
+        if defaults not in original:
+            self.assertEqual(actual.pop(defaults), {'name': b'defaults\0'})
+        self.assertEqual(actual, original)
+        configure_native_text_state(self.path, native_disable_sleep=True)
+        self.assertEqual(self.path.read_bytes(), configured)
+
     def test_unavailable_vm_sleep_uses_native_defaults_without_hardware_changes(self):
         before = self.path.read_bytes()
         with self.assertRaisesRegex(ValueError, 'development fixture'):
