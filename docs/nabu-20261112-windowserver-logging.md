@@ -63,6 +63,10 @@ in that same translation unit; importing the broader BSD header is avoided.
 Run 43165344743 then exposed BSD's separate header search scope. The build now
 stages the same header beside both BSD and Mach callers and uses local includes,
 instead of assuming a new internal header was in the exported kern headers.
+Run 43166489806 reached the BSD caller and identified the Mach-private shared
+region struct boundary. `nabu_ws_trace_slide()` now owns that lookup in the
+Mach exception translation unit; BSD callers use only the scalar-returning
+interface, preserving the reference/deallocation pair without exposing layout.
 
 After decoding a run, use its recorded slide rather than an earlier boot's:
 

@@ -9,7 +9,6 @@
 #include <kern/thread.h>
 #include <libkern/copyio.h>
 #include <pexpert/pexpert.h>
-#include <vm/vm_shared_region_xnu.h>
 #include <stdarg.h>
 /* Avoid pulling BSD device typedefs into the libsa-based exception build. */
 extern int proc_selfpid(void);
@@ -17,6 +16,7 @@ extern void proc_name(int, char *, int);
 extern int vsnprintf(char *, size_t, const char *, va_list) __attribute__((format(printf, 3, 0)));
 extern void nabu_capture_append(const char *, unsigned);
 #endif
+extern uint64_t nabu_ws_trace_slide(void);
 
 /* No console recursion, disk I/O, panic or changes to the observed result.
  * Each translation unit admits at most 32 events for the whole boot. */
@@ -76,12 +76,7 @@ nabu_ws_trace_context(const char *event, uint64_t code, uint64_t subcode, uint64
     if (!state || !is_saved_state64(state)) return;
     uint64_t pc = get_saved_state_pc(state), lr = get_saved_state_lr(state);
     uint64_t sp = get_saved_state_sp(state), fp = get_saved_state_fp(state);
-    uint64_t slide = UINT64_MAX;
-    vm_shared_region_t region = vm_shared_region_get(current_task());
-    if (region) {
-        slide = region->sr_slide;
-        vm_shared_region_deallocate(region);
-    }
+    uint64_t slide = nabu_ws_trace_slide();
     uint32_t instruction = 0;
     int fetch = copyin((user_addr_t)nabu_ws_trace_user_address(pc), &instruction, sizeof(instruction));
     nabu_ws_trace_emit("NABU-WS pid=%d seq=%u pc=%llx lr=%llx sp=%llx fp=%llx esr=%llx far=%llx insn=%08x fetch=%d slide=%llx\n",

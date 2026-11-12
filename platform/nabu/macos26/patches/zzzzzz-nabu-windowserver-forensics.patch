@@ -38,13 +38,23 @@ Opt-in WindowServer entry context in the ESP RAM journal, before exit teardown a
  	/*
 --- a/osfmk/kern/exception.c
 +++ b/osfmk/kern/exception.c
-@@ -94,6 +94,10 @@
+@@ -94,6 +94,20 @@
  #include <string.h>
  
  #include <pexpert/pexpert.h>
 +
 +#if defined(NABU) && NABU && defined(__arm64__)
 +#include "nabu_windowserver_trace.h"
++#include <vm/vm_shared_region_xnu.h>
++uint64_t
++nabu_ws_trace_slide(void)
++{
++	vm_shared_region_t region = vm_shared_region_get(current_task());
++	if (!region) return UINT64_MAX;
++	uint64_t slide = region->sr_slide;
++	vm_shared_region_deallocate(region);
++	return slide;
++}
 +#endif
  
  #include <os/log.h>

@@ -55,6 +55,11 @@ static int is_saved_state64(arm_saved_state_t *s){return s==&saved;}
 static const arm_saved_state64_t *const_saved_state64(arm_saved_state_t *s){return s;}
 static vm_shared_region_t vm_shared_region_get(task_t t){assert(t==&self);if(have_region)regions++;return have_region?&region:0;}
 static void vm_shared_region_deallocate(vm_shared_region_t r){assert(r==&region && regions);regions--;}
+uint64_t nabu_ws_trace_slide(void){
+ vm_shared_region_t r=vm_shared_region_get(current_task());
+ if(!r)return UINT64_MAX;
+ uint64_t slide=r->sr_slide;vm_shared_region_deallocate(r);return slide;
+}
 static uint64_t mach_absolute_time(void){return 123456789;}
 static void absolutetime_to_nanoseconds(uint64_t t,uint64_t *out){*out=t;}
 static void nabu_capture_append(const char *s,unsigned n){assert(used+n<sizeof(journal));memcpy(journal+used,s,n);used+=n;journal[used]=0;emits++;}
