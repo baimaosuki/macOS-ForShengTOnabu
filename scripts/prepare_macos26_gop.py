@@ -75,6 +75,33 @@ def prepare(root: Path, destination: Path, *, board: str = "sheng") -> dict:
         text = text.replace('    fScanout = reinterpret_cast<uint8_t *>(fScanoutMap->getVirtualAddress());', '    fScanout = reinterpret_cast<uint8_t *>(fScanoutMap->getVirtualAddress());\n    fSourceReaper = NabuGopSourceReaper::create();\n    if (!fSourceReaper) { OSSafeReleaseNULL(fScanoutMap); return false; }')
         text = text.replace('        IOLog("NativeGOPDisplay: IOMobileFramebufferLegacy::start failed\\n");', '        IOLog("NativeGOPDisplay: IOMobileFramebufferLegacy::start failed\\n");\n        IOMemoryMap *empty[4]{}; fSourceReaper->finish(empty); fSourceReaper = nullptr;')
         text = text.replace('    IOMobileFramebufferLegacy::stop(provider);', '    IOMobileFramebufferLegacy::stop(provider);\n    if (fSourceReaper) {\n        IOMemoryMap *maps[4]{};\n        for (unsigned i = 0; i < 4; i++) { maps[i] = fSourceMaps[i].mapping; fSourceMaps[i] = {}; }\n        fSourceReaper->finish(maps); fSourceReaper = nullptr;\n    }')
+        # enable() alone leaves a new IOTimerEventSource at deadline zero.
+        # Start the callback chain only after the family has finished start(),
+        # independently of the first userspace swap. The callback and native
+        # power/queue operations share the same work-loop gate.
+        started = '    IOLog("NativeGOPDisplay: started, display %ux%u\\n", display_width(), display_height());\n    return true;'
+        if text.count(started) != 1:
+            raise ValueError('paired framebuffer start completion changed')
+        text = text.replace(started, '''    IOLog("NativeGOPDisplay: started, display %ux%u\\n", display_width(), display_height());
+    IOReturn armed = fVBL ? fVBL->setTimeoutMS(16) : kIOReturnNotReady;
+    IOLog("NABU-DISPLAY: refresh-bootstrap result=%#x\\n", armed);
+    if (armed != kIOReturnSuccess) {
+        stop(provider);
+        return false;
+    }
+    return true;''')
+        fired = '    static_cast<NativeGOPDisplay *>(owner)->swap_begin_gated();'
+        if text.count(fired) != 1:
+            raise ValueError('paired framebuffer timer callback changed')
+        text = text.replace(fired, '''    auto *display = static_cast<NativeGOPDisplay *>(owner);
+    if (!display->fTicks) IOLog("NABU-DISPLAY: first-timer-fired\\n");
+    display->swap_begin_gated();''')
+        notified = '    powerstate_notify(true, on);'
+        if text.count(notified) != 1:
+            raise ValueError('paired framebuffer power notification changed')
+        text = text.replace(notified, '''    if (!fFrames) IOLog("NABU-DISPLAY: power-notify-begin on=%u\\n", on);
+    powerstate_notify(true, on);
+    if (!fFrames) IOLog("NABU-DISPLAY: power-notify-done on=%u\\n", on);''')
         text = text.replace('            dropSwap_gated(swap, false);', '            failCurrentSwap(swap);')
         begin = text.index('// Copy the compatible scene before completing the swap.')
         end = text.index('static constexpr uint32_t kFormatBGRA', begin)
@@ -129,6 +156,7 @@ def prepare(root: Path, destination: Path, *, board: str = "sheng") -> dict:
         }
         evidence['compositor_qualified'] = False
         evidence['session_heartbeat'] = 'nabu-session-log=1; software callback, queue, actual copy and completion counters'
+        evidence['refresh_bootstrap'] = 'arm 16ms after successful native family start; callback entry precedes queue work; power changes preserve cadence'
         evidence['cpu_presentation'] = '25F71 persistent planes; source/destination rectangles; opaque scene planes; plane-1 premultiplied cursor; source-backed staging before completion'
         evidence['scanout_geometry'] = dict(base=0x9c000000, width=1600,
                                             height=2560, stride=6400, rotation=0)
