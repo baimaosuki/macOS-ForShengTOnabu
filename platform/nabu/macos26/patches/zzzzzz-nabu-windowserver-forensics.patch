@@ -7,7 +7,7 @@ Opt-in WindowServer entry context in the ESP RAM journal, before exit teardown a
  #include <pexpert/pexpert.h>
 +
 +#if defined(NABU) && NABU && defined(__arm64__)
-+#include <kern/nabu_windowserver_trace.h>
++#include "nabu_windowserver_trace.h"
 +#endif
  #if SHENG
  extern void sheng_windowserver_stop(unsigned exception, uint64_t code, uint64_t subcode);
@@ -44,7 +44,7 @@ Opt-in WindowServer entry context in the ESP RAM journal, before exit teardown a
  #include <pexpert/pexpert.h>
 +
 +#if defined(NABU) && NABU && defined(__arm64__)
-+#include <kern/nabu_windowserver_trace.h>
++#include "nabu_windowserver_trace.h"
 +#endif
  
  #include <os/log.h>
@@ -67,7 +67,7 @@ Opt-in WindowServer entry context in the ESP RAM journal, before exit teardown a
  #include <kern/task.h>
 +
 +#if defined(NABU) && NABU && defined(__arm64__)
-+#include <kern/nabu_windowserver_trace.h>
++#include "nabu_windowserver_trace.h"
 +#endif
  #include <kern/thread.h>
  #include <kern/coalition.h>
@@ -89,7 +89,7 @@ Opt-in WindowServer entry context in the ESP RAM journal, before exit teardown a
  #include <sys/shm_internal.h>   /* for shmfork() */
  #include <mach/task.h>          /* for thread_create() */
 +#if defined(NABU) && NABU && defined(__arm64__)
-+#include <kern/nabu_windowserver_trace.h>
++#include "nabu_windowserver_trace.h"
 +#endif
  #include <mach/thread_act.h>    /* for thread_resume() */
  

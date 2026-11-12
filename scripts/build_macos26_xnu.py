@@ -520,6 +520,7 @@ def prepare() -> dict:
     stage_file(process_output, source / 'bsd/kern/sheng_process_output.h')
     if BOARD == 'nabu':
         stage_file(PLATFORM / 'log/windowserver_trace.h', source / 'osfmk/kern/nabu_windowserver_trace.h')
+        stage_file(PLATFORM / 'log/windowserver_trace.h', source / 'bsd/kern/nabu_windowserver_trace.h')
     panel_console = PLATFORM / 'log/panel_console.h'
     stage_file(panel_console, source / 'pexpert/arm/pe_sheng_panel.h')
     panel_font = source / 'osfmk/console/iso_font.c'
@@ -595,6 +596,7 @@ def prepare() -> dict:
     if BOARD == 'nabu':
         subprocess.run(['git', '-C', source, 'add', '-N',
                         'osfmk/kern/nabu_windowserver_trace.h',
+                        'bsd/kern/nabu_windowserver_trace.h',
                         'osfmk/vm/nabu_cpu_compositor_policy.h',
                         'osfmk/vm/nabu_cpu_compositor_kernel.h',
                         'osfmk/vm/nabu_cpu_compositor_pages.h'], check=True)
