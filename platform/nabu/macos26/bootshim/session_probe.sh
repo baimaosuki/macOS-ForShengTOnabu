@@ -1,8 +1,10 @@
 #!/bin/sh
-# One boot, three snapshots. Original signed macOS tools; no service restarts.
+# Direct child of the owner boot tool. Do not depend on launchd job discovery.
 PATH=/usr/bin:/bin:/usr/sbin:/sbin
 export PATH
 umask 077
+echo "NABU-SESSION-PROBE started pid=$$ version=2"
+trap 'echo "NABU-SESSION-PROBE shell exit=$?"' 0
 
 snapshot()
 {
@@ -36,7 +38,7 @@ snapshot()
     echo "NABU-SESSION-PROBE end round=$1"
 }
 
-sleep 90
+sleep 15
 snapshot 1
 sleep 180
 snapshot 2

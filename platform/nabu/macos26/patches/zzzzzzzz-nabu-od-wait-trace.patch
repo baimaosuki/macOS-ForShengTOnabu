@@ -1,0 +1,32 @@
+Observe OD timed semaphore trap inputs and both immediate and continuation results.
+--- a/osfmk/kern/sync_sema.c
++++ b/osfmk/kern/sync_sema.c
+@@ -54,6 +54,10 @@
+ #include <kern/waitq.h>
+ #include <kern/zalloc.h>
+ #include <kern/mach_param.h>
++
++#if defined(NABU) && NABU
++#include "nabu_od_wait_trace.h"
++#endif
+ 
+ static const uint8_t semaphore_event;
+ #define SEMAPHORE_EVENT CAST_EVENT64_T(&semaphore_event)
+@@ -904,8 +908,17 @@
+ semaphore_timedwait_trap(
+ 	struct semaphore_timedwait_trap_args *args)
+ {
++#if defined(NABU) && NABU
++	int traced = nabu_od_wait_begin(args->wait_name, args->sec, args->nsec);
++	kern_return_t result = semaphore_timedwait_trap_internal(args->wait_name,
++	    args->sec, args->nsec,
++	    traced ? nabu_od_wait_continue : thread_syscall_return);
++	if (traced) nabu_od_wait_end(result, 0);
++	return result;
++#else
+ 	return semaphore_timedwait_trap_internal(args->wait_name,
+ 	           args->sec, args->nsec, thread_syscall_return);
++#endif
+ }
+ 
+ 

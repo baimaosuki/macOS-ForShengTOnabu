@@ -53,3 +53,52 @@ All administrative enable/disable states keep link valid but inactive, speed 0.
 All outgoing mbufs are consumed and counted as dropped. The medium is Ethernet
 none, the interface is not classified as Wi-Fi, and both controller and interface
 publish `NetworkConnectivityImplemented=false`.
+
+## Native 25F71 clock lookup policy (2026-11-13)
+
+The original family has a supported presence flag, `-timesync_bringup`. This
+is unrelated to the iOS 20F66 QuartzCore `CA_FORCE_TIMER` behavior. The paired
+25F71 kernel collection implements it as follows:
+
+| Original function / address | Verified behavior |
+| --- | --- |
+| `IOTimeSyncClockManager::init`, `0xfffffe000accd704`–`0xfffffe000accd720` | `PE_parse_boot_argn("-timesync_bringup", NULL, 0)` stores the presence boolean at manager `+0x128` |
+| `delayedClockIDLookup`, `0xfffffe000accdd48`–`0xfffffe000accdd64` | Flag present selects `IOSleep(5000)`; flag absent selects `getPlatform()->waitQuiet(UINT64_MAX)` |
+| `delayedClockIDLookup`, `0xfffffe000accdd98`–`0xfffffe000accdda4` | Both branches join the original `findTimeSyncTimeClockID()` call and test its success byte at manager `+0xbb` |
+| `delayedClockIDLookup`, `0xfffffe000accddd0`–`0xfffffe000accdde4` | Only after successful lookup, update the original translation service and publish the `IOTimeSyncClockManager` resource |
+
+`scripts/inspect_nabu_timesync_identity.py` now qualifies the option literal,
+parse call, flag storage, both wait branches, lookup call, success guard,
+translation update and resource publication against the actual original
+instructions. It rejects changes to this contract. Run:
+
+```sh
+python3 scripts/inspect_nabu_timesync_identity.py \
+  --kernelcache out/nabu-bootkc/kernelcache.release.mac13g.nabu.kc \
+  --output out/nabu-timesync-25F71-policy.json
+```
+
+The report records the complete input hash and the delayed lookup code hash.
+This inspector does not patch the collection. The boot policy can select this
+existing native branch to remove the dependency on *global* platform quiescence
+while retaining real interface and MAC discovery. The 5-second delay starts
+after an actual named-interface match schedules the original delayed lookup;
+it is not a five-second deadline from power-on and not a readiness assertion.
+Because the option is tested for presence, use its exact standalone spelling.
+
+The candidate's inactive carrier and `IOBuiltin=false` do not require faking a
+built-in interface. `findTimeSyncTimeClockID` first prefers built-in interfaces,
+then has an Ethernet fallback at `0xfffffe000accec20`. That fallback excludes
+Thunderbolt IP and the reviewed USB case, collects eligible original Ethernet
+interfaces, and reads `IOMACAddress` from the interface or controller beginning
+at `0xfffffe000accefd4`. Native code derives and publishes its own clock ID;
+this provider must not publish that resource itself or invent a clock ID.
+
+The `xnu-20261113a/verified-boot.txt` journal contains native `en0` naming and
+the rematch, and `IOTimeSyncTranslationMach` publication. It contains no
+`ZZ rs IOTimeSyncClockManager` resource-owner publication. This is consistent
+with the original delayed worker remaining in its unbounded `waitQuiet`, but
+does not prove that wait's runtime stack or establish it as the sole black
+screen cause. Hardware acceptance requires observing the actual native clock
+resource plus its clock ID and translation, followed by completed user frames
+and visible session progress. No networking functionality is added.

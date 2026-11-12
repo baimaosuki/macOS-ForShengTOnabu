@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /* Included by the retained-log owner after the bounded progress formatter. */
 extern volatile uint32_t armcpu_smp_running, armcpu_smp_requested;
+extern volatile uint32_t armcpu_registration_count, armcpu_registration_complete;
 extern volatile uint32_t armcpu_smp_step[8], armcpu_smp_fail[8];
 extern volatile int32_t armcpu_smp_psci_rc[8];
 extern volatile uint32_t armcpu_smp_mpidr[8], armcpu_smp_seen_mpidr[8];
@@ -54,6 +55,10 @@ static void sheng_smp_log_tick(void)
     sheng_smp_field(line, &n, " cpus=", sheng_smp_log_cpus);
     sheng_smp_field(line, &n, " secondaries=", __atomic_load_n(&armcpu_smp_running, __ATOMIC_RELAXED));
     sheng_smp_field(line, &n, " enabled=", __atomic_load_n(&armcpu_smp_requested, __ATOMIC_RELAXED));
+    sheng_smp_emit(line);
+    n = 0;
+    sheng_smp_field(line, &n, "registered=", __atomic_load_n(&armcpu_registration_count, __ATOMIC_ACQUIRE));
+    sheng_smp_field(line, &n, " scheduler-init-complete=", __atomic_load_n(&armcpu_registration_complete, __ATOMIC_ACQUIRE));
     sheng_smp_emit(line);
     n = 0;
     sheng_smp_field(line, &n, "ipi-sent=", __atomic_load_n(&armcpu_ipi_sent, __ATOMIC_RELAXED));

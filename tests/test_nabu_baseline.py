@@ -151,14 +151,17 @@ class NabuBaseline(unittest.TestCase):
 
     def test_gicv3_sgi_ipi_and_8_core_smp(self):
         """Verify Nabu's 8-core Kryo 485 SMP, SMC PSCI, and GICv3 SGI IPI route."""
-        patch_smp = ROOT / 'platform/sheng/macos26/patches/machine-cpu-smp-bootstrap.patch'
-        patch_asm = ROOT / 'platform/sheng/macos26/patches/machine-cpu-inline-asm.patch'
-        patch_timer = ROOT / 'platform/nabu/macos26/patches/nabu-armcpu-timer-intid19.patch'
+        patch_smp = ROOT / 'platform/nabu/macos26/patches/components/machine-cpu-smp-bootstrap.patch'
+        patch_asm = ROOT / 'platform/nabu/macos26/patches/components/machine-cpu-inline-asm.patch'
+        patch_timer = ROOT / 'platform/nabu/macos26/patches/components/nabu-armcpu-timer-intid19.patch'
 
         build = dict(
             cpu_smp_patch_sha256=sha256_file(patch_smp),
             cpu_inline_asm_patch_sha256=sha256_file(patch_asm),
-            nabu_timer_patch_sha256=sha256_file(patch_timer),
+            cpu_timer_intid_patch_sha256=sha256_file(patch_timer),
+            cpu_init_completed_patch_sha256=sha256_file(patch_timer.parent / 'machine-cpu-init-completed.patch'),
+            nabu_smp_source=dict(reset_affinity_bits=16, completion_after_all_registrations=True,
+                                 virtual_timer_intid=19, psci_method='smc'),
             cpu_sgi_instructions={'verified': True},
             virtual_timer_intid=19,
             psci_method='smc',

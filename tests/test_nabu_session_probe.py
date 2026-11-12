@@ -1,17 +1,17 @@
-"""Execute the actual opt-in installer with host filesystem/sysctl adapters."""
+"""Execute the real opt-in installer and its directly spawned shell marker."""
 from pathlib import Path
 import json
 import os
-import plistlib
 import subprocess
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 SHIM = ROOT / 'platform/nabu/macos26/bootshim'
 
 
-def test_session_probe_installs_valid_job_only_when_enabled(tmp_path):
+def test_session_probe_direct_child_and_spawn_failure(tmp_path):
     (tmp_path / 'sys').mkdir()
-    (tmp_path / 'sys/sysctl.h').write_text('/* sysctl adapter is declared by the harness */\n')
+    (tmp_path / 'sys/sysctl.h').write_text('/* declared by the host adapter */\n')
     script = (SHIM / 'session_probe.sh').read_text()
     (tmp_path / 'nabu_session_probe_script.h').write_text(
         'static const char nabu_session_probe_script[] = ' + json.dumps(script) + ';\n')
@@ -19,11 +19,14 @@ def test_session_probe_installs_valid_job_only_when_enabled(tmp_path):
 #include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <spawn.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
+static pid_t child=-1;
 static int fixture_sysctl(const char *key, void *out, size_t *size, void *input, size_t n) {
     (void)input; (void)n;
     assert(!strcmp(key,"kern.bootargs"));
@@ -32,31 +35,59 @@ static int fixture_sysctl(const char *key, void *out, size_t *size, void *input,
     strcpy(out,value); *size=strlen(value)+1; return 0;
 }
 static int fixture_open(const char *path, int flags, mode_t mode) {
-    assert(!strncmp(path,"/System/Volumes/Data/",21));
-    return open(strrchr(path,'/')+1,flags,mode);
+    assert(!strcmp(path,"/System/Volumes/Data/private/var/db/nabu-session-probe.sh"));
+    return open("nabu-session-probe.sh",flags,mode);
 }
-static int fixture_mkdir(const char *path, mode_t mode) {
-    assert(!strcmp(path,"/System/Volumes/Data/Library/LaunchDaemons"));
-    assert(mode==0755); return 0;
+static int fixture_addopen(posix_spawn_file_actions_t *a, int fd, const char *path, int flags, mode_t mode) {
+    assert(fd>=0 && fd<=2);
+    assert(!strcmp(path,fd?"/dev/console":"/dev/null"));
+    if(fd) {path="console.txt";flags|=O_CREAT|O_APPEND;mode=0600;}
+    return posix_spawn_file_actions_addopen(a,fd,path,flags,mode);
+}
+static int fixture_spawn(pid_t *pid,const char *path,const posix_spawn_file_actions_t *actions,
+        const posix_spawnattr_t *attr,char *const args[],char *const env[]) {
+    short flags=0;assert(!posix_spawnattr_getflags(attr,&flags));
+    assert(flags&POSIX_SPAWN_SETSID);
+    assert(!strcmp(path,"/bin/sh")&&!strcmp(args[0],path));
+    assert(!strcmp(args[1],"/private/var/db/nabu-session-probe.sh")&&!args[2]);
+    assert(!strcmp(env[0],"PATH=/usr/bin:/bin:/usr/sbin:/sbin"));
+    assert(!strcmp(env[1],"HOME=/var/root")&&!env[2]);
+    if(getenv("SPAWN_FAIL"))return EACCES;
+    /* Execute the real installed script. Stop at its first delay after its
+     * actual start marker, without running macOS sampling tools on Linux. */
+    char *local[]={"/bin/sh","-c","sleep() { exit 0; }; . ./nabu-session-probe.sh",NULL};
+    int result=posix_spawn(pid,path,actions,attr,local,env);child=*pid;return result;
 }
 #define sysctlbyname fixture_sysctl
 #define open fixture_open
-#define mkdir fixture_mkdir
+#define posix_spawn_file_actions_addopen fixture_addopen
+#define posix_spawn fixture_spawn
 #include "session_probe.h"
-int main(void) { nabu_install_session_probe(); return 0; }
+int main(void) {
+    nabu_install_session_probe();
+    if(child>0){int status;assert(waitpid(child,&status,0)==child);assert(WIFEXITED(status)&&!WEXITSTATUS(status));}
+    return 0;
+}
 ''')
     executable = tmp_path / 'test'
     subprocess.run(['cc', '-std=c11', '-D_GNU_SOURCE', '-Wall', '-Wextra', '-Werror',
                     '-I', str(tmp_path), '-I', str(SHIM), str(tmp_path / 'test.c'),
                     '-o', str(executable)], check=True, capture_output=True)
-    subprocess.run([executable], cwd=tmp_path, env=dict(os.environ, PROBE_ARGS='nabu-session-log=1'), check=True)
-    assert not (tmp_path / 'org.nabu.session-probe.plist').exists()
-    subprocess.run([executable], cwd=tmp_path,
-                   env=dict(os.environ, PROBE_ARGS='-v nabu-session-probe=1 cpus=1'), check=True)
-    job = plistlib.loads((tmp_path / 'org.nabu.session-probe.plist').read_bytes())
-    assert job['ProgramArguments'] == ['/bin/sh', '/private/var/db/nabu-session-probe.sh']
-    assert job['RunAtLoad'] and 'KeepAlive' not in job
-    assert job['StandardOutPath'] == job['StandardErrorPath'] == '/dev/console'
+    for args in ('nabu-session-log=1', 'x-nabu-session-probe=1', 'nabu-session-probe=10'):
+        subprocess.run([executable], cwd=tmp_path, env=dict(os.environ, PROBE_ARGS=args), check=True)
+        assert not (tmp_path / 'nabu-session-probe.sh').exists()
+    result = subprocess.run([executable], cwd=tmp_path,
+        env=dict(os.environ, PROBE_ARGS='-v nabu-session-probe=1 cpus=8'),
+        check=True, capture_output=True, text=True)
+    assert 'direct spawn pid=' in result.stderr and 'status=0' in result.stderr
     assert (tmp_path / 'nabu-session-probe.sh').read_text() == script
     assert (tmp_path / 'nabu-session-probe.sh').stat().st_mode & 0o777 == 0o600
+    console = (tmp_path / 'console.txt').read_text()
+    assert 'NABU-SESSION-PROBE started pid=' in console and 'version=2' in console
+    assert 'NABU-SESSION-PROBE shell exit=0' in console
+    assert not (tmp_path / 'org.nabu.session-probe.plist').exists()
+    result = subprocess.run([executable], cwd=tmp_path,
+        env=dict(os.environ, PROBE_ARGS='nabu-session-probe=1', SPAWN_FAIL='1'),
+        check=True, capture_output=True, text=True)
+    assert 'direct spawn pid=-1 status=13' in result.stderr
     subprocess.run(['/bin/sh', '-n', str(tmp_path / 'nabu-session-probe.sh')], check=True)

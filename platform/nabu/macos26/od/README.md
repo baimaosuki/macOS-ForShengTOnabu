@@ -1,5 +1,12 @@
 # 25F71 callback-free connection startup candidate
 
+**Withdrawn functional candidate.** The queue fence below has no end-to-end
+timeout and its union overlay was refused on the device. It must not be
+included in a new package or described as an OD repair. The latest device log
+again reproduces the original assertion. The current independent diagnostic
+is [OD timed-wait capture](../../../../docs/nabu-20261113-od-wait-diagnostic.md);
+it preserves the original service and failure behavior.
+
 `scripts/prepare_nabu_od_startup.py` prepares an exact-input, experimental
 OpenDirectory adaptation. It addresses the cold-start dependency exposed by
 the initial PlistFile assertion without pre-setting connection state, replacing

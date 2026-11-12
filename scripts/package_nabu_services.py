@@ -28,12 +28,18 @@ def sha(path):
 
 
 def package(artifact, metadata, output, installed_toml, identity_file, *, cpu_compositor=False,
-            windowserver_log=False, session_repair=False):
+            windowserver_log=False, session_repair=False, cpu_desktop_repair=False, cpu_count=1):
     metadata = json.loads(metadata.read_text())
     if metadata['conclusion'] != 'success':
         raise ValueError('requires a successful native CI build')
     build = json.loads((artifact / 'build.json').read_text())
     native = artifact / 'kernel.development.nabu'
+    if cpu_desktop_repair and not (cpu_compositor and session_repair and windowserver_log):
+        raise ValueError('CPU desktop repair requires the compositor and session policies')
+    timesync_policy = None
+    if cpu_desktop_repair:
+        from inspect_nabu_timesync_identity import inspect
+        timesync_policy = inspect(ROOT / 'out/nabu-bootkc/kernelcache.release.mac13g.nabu.kc')['native_bringup_policy']
     if sha(native) != build['executable_kernel_sha256']:
         raise ValueError('CI kernel differs from its build record')
     if '_native_owner_hardware_volume_status' not in symbols(native):
@@ -109,7 +115,8 @@ def package(artifact, metadata, output, installed_toml, identity_file, *, cpu_co
         ROOT / 'out/nabu-desktop-loader-final', candidate,
         trust_cache=addon / 'kernel.macho.trustcache',
         boot_addon=addon / 'kernel.macho.gpuaddon', disable_watchdogd=True,
-        trace_boot_processes=True, native_gop_display=True, platform_uuid=platform_uuid)
+        trace_boot_processes=True, native_gop_display=True, platform_uuid=platform_uuid,
+        cpu_count=cpu_count, kernel_build=artifact / 'build.json')
     # Preserve the device's working ESP logger allocation and boot entry.
     text = installed_toml.read_text()
     parsed = tomllib.loads(text)
@@ -149,6 +156,22 @@ def package(artifact, metadata, output, installed_toml, identity_file, *, cpu_co
         args = [a for a in match.group(2).split() if a.split('=', 1)[0] not in changes]
         args += [key + '=' + value for key, value in changes.items()]
         text = text[:match.start(2)] + ' '.join(args) + text[match.end(2):]
+    if cpu_desktop_repair or cpu_count != 1:
+        matches = list(re.finditer(r'(?m)^(\s*args\s*=\s*")([^"\n]*)("\s*)$', text))
+        if len(matches) != 1:
+            raise ValueError('expected one installed args line')
+        match = matches[0]
+        arguments = match.group(2)
+        if cpu_count != 1:
+            from native_smp import configure
+            arguments = configure(build, cpu_count, True, arguments, board='nabu')['boot_args']
+        if cpu_desktop_repair:
+            wanted = {'-timesync_bringup', 'nabu-session-probe=1', 'nabu-od-wait-log=1'}
+            keys = {a.split('=', 1)[0] for a in wanted}
+            arguments = ' '.join([a for a in arguments.split() if a.split('=', 1)[0] not in keys] + sorted(wanted))
+        if len(arguments.encode()) >= 1000:
+            raise ValueError('CPU desktop boot arguments exceed the loader command line budget')
+        text = text[:match.start(2)] + arguments + text[match.end(2):]
     config_path = candidate / 'EFI/UniXNU/unixnu.toml'
     config_path.write_text(text)
     final_config = tomllib.loads(text)
@@ -171,7 +194,8 @@ def package(artifact, metadata, output, installed_toml, identity_file, *, cpu_co
         gpu_acceleration=False, sep_backed=False, network_connectivity=False,
         device_tested=False, desktop_verified=False, root_reflash_required=False,
         data_reflash_required=False, esp_logger_allocation_preserved=True,
-        system_sleep_disabled=True,
+        system_sleep_disabled=True, cpu_count=cpu_count,
+        cpu_desktop_repair=cpu_desktop_repair, timesync_bringup_policy=timesync_policy,
         payload_sha256={name: sha(payload / name) for name in names},
         toml_sha256=sha(config_path), assembled_boot_args_without_log_token=assembled['boot_args'])
     readme = '''NABU macOS 26.5 / 25F71 — Hardware / AKS / GOP / TimeSync
@@ -241,6 +265,27 @@ NABU-DISPLAY 报告实际 VBL/队列/提交/显示计数；WS 退出观察也覆
 新增 nabu-session-log=1，stdout/stderr 选择 boot-filesystems；日志 token 保持不变。
 这些是代码与构建结果；仍需本机确认登录连接、第一帧和 Dock/Finder。
 '''
+    if cpu_desktop_repair:
+        delivery['implemented'] += ['25F71 CPU persistent layer presentation',
+                                    'native TimeSync bounded bringup wait',
+                                    'directly spawned session stack capture']
+        delivery['unresolved'] = ['device verification of CPU layer pixels and completed frames',
+                                  'OD cold-start assertion and query latency need device retest',
+                                  'native TimeSync clock resource and interactive desktop need device verification']
+        readme += '''
+本轮 CPU 桌面候选：按 25F71 swap 语义保留图层并由 CPU 呈现，
+加入原版 -timesync_bringup，使时钟查找前的无限平台等待改为原生 5 秒等待。
+此选项仍要求真实 MAC 派生时钟，不伪造 clock ready。
+修复采样脚本仅安装不运行的问题：mount phase 2 直接启动独立 shell，
+立即打印 NABU-SESSION-PROBE started，15 秒后开始有限采样。
+新增 NABU-OD-WAIT 只记录 OD 实际 timedwait 输入/结果，不改其超时与断言。
+旧版本未取得脚本栈，不能声称本轮已修复 OD 冷启动根因或桌面已经可见。
+'''
+    if cpu_count != 1:
+        delivery['implemented'] += [f'{cpu_count} CPU nodes and PSCI/SGI startup configuration',
+                                    'NABU Affinity1 reset lookup and original CPU registration completion']
+        delivery['unresolved'].append('all secondary CPUs, timers and SGI require device validation')
+        readme += f'\n本包启用 cpus={cpu_count} sheng-smp=1，ADT 同时生成 {cpu_count} 个真实 MPIDR CPU 节点。\n副核、timer、SGI 和调度仍待设备验证；主机测试不代表八核已经实机上线。\n'
     readme += '''
 设备树 /defaults/sleep-disabled=1：沿用 SHENG board.toml 的禁整机睡眠策略，
 避免进入尚未完成的 CPU 睡眠路径。此项无需重编内核，不等于已经修复登录会话。
@@ -272,7 +317,10 @@ if __name__ == '__main__':
     parser.add_argument('--cpu-compositor', action='store_true')
     parser.add_argument('--windowserver-log', action='store_true')
     parser.add_argument('--session-repair', action='store_true')
+    parser.add_argument('--cpu-desktop-repair', action='store_true')
+    parser.add_argument('--cpus', type=int, choices=(1, 2, 4, 8), default=1)
     args = parser.parse_args()
     package(args.artifact, args.metadata, args.output, args.installed_toml, args.identity_file,
             cpu_compositor=args.cpu_compositor, windowserver_log=args.windowserver_log,
-            session_repair=args.session_repair)
+            session_repair=args.session_repair, cpu_desktop_repair=args.cpu_desktop_repair,
+            cpu_count=args.cpus)

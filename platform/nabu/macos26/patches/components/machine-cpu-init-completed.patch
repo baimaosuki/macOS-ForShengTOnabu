@@ -1,0 +1,63 @@
+--- a/ArmCpu/ArmCpu.cpp
++++ b/ArmCpu/ArmCpu.cpp
+@@ -11,6 +11,7 @@
+ // Exact private entry from Darwin 23 arm/rtclock.h. Its full data header is
+ // not exported to IOKit; the IRQ path calls the real kernel implementation.
+ extern "C" void rtclock_intr (unsigned int);
++extern "C" void ml_cpu_init_completed (void);
+ // Kernel-internal entries used for secondary CPU startup (Darwin 23 osfmk).
+ extern "C" vm_offset_t ml_static_vtop (vm_offset_t);
+ extern "C" char LowResetVectorBase[], LowResetVectorEnd[], ResetHandlerData[], const_boot_args[];
+@@ -31,6 +32,7 @@
+ 
+ extern "C" {
+ volatile uint32_t armcpu_registered = 0;
++volatile uint32_t armcpu_registration_count = 0, armcpu_registration_complete = 0;
+ volatile uint32_t armcpu_gic_ready = 0;
+ volatile uint64_t armcpu_timer_interrupts = 0;
+ volatile uint32_t armcpu_timer_intid = 19;   // ppi used for the virtual timer
+@@ -78,6 +80,7 @@
+   bool wakeRedistributor (bool local);
+   bool finishSecondary (void);
+   static void drainPending (void);
++  static void registrationReturned (void);
+   bool prepareGic (void);
+   void enableGic (void);
+   void interrupt (void);
+@@ -461,7 +464,28 @@
+   registerService ();
+   __atomic_store_n (&gBootRegistered, 1U, __ATOMIC_RELEASE);
+   drainPending ();
++  registrationReturned ();
+   return true;
++}
++
++// Match the Apple CPU driver's registration barrier. ml_processor_register() on
++// this XNU calls processor_boot() itself; its return alone does not complete the
++// scheduler's global CPU setup. The final successful registration invokes the
++// original completion routine, which waits for every processor's first startup.
++void ArmCpu::registrationReturned (void)
++{
++  unsigned expected = static_cast<unsigned> (ml_get_max_cpu_number ()) + 1;
++  unsigned registered = __atomic_add_fetch (&armcpu_registration_count, 1U, __ATOMIC_ACQ_REL);
++  if (registered != expected) { return; }
++  for (unsigned cpu = 0; cpu < expected; cpu++) {
++    if (__atomic_load_n (&armcpu_smp_fail[cpu], __ATOMIC_ACQUIRE) != 0 ||
++        __atomic_load_n (&armcpu_smp_psci_rc[cpu], __ATOMIC_ACQUIRE) != 0) { return; }
++  }
++  // Exactly one registration can observe the final count. Do not set scheduler
++  // internals: its own completion path checks and waits for real CPU startup.
++  ml_cpu_init_completed ();
++  IOService::publishResource (gIOAllCPUInitializedKey, kOSBooleanTrue);
++  __atomic_store_n (&armcpu_registration_complete, 1U, __ATOMIC_RELEASE);
+ }
+ 
+ void ArmCpu::drainPending (void)
+@@ -492,6 +516,7 @@
+   kern_return_t status = ml_processor_register (&info, &machProcessor, &ipi_handler, &pmi);
+   if (status != KERN_SUCCESS) { armcpu_smp_fail[logicalId] = 4; return false; }
+   registerService ();
++  registrationReturned ();
+   return true;
+ }
+ 

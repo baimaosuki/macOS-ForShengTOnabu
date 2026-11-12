@@ -26,7 +26,7 @@ def validate_owned_memory_size(owned_memory_size, kernel_span, packed_seed_bytes
 def assemble(kernel, prelink_report, policy, data, root, loader_build, output, *,
              owned_memory_size=2 << 30, trust_cache: Path | None = None,
              boot_addon: Path | None = None, disable_watchdogd=False, trace_boot_processes=False,
-             native_gop_display=False, platform_uuid=None):
+             native_gop_display=False, platform_uuid=None, cpu_count=1, kernel_build=None):
     validate_owned_memory_size(owned_memory_size, 0, 0)
     if platform_uuid is not None:
         platform_uuid = uuid.UUID(str(platform_uuid))
@@ -49,6 +49,13 @@ def assemble(kernel, prelink_report, policy, data, root, loader_build, output, *
     report = json.loads(prelink_report.read_text())
     raw = kernel.read_bytes()
     image = macho(raw, 'arm64')
+    smp = None
+    if cpu_count != 1:
+        if kernel_build is None:
+            raise ValueError('SMP candidate requires the paired kernel build report')
+        from native_smp import configure
+        evidence = json.loads(kernel_build.read_text())
+        smp = configure(evidence, cpu_count, native_gop_display, 'cpus=1', board='nabu')
     if disable_watchdogd and not {'_native_owner_watchdog_policy_status',
                                   '_native_owner_watchdog_spawn_blocked',
                                   '_native_owner_watchdog_proxy_blocked'} <= symbols(kernel).keys():
@@ -117,9 +124,11 @@ def assemble(kernel, prelink_report, policy, data, root, loader_build, output, *
     adt = payload / 'kernel.macho.adt'
     make_nabu_adt(adt, owned_memory_size=owned, os_environment='main',
                   native_ufs=True, packed_ramdisk=True, trust_cache=trust_data is not None,
-                  boot_addon=addon_data is not None, native_gop_display=native_gop_display)
+                  boot_addon=addon_data is not None, native_gop_display=native_gop_display,
+                  cpu_count=cpu_count)
     configure_native_text_state(adt, development_root=True, root_match_volume_uuid=root_identity,
-                                native_gop_display=native_gop_display, platform_uuid=platform_uuid)
+                                native_gop_display=native_gop_display, platform_uuid=platform_uuid,
+                                native_disable_sleep=True)
     tree, parsed = parse_adt(adt.read_bytes())
     if parsed != adt.stat().st_size: raise ValueError('ADT has trailing bytes')
     ufs = tree['/device-tree/arm-io/ufs']
@@ -138,6 +147,8 @@ def assemble(kernel, prelink_report, policy, data, root, loader_build, output, *
     # A root-test candidate must expose transport/layout failures on the panic
     # panel instead of silently returning false and waiting forever for its UUID.
     args = '-v keepsyms=1 debug=0x14e cpus=1 armcpu-self-ipi=1 nabu-source-text=1 native-ufs-root=1 native-ufs-diagnostics=1 rd=uuid boot-uuid=' + root_uuid
+    if smp is not None:
+        args = args.replace('cpus=1', f'cpus={cpu_count}', 1) + ' sheng-smp=1'
     if native_gop_display:
         args += ' native-gop-display=1'
     if disable_watchdogd:
@@ -163,6 +174,7 @@ def assemble(kernel, prelink_report, policy, data, root, loader_build, output, *
         loader=loader_record,source_module_pointer_formats=storage['pointer_formats'],
         trust_cache=trust_record,
         native_gop_display=bool(native_gop_display),
+        cpu_count=cpu_count, smp=smp,
         platform_uuid=str(platform_uuid).upper() if platform_uuid is not None else None,
         boot_addon=addon_record,
         boot_process_trace=dict(enabled=bool(trace_boot_processes), boot_argument='nabu-boot-proc=1',
@@ -209,8 +221,11 @@ if __name__ == '__main__':
                    help='enable bounded selected filesystem/desktop exec, exit and stderr diagnostics')
     p.add_argument('--native-gop-display', action='store_true', help='enable the paired CPU framebuffer backend; does not qualify a desktop')
     p.add_argument('--platform-uuid', type=uuid.UUID, help='stable owner platform identity for /options/platform-uuid')
+    p.add_argument('--cpus', type=int, choices=(1, 2, 4, 8), default=1,
+                   help='paired ADT and PSCI secondary CPU count')
+    p.add_argument('--kernel-build', type=Path, help='paired source kernel build report required for SMP')
     a=p.parse_args(); print(json.dumps(assemble(a.kernel,a.prelink_report,a.policy,a.data,a.root,a.loader_build,a.output,
         owned_memory_size=a.owned_memory_size, trust_cache=a.trust_cache,
         boot_addon=a.boot_addon, disable_watchdogd=a.disable_watchdogd,
         trace_boot_processes=a.trace_boot_processes, native_gop_display=a.native_gop_display,
-        platform_uuid=a.platform_uuid),indent=2))
+        platform_uuid=a.platform_uuid, cpu_count=a.cpus, kernel_build=a.kernel_build),indent=2))

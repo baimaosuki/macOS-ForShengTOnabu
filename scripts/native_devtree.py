@@ -300,7 +300,8 @@ def make_nabu_adt(path: Path, *, dram_base: int = 0xc0000000,
                   native_ufs: bool = False,
                   packed_ramdisk: bool = False,
                   trust_cache: bool = False,
-                  boot_addon: bool = False) -> None:
+                  boot_addon: bool = False,
+                  cpu_count: int = 1) -> None:
     """Emit the Xiaomi Pad 5 (nabu / SM8150) Apple DeviceTree (.adt)."""
     # Nabu has 3 physical DRAM banks separated by the TrustZone hole 0xb9900000..0xc0000000.
     # XNU owns the upper contiguous 5 GiB window [0xc0000000, 0x200000000), while stock UEFI GOP
@@ -309,6 +310,8 @@ def make_nabu_adt(path: Path, *, dram_base: int = 0xc0000000,
         raise ValueError('nabu XNU DRAM window must avoid the 0xb9900000..0xc0000000 TrustZone hole')
     if not 0 < owned_memory_size <= dram_size:
         raise ValueError('nabu darwinboot-memory-size must lie within the XNU DRAM window')
+    if cpu_count not in (1, 2, 4, 8):
+        raise ValueError('nabu CPU count must be 1, 2, 4 or 8')
     chosen_props = [
         ('dram-base', struct.pack('<Q', dram_base)),
         ('dram-size', struct.pack('<Q', dram_size)),
@@ -336,23 +339,24 @@ def make_nabu_adt(path: Path, *, dram_base: int = 0xc0000000,
     chosen_props.extend(_adt_nvram_props())
     if panic_log:
         chosen_props.append(('embedded-panic-log-size', struct.pack('<I', 0x80000)))
-    # Controlled first boot: one core only. ArmDTPlatform walks /cpus children
-    # with device_type == "cpu"; the strict ADT contract rejects secondaries.
-    cpus = [_adt_node('cpu@0', (
+    # SM8150 numbers cores in MPIDR Affinity1. Only CPU0 is already running;
+    # ArmCpu starts the other nubs through PSCI CPU_ON. Keep the generic SMP
+    # scheduler policy: Apple cluster power management is not implemented.
+    cpus = [_adt_node(f'cpu@{cpu << 8:x}', (
         ('device_type', b'cpu\0'),
-        ('compatible', b'arm,cortex-a55\0'),
-        ('reg', struct.pack('<I', 0)),
-        ('cpu-id', struct.pack('<I', 0)),
+        ('compatible', b'arm,cortex-a55\0' if cpu < 4 else b'arm,cortex-a76\0'),
+        ('reg', struct.pack('<I', cpu << 8)),
+        ('cpu-id', struct.pack('<I', cpu)),
         ('enable-method', b'psci\0'),
         # pe_identify_machine reads the boot state and the timebase; a missing
         # state string leaves the cpu unusable and a zero rate divides by zero.
-        ('state', b'running\0'),
+        ('state', b'running\0' if cpu == 0 else b'stopped\0'),
         ('timebase-frequency', struct.pack('<I', 19200000)),
         # Without bus-frequency the kernel keeps bus_frequency_hz at 0 (bzero)
         # and copies it into bus_clock_rate_hz; L154 then divides by zero.
         ('bus-frequency', struct.pack('<Q', 100000000)),
         ('clock-frequency', struct.pack('<Q', 2840000000)),
-    ))]
+    )) for cpu in range(cpu_count)]
     # XNU ArmDTPlatform requires interrupt-controller = "master\0" and name = "interrupt-controller\0"
     intc = _adt_node('intc', (
         ('compatible', b'arm,gic-v3\0'),

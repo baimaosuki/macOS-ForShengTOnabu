@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: MIT */
 #include <sys/sysctl.h>
+#include <spawn.h>
 #include "nabu_session_probe_script.h"
 
 static int
@@ -40,22 +41,35 @@ static void
 nabu_install_session_probe(void)
 {
     const char *script = "/System/Volumes/Data/private/var/db/nabu-session-probe.sh";
-    const char *directory = "/System/Volumes/Data/Library/LaunchDaemons";
-    const char *plist = "/System/Volumes/Data/Library/LaunchDaemons/org.nabu.session-probe.plist";
-    static const char xml[] =
-        "<?xml version=\"1.0\"?><plist version=\"1.0\"><dict>"
-        "<key>Label</key><string>org.nabu.session-probe</string>"
-        "<key>ProgramArguments</key><array><string>/bin/sh</string>"
-        "<string>/private/var/db/nabu-session-probe.sh</string></array>"
-        "<key>RunAtLoad</key><true/>"
-        "<key>StandardOutPath</key><string>/dev/console</string>"
-        "<key>StandardErrorPath</key><string>/dev/console</string>"
-        "<key>ProcessType</key><string>Background</string>"
-        "</dict></plist>";
     if (!nabu_session_probe_enabled()) return;
-    int error = 0;
-    if (mkdir(directory, 0755) != 0 && errno != EEXIST) error = errno;
-    if (!error) error = nabu_probe_write(script, nabu_session_probe_script, 0600);
-    if (!error) error = nabu_probe_write(plist, xml, 0644);
-    fprintf(stderr, "apfs_boot_util (owner): session stack probe installation status=%d\n", error);
+    int error = nabu_probe_write(script, nabu_session_probe_script, 0600);
+    fprintf(stderr, "apfs_boot_util (owner): session probe script status=%d\n", error);
+    if (error) return;
+    /* A plist on Data is not evidence that launchd loaded or ran it. Start
+     * directly, with a new session and explicit independent console handles. */
+    posix_spawn_file_actions_t actions;
+    posix_spawnattr_t attributes;
+    error = posix_spawn_file_actions_init(&actions);
+    if (error) {
+        fprintf(stderr, "apfs_boot_util (owner): session probe actions status=%d\n", error);
+        return;
+    }
+    error = posix_spawnattr_init(&attributes);
+    if (error) {
+        posix_spawn_file_actions_destroy(&actions);
+        fprintf(stderr, "apfs_boot_util (owner): session probe attributes status=%d\n", error);
+        return;
+    }
+    error = posix_spawnattr_setflags(&attributes, POSIX_SPAWN_SETSID);
+    if (!error) error = posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0);
+    if (!error) error = posix_spawn_file_actions_addopen(&actions, 1, "/dev/console", O_WRONLY, 0);
+    if (!error) error = posix_spawn_file_actions_addopen(&actions, 2, "/dev/console", O_WRONLY, 0);
+    pid_t pid = -1;
+    char *arguments[] = {"/bin/sh", "/private/var/db/nabu-session-probe.sh", NULL};
+    char *environment[] = {"PATH=/usr/bin:/bin:/usr/sbin:/sbin", "HOME=/var/root", NULL};
+    if (!error) error = posix_spawn(&pid, "/bin/sh", &actions, &attributes, arguments, environment);
+    posix_spawnattr_destroy(&attributes);
+    posix_spawn_file_actions_destroy(&actions);
+    fprintf(stderr, "apfs_boot_util (owner): session probe direct spawn pid=%ld status=%d (%s)\n",
+        (long)pid, error, error ? strerror(error) : "started; await child marker");
 }

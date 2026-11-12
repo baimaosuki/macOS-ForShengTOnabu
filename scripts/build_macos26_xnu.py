@@ -114,6 +114,7 @@ CPU_SMP_PATCH = board_patch('machine-cpu-smp-bootstrap.patch')
 CPU_ASM_PATCH = board_patch('machine-cpu-inline-asm.patch')
 CPU_GIC_PATCH = board_patch('machine-cpu-gic-group.patch')
 CPU_TIMER_PATCH = board_patch('nabu-armcpu-timer-intid19.patch')
+CPU_COMPLETION_PATCH = board_patch('machine-cpu-init-completed.patch')
 
 
 # Preserve diagnostics for exported Apple source/tool-generated code on Clang 27.
@@ -522,6 +523,7 @@ def prepare() -> dict:
     if BOARD == 'nabu':
         stage_file(PLATFORM / 'log/windowserver_trace.h', source / 'osfmk/kern/nabu_windowserver_trace.h')
         stage_file(PLATFORM / 'log/windowserver_trace.h', source / 'bsd/kern/nabu_windowserver_trace.h')
+        stage_file(PLATFORM / 'log/od_wait_trace.h', source / 'osfmk/kern/nabu_od_wait_trace.h')
         for directory in ('bsd/kern', 'osfmk/ipc'):
             stage_file(PLATFORM / 'log/session_trace.h', source / directory / 'nabu_session_trace.h')
         build_epoch = int(os.environ.get('SOURCE_DATE_EPOCH', str(int(time.time()))))
@@ -606,6 +608,7 @@ def prepare() -> dict:
     if BOARD == 'nabu':
         subprocess.run(['git', '-C', source, 'add', '-N',
                         'osfmk/kern/nabu_windowserver_trace.h',
+                        'osfmk/kern/nabu_od_wait_trace.h',
                         'bsd/kern/nabu_windowserver_trace.h',
                         'bsd/kern/nabu_session_trace.h', 'osfmk/ipc/nabu_session_trace.h',
                         'bsd/kern/nabu_boot_epoch.h',
@@ -620,6 +623,7 @@ def prepare() -> dict:
                       calendar_floor_utc=build_epoch, session_trace_arg='nabu-session-log=1',
                       session_trace_sha256=sha(PLATFORM / 'log/session_trace.h'),
                       filesystem_patch_sha256=sha(PLATFORM / 'desktop/session-filesystem.patch'),
+                      od_wait_trace_sha256=sha(PLATFORM / 'log/od_wait_trace.h'),
                       device_verified=False) if BOARD == 'nabu' else None),
                   windowserver_trace=(dict(default_off=True, boot_argument='nabu-ws-log=1',
                       header_sha256=sha(PLATFORM / 'log/windowserver_trace.h'),
@@ -684,7 +688,7 @@ def prepare() -> dict:
                       runtime_qualified=False, hardware_qualified=False),
                   smp_bootstrap=dict(kernel_keys='cold-boot bank shared before secondary C entry'
                                         if ARCH == 'arm64e' else 'not used by the ARM64 target',
-                      reset_affinity_bits=16 if ARCH == 'arm64e' else 8, key_material_logged=False,
+                      reset_affinity_bits=16 if ARCH == 'arm64e' or BOARD == 'nabu' else 8, key_material_logged=False,
                       source_sha256={name: sha(PLATFORM / 'pac' / name)
                                      for name in smp_headers},
                       hardware_qualified=False, graphics_smp_qualified=False),
@@ -907,6 +911,12 @@ def compile_sources(args, record: dict) -> None:
     subprocess.run(['git', 'apply', '--directory=' + str(machine.relative_to(ROOT)),
                     str(CPU_TIMER_PATCH)], cwd=ROOT, check=True)
     record['cpu_timer_intid_patch_sha256'] = sha(CPU_TIMER_PATCH)
+    if BOARD == 'nabu':
+        subprocess.run(['git', 'apply', '--directory=' + str(machine.relative_to(ROOT)),
+                        str(CPU_COMPLETION_PATCH)], cwd=ROOT, check=True)
+        record['cpu_init_completed_patch_sha256'] = sha(CPU_COMPLETION_PATCH)
+        from native_smp import audit_nabu_source
+        record['nabu_smp_source'] = audit_nabu_source(source, machine / 'ArmCpu/ArmCpu.cpp')
     record['platform_objects'] = {}
     for component in ('ArmDTPlatform', 'ArmCpu'):
         original = ROOT / f'UniXNU/drivers/{component}/{component}.cpp'
