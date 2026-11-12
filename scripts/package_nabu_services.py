@@ -73,6 +73,8 @@ def package(artifact, metadata, output, installed_toml, identity_file, *, cpu_co
     addon = output / 'boot-addon'
     prepare_addon(artifact / 'boot-shim',
                   ROOT / 'out/nabu-25F71-trustcache/verified/kernel.macho.trustcache', addon)
+    if cpu_compositor and json.loads((addon / 'build.json').read_text())['addon']['files'] != 1:
+        raise ValueError('CPU compositor package must preserve the original OD executable')
     # The board-owned public identity persists across rebuilt packages.
     if not identity_file.exists():
         identity_file.parent.mkdir(parents=True, exist_ok=True)
@@ -132,7 +134,8 @@ def package(artifact, metadata, output, installed_toml, identity_file, *, cpu_co
                      'CPU scanout backend', 'local Ethernet identity for original TimeSync'],
         unresolved=['OD first-launch internal connection timeout',
                     'device validation of new services and actual WindowServer presentation'],
-        cpu_compositor=cpu_compositor, gpu_acceleration=False, sep_backed=False, network_connectivity=False,
+        cpu_compositor=cpu_compositor, od_overlay_included=False,
+        gpu_acceleration=False, sep_backed=False, network_connectivity=False,
         device_tested=False, desktop_verified=False, root_reflash_required=False,
         data_reflash_required=False, esp_logger_allocation_preserved=True,
         payload_sha256={name: sha(payload / name) for name in names},
@@ -160,7 +163,8 @@ adb reboot
 '''
     if cpu_compositor:
         delivery['implemented'].append('original CompositorSW with BGRA screen/intermediate allocation')
-        delivery['unresolved'].append('device validation of CPU compositor frames and login desktop')
+        delivery['unresolved'] = ['registered identity resolver query timeout remains unproven',
+                                  'device validation of CPU compositor frames and login desktop']
         readme = '''NABU macOS 26.5 / 25F71 — CPU compositor test candidate
 
 本包保留已实机启动的 2–5 项服务，新增 nabu-cpu-compositor=1。
