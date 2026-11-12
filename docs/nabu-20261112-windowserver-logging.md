@@ -58,6 +58,8 @@ First native CI 43163428641 exposed a header integration error: importing
 BSD sys/proc.h into the libsa exception translation unit redefined dev_t and
 daddr_t. The observer now declares only the two proc interfaces it uses,
 matching exception.c's existing pattern, without changing either ABI typedef.
+Retry 43164426419 additionally required the exact libkern vsnprintf prototype
+in that same translation unit; importing the broader BSD header is avoided.
 
 After decoding a run, use its recorded slide rather than an earlier boot's:
 

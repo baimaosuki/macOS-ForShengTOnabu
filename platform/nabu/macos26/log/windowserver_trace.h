@@ -14,6 +14,7 @@
 /* Avoid pulling BSD device typedefs into the libsa-based exception build. */
 extern int proc_selfpid(void);
 extern void proc_name(int, char *, int);
+extern int vsnprintf(char *, size_t, const char *, va_list) __attribute__((format(printf, 3, 0)));
 extern void nabu_capture_append(const char *, unsigned);
 #endif
 
