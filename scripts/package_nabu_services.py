@@ -217,6 +217,9 @@ task-terminate 记录终止发起者 PID 与内核调用点；外部终止不读
             bundle.write(output / name, name)
         for name in ('read_xnu2log.py', 'nabu_log_volume.py'):
             bundle.write(ROOT / 'scripts' / name, 'tools/' + name)
+        if windowserver_log:
+            for name in ('symbolicate_nabu_ws_log.py', 'native_macho.py'):
+                bundle.write(ROOT / 'scripts' / name, 'tools/' + name)
     delivery.update(package=str(archive), package_sha256=sha(archive), package_bytes=archive.stat().st_size)
     (output / 'delivery.json').write_text(json.dumps(delivery, indent=2) + '\n')
     print(json.dumps(delivery, indent=2), flush=True)

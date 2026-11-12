@@ -18,6 +18,9 @@ by the existing ESP journal, independently of console/framebuffer ownership:
   detail, before the optional SHENG stop and normal exception delivery.
 - `event=task-terminate`: target/caller PID, whether self-termination and
   raw kernel call site. No reads from another task's user map.
+- `event=fork-parent`: successful fork child PID in code and the parent's
+  user stack, after child construction locks are dropped. This distinguishes
+  daemon parent exit from termination without a child; fork does not exec.
 
 Context includes PC/LR/SP/FP, ESR/FAR, fault-safe instruction fetch, shared
 cache slide (all ones means unavailable), x0–x28, and up to twelve frame
@@ -50,3 +53,21 @@ and process selection, instruction/frame copy failures, PAC candidate
 addresses, missing saved state/region, cyclic or misaligned frames and budget
 exhaustion. A fresh desktop prepare applies all hooks and records the header
 hash. Native CI and device evidence are separate acceptance steps.
+
+First native CI 43163428641 exposed a header integration error: importing
+BSD sys/proc.h into the libsa exception translation unit redefined dev_t and
+daddr_t. The observer now declares only the two proc interfaces it uses,
+matching exception.c's existing pattern, without changing either ABI typedef.
+
+After decoding a run, use its recorded slide rather than an earlier boot's:
+
+```
+python3 scripts/symbolicate_nabu_ws_log.py /home/baimao/p5.txt \
+  --cache-map out/nabu-pid1-cache-fault/cache/System/Library/dyld/dyld_shared_cache_arm64e.map \
+  --native <exact-CI-artifact>/kernel.development.nabu --output /home/baimao/p5-ws.json
+```
+
+This maps shared-cache PCs and frame callers to module text offsets, and task
+termination call sites to the nearest native kernel symbol. Executable PCs
+outside the cache remain explicitly unresolved and need that executable's
+load address. The tool is included in the diagnostic ZIP with native_macho.py.

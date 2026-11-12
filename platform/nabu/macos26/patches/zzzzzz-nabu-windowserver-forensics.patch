@@ -82,3 +82,25 @@ Opt-in WindowServer entry context in the ESP RAM journal, before exit teardown a
  
  	self = current_thread();
  	self_task = current_task();
+--- a/bsd/kern/kern_fork.c
++++ b/bsd/kern/kern_fork.c
+@@ -140,6 +140,9 @@
+ 
+ #include <sys/shm_internal.h>   /* for shmfork() */
+ #include <mach/task.h>          /* for thread_create() */
++#if defined(NABU) && NABU && defined(__arm64__)
++#include <kern/nabu_windowserver_trace.h>
++#endif
+ #include <mach/thread_act.h>    /* for thread_resume() */
+ 
+ #include <sys/sdt.h>
+@@ -598,6 +601,9 @@
+ 		 */
+ 		proc_signalend(child_proc, 0);
+ 		proc_transend(child_proc, 0);
++#if defined(NABU) && NABU && defined(__arm64__)
++		nabu_ws_trace_context("fork-parent", proc_getpid(child_proc), 0, 0);
++#endif
+ 
+ 		/* flag the fork has occurred */
+ 		proc_knote(parent_proc, NOTE_FORK | proc_getpid(child_proc));

@@ -605,7 +605,7 @@ def prepare() -> dict:
                   windowserver_trace=(dict(default_off=True, boot_argument='nabu-ws-log=1',
                       header_sha256=sha(PLATFORM / 'log/windowserver_trace.h'),
                       output='ESP RAM journal', user_frames=12,
-                      events=['exit-syscall', 'exit-with-reason', 'exception', 'task-terminate'])
+                      events=['exit-syscall', 'exit-with-reason', 'exception', 'task-terminate', 'fork-parent'])
                       if BOARD == 'nabu' else None),
                   cpu_compositor=(dict(default_off=True, boot_argument='nabu-cpu-compositor=1',
                       shared_memory_pages=True, disk_modified=False, runtime_qualified=False,

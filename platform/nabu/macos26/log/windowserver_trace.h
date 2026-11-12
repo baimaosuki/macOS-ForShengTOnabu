@@ -9,9 +9,11 @@
 #include <kern/thread.h>
 #include <libkern/copyio.h>
 #include <pexpert/pexpert.h>
-#include <sys/proc.h>
 #include <vm/vm_shared_region_xnu.h>
 #include <stdarg.h>
+/* Avoid pulling BSD device typedefs into the libsa-based exception build. */
+extern int proc_selfpid(void);
+extern void proc_name(int, char *, int);
 extern void nabu_capture_append(const char *, unsigned);
 #endif
 
