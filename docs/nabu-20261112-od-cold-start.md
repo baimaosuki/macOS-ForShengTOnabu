@@ -119,3 +119,22 @@ resolver bootstrap/self-deadlock fix. The matching build enables
 `CONFIG_EXT_RESOLVER`. Audit records are
 `out/nabu-service-startup/od-resolver-bootstrap-audit.json` and
 `od-sheng-resolver-patch-audit.json`. No new resolver bypass was justified.
+
+
+## Device rejection: mount phase regression
+
+The candidate package above is **withdrawn** after the device test. Input
+`/home/baimao/p1.txt`, SHA-256
+`4636d1ebb861fbfc1f8bc7fe0f105fc849bf78ba6d4fc635fd854f01988a89bd`,
+contains successful Data and VM write/close/unlink probes, followed by
+`mount OD union /usr/libexec: errno=1 (Operation not permitted)` and launchd's
+fatal mount-phase-1 failure. OD did not start, so the queue fence was not tested.
+The signed bindfs entitlement and host mount model did not establish that the
+real VFS/MAC policy would permit this userland overlay. Returning exit 1 from
+an optional experimental overlay introduced an earlier boot failure.
+
+The CPU compositor package deliberately does not include `od/opendirectoryd`;
+its original OD service remains visible. Restore the already booted services
+package to recover from the withdrawn OD test. The optional overlay's failure
+handling is being corrected independently; a successful fallback to original OD
+must never be reported as the queue candidate having executed.

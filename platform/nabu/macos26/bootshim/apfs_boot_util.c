@@ -96,6 +96,34 @@ probe_writable(const char *path, dev_t device)
 
 #ifdef __APPLE__
 static int
+skip_od_overlay(const char *operation, const char *path, int error)
+{
+    fprintf(stderr, "apfs_boot_util (owner): optional OD overlay inactive: %s %s: errno=%d (%s); namespace unchanged, continuing boot\n",
+        operation, path, error, strerror(error));
+    return 0;
+}
+
+static int
+verify_od_namespace(const struct stat *original, const struct stat *lower,
+    const struct statfs *baseline)
+{
+    struct stat current, current_lower;
+    struct statfs filesystem;
+    if (stat("/usr/libexec/opendirectoryd", &current) == -1 ||
+        stat("/usr/libexec/xpcproxy", &current_lower) == -1 ||
+        statfs("/usr/libexec", &filesystem) == -1)
+        return errno;
+    if (current.st_dev != original->st_dev || current.st_ino != original->st_ino ||
+        current_lower.st_dev != lower->st_dev || current_lower.st_ino != lower->st_ino ||
+        filesystem.f_flags != baseline->f_flags ||
+        strcmp(filesystem.f_fstypename, baseline->f_fstypename) != 0 ||
+        strcmp(filesystem.f_mntonname, baseline->f_mntonname) != 0 ||
+        strcmp(filesystem.f_mntfromname, baseline->f_mntfromname) != 0)
+        return EIO;
+    return 0;
+}
+
+static int
 same_file_bytes(const char *left, const char *right)
 {
     unsigned char a[8192], b[8192];
@@ -130,36 +158,44 @@ prepare_od_overlay(void)
     const char *point = "/usr/libexec";
     const char *visible = "/usr/libexec/opendirectoryd";
     const char *lower = "/usr/libexec/xpcproxy";
-    struct stat directory, file, before, after;
-    struct statfs filesystem;
+    struct stat directory, file, before, after, original;
+    struct statfs filesystem, baseline;
     int mounted = 0, error;
 
     // A missing candidate retains the original service for older addon bundles.
     // Any present candidate must be complete, root-owned and immutable to users.
     if (lstat(source, &directory) == -1)
-        return errno == ENOENT ? 0 : failure("stat OD source", source, errno);
+        return skip_od_overlay("stat OD source", source, errno);
     if (!S_ISDIR(directory.st_mode) || directory.st_uid != 0 || directory.st_gid != 0 ||
         (directory.st_mode & 0022) != 0)
-        return failure("validate OD source ownership", source, EPERM);
+        return skip_od_overlay("validate OD source ownership", source, EPERM);
     if (lstat(binary, &file) == -1)
-        return failure("stat OD candidate", binary, errno);
+        return skip_od_overlay("stat OD candidate", binary, errno);
     if (!S_ISREG(file.st_mode) || file.st_uid != 0 || file.st_gid != 0 ||
         (file.st_mode & 0022) != 0 || (file.st_mode & 0111) == 0 || file.st_size <= 0)
-        return failure("validate OD candidate ownership", binary, EPERM);
+        return skip_od_overlay("validate OD candidate ownership", binary, EPERM);
     if (stat(lower, &before) == -1)
-        return failure("lookup lower xpcproxy", lower, errno);
+        return skip_od_overlay("lookup lower xpcproxy", lower, errno);
     if (statfs(point, &filesystem) == -1)
-        return failure("statfs OD mountpoint", point, errno);
+        return skip_od_overlay("statfs OD mountpoint", point, errno);
     if (strcmp(filesystem.f_fstypename, "bindfs") == 0 &&
         strcmp(filesystem.f_mntonname, point) == 0) {
         if (strcmp(filesystem.f_mntfromname, source) != 0 ||
             (filesystem.f_flags & (MNT_RDONLY | MNT_UNION)) != (MNT_RDONLY | MNT_UNION))
-            return failure("unexpected OD overlay", point, EBUSY);
+            return skip_od_overlay("unexpected OD overlay", point, EBUSY);
     } else {
         // MNT_UNION is essential: fallback lookups must still see every sealed
         // /usr/libexec tool. A plain bind mount would hide xpcproxy and others.
-        if (mount("bindfs", point, MNT_RDONLY | MNT_UNION, (void *)source) == -1)
-            return failure("mount OD union", point, errno);
+        if (stat(visible, &original) == -1)
+            return skip_od_overlay("lookup original OD", visible, errno);
+        baseline = filesystem;
+        if (mount("bindfs", point, MNT_RDONLY | MNT_UNION, (void *)source) == -1) {
+            int mount_error = errno;
+            error = verify_od_namespace(&original, &before, &baseline);
+            if (error != 0)
+                return failure("OD mount rejected but namespace differs", point, error);
+            return skip_od_overlay("mount OD union rejected; original OD retained", point, mount_error);
+        }
         mounted = 1;
     }
     error = same_file_bytes(binary, visible);
@@ -174,9 +210,16 @@ prepare_od_overlay(void)
         (filesystem.f_flags & (MNT_RDONLY | MNT_UNION)) != (MNT_RDONLY | MNT_UNION)))
         error = EIO;
     if (error != 0) {
-        if (mounted && unmount(point, 0) == -1)
+        int validation_error = error;
+        // Only the exact owner source passed the existing-mount check above.
+        // If this mount existed on entry, remove that failed owner view too.
+        if (unmount(point, 0) == -1)
             return failure("rollback OD union", point, errno);
-        return failure("verify OD union replacement/lower lookup", point, error);
+        if (mounted && (error = verify_od_namespace(&original, &before, &baseline)) != 0)
+            return failure("OD rollback namespace differs", point, error);
+        fprintf(stderr, "apfs_boot_util (owner): optional OD overlay inactive: validation errno=%d (%s); rollback succeeded, original OD retained, continuing boot\n",
+            validation_error, strerror(validation_error));
+        return 0;
     }
     fprintf(stderr, "apfs_boot_util (owner): OD readonly union ready: replacement bytes match; lower xpcproxy preserved\n");
     return 0;

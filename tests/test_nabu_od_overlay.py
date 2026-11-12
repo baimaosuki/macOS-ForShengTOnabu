@@ -70,12 +70,17 @@ int statfs(const char *path, struct statfs *s) {
 int mount(const char *type,const char *point,int flags,void *source) {
     if (strcmp(type,"bindfs") || strcmp(point,"/usr/libexec") ||
         strcmp((char *)source,"/private/var/ngpu/od") || flags!=(MNT_RDONLY|MNT_UNION)) abort();
-    if (scenario==8) { errno=EPERM; return -1; }
+    if (scenario==8 || scenario==11) {
+        if (scenario==11) mounted=1; /* unexpected failed-mount side effect */
+        errno=EPERM; return -1;
+    }
     mounts++; mounted=1; return 0;
 }
 int unmount(const char *path,int flags) {
     if (strcmp(path,"/usr/libexec") || flags) abort();
-    unmounts++; mounted=0; return 0;
+    unmounts++;
+    if (scenario==10) { errno=EPERM; return -1; }
+    mounted=0; return 0;
 }
 static int fake_open(const char *path,int flags,...) {
     if (!(flags&O_NOFOLLOW)) abort();
@@ -85,7 +90,7 @@ static ssize_t fake_read(int fd,void *bytes,size_t count) {
     (void)count;
     static int seen[2];
     if (seen[fd-100]++%2) return 0;
-    *(char *)bytes=(scenario==2 && fd==101)?'b':'a';
+    *(char *)bytes=((scenario==2 || scenario==10) && fd==101)?'b':'a';
     return 1;
 }
 static int fake_close(int fd) { (void)fd; return 0; }
@@ -127,17 +132,42 @@ int main(int argc,char **argv) {
         self.assertEqual(result.stderr.count('lower xpcproxy preserved'), 2)
 
     def test_absent_source_keeps_original_and_bad_permissions_never_mount(self):
-        for case, expected in [(1, 0), (5, 1), (6, 1), (8, 1), (9, 1)]:
+        for case in (1, 5, 6, 8, 9):
             with self.subTest(case=case):
                 result = self.run_case(case)
-                self.assertIn(f'result={expected} mounts=0 unmounts=0', result.stdout)
+                self.assertIn('result=0 mounts=0 unmounts=0', result.stdout)
+                self.assertIn('optional OD overlay inactive:', result.stderr)
+                self.assertIn('continuing boot', result.stderr)
+                self.assertNotIn('readonly union ready', result.stderr)
+
+    def test_eperm_preserves_original_namespace_and_continues_boot(self):
+        result = self.run_case(8)
+        self.assertIn('result=0 mounts=0 unmounts=0', result.stdout)
+        self.assertIn('mount OD union rejected; original OD retained', result.stderr)
+        self.assertIn('errno=1 ', result.stderr)
+        self.assertNotIn('readonly union ready', result.stderr)
 
     def test_byte_mismatch_missing_lower_wrong_inode_or_missing_union_roll_back(self):
         for case in (2, 3, 4, 7):
             with self.subTest(case=case):
                 result = self.run_case(case)
-                self.assertIn('result=1 mounts=1 unmounts=1', result.stdout)
+                self.assertIn('result=0 mounts=1 unmounts=1', result.stdout)
+                self.assertIn('rollback succeeded, original OD retained, continuing boot', result.stderr)
                 self.assertNotIn('readonly union ready', result.stderr)
+
+    def test_failed_rollback_remains_fatal_and_never_claims_original_retained(self):
+        result = self.run_case(10)
+        self.assertIn('result=1 mounts=1 unmounts=1', result.stdout)
+        self.assertIn('rollback OD union', result.stderr)
+        self.assertNotIn('continuing boot', result.stderr)
+        self.assertNotIn('original OD retained', result.stderr)
+        self.assertNotIn('readonly union ready', result.stderr)
+
+    def test_failed_mount_with_changed_namespace_is_not_silently_accepted(self):
+        result = self.run_case(11)
+        self.assertIn('result=1 mounts=0 unmounts=0', result.stdout)
+        self.assertIn('OD mount rejected but namespace differs', result.stderr)
+        self.assertNotIn('continuing boot', result.stderr)
 
 
 if __name__ == '__main__':
