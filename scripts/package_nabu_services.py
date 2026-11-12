@@ -26,7 +26,8 @@ def sha(path):
     return digest.hexdigest()
 
 
-def package(artifact, metadata, output, installed_toml, identity_file, *, cpu_compositor=False):
+def package(artifact, metadata, output, installed_toml, identity_file, *, cpu_compositor=False,
+            windowserver_log=False):
     metadata = json.loads(metadata.read_text())
     if metadata['conclusion'] != 'success':
         raise ValueError('requires a successful native CI build')
@@ -44,6 +45,12 @@ def package(artifact, metadata, output, installed_toml, identity_file, *, cpu_co
         contract = ROOT / 'platform/nabu/macos26/software-compositor/contract.json'
         if build['cpu_compositor']['contract_sha256'] != sha(contract):
             raise ValueError('CPU compositor contract differs from the compiled kernel')
+    if windowserver_log:
+        trace = build.get('windowserver_trace') or {}
+        if trace.get('header_sha256') != sha(ROOT / 'platform/nabu/macos26/log/windowserver_trace.h'):
+            raise ValueError('WindowServer observer differs from the compiled kernel')
+        if b'NABU-WS event=' not in native.read_bytes():
+            raise ValueError('native kernel omitted the WindowServer journal observer')
     output.mkdir(parents=True, exist_ok=False)
 
     def run(arguments, name):
@@ -119,6 +126,16 @@ def package(artifact, metadata, output, installed_toml, identity_file, *, cpu_co
                 raise ValueError('expected one installed args line')
             match = matches[0]
             text = text[:match.end(2)] + ' nabu-cpu-compositor=1' + text[match.end(2):]
+    if windowserver_log:
+        matches = list(re.finditer(r'(?m)^(\s*args\s*=\s*")([^"\n]*)("\s*)$', text))
+        if len(matches) != 1:
+            raise ValueError('expected one installed args line')
+        match = matches[0]
+        changes = {'nabu-ws-log': '1', 'sheng-windowserver-stop': '0',
+                   'sheng-stderr-log': '2', 'sheng-stderr-name': 'WindowServer'}
+        args = [a for a in match.group(2).split() if a.split('=', 1)[0] not in changes]
+        args += [key + '=' + value for key, value in changes.items()]
+        text = text[:match.start(2)] + ' '.join(args) + text[match.end(2):]
     config_path = candidate / 'EFI/UniXNU/unixnu.toml'
     config_path.write_text(text)
     final_config = tomllib.loads(text)
@@ -134,7 +151,7 @@ def package(artifact, metadata, output, installed_toml, identity_file, *, cpu_co
                      'CPU scanout backend', 'local Ethernet identity for original TimeSync'],
         unresolved=['OD first-launch internal connection timeout',
                     'device validation of new services and actual WindowServer presentation'],
-        cpu_compositor=cpu_compositor, od_overlay_included=False,
+        cpu_compositor=cpu_compositor, windowserver_log=windowserver_log, od_overlay_included=False,
         gpu_acceleration=False, sep_backed=False, network_connectivity=False,
         device_tested=False, desktop_verified=False, root_reflash_required=False,
         data_reflash_required=False, esp_logger_allocation_preserved=True,
@@ -180,6 +197,15 @@ TWRP 中备份现有五文件，然后替换 EFI/UniXNU 下五文件，sync 后�
 检查日志 NABU: CPU compositor page 0/1/2 applied、GOP swap，
 以及 WindowServer 不再从 Metal 设备检查退出和实际画面。
 '''
+    if windowserver_log:
+        readme += '''
+本版增加 WindowServer 退出入口和异常现场日志：NABU-WS。
+记录 PC/LR/SP/FP、ESR/FAR、指令、共享缓存 slide、通用寄存器和最多 12 层用户栈。
+task-terminate 记录终止发起者 PID 与内核调用点；外部终止不读取目标用户内存。
+新开关 nabu-ws-log=1 直接写 ESP 日志所用 RAM 环；每编译单元每次启动最多 32 次事件。
+同时打开 WindowServer stdout/stderr。为让 journal 线程继续提交，关闭首异常强制停机；
+这不改变原异常投递和原进程退出处理。本版增强诊断，不代表已修复桌面。
+'''
     (output / 'README.txt').write_text(readme)
     (output / 'delivery.json').write_text(json.dumps(delivery, indent=2) + '\n')
     archive = output.with_suffix('.zip')
@@ -202,6 +228,7 @@ if __name__ == '__main__':
     for name in ('artifact', 'metadata', 'output', 'installed-toml', 'identity-file'):
         parser.add_argument('--' + name, type=Path, required=True)
     parser.add_argument('--cpu-compositor', action='store_true')
+    parser.add_argument('--windowserver-log', action='store_true')
     args = parser.parse_args()
     package(args.artifact, args.metadata, args.output, args.installed_toml, args.identity_file,
-            cpu_compositor=args.cpu_compositor)
+            cpu_compositor=args.cpu_compositor, windowserver_log=args.windowserver_log)

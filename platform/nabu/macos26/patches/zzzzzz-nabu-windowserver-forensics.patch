@@ -1,0 +1,84 @@
+Opt-in WindowServer entry context in the ESP RAM journal, before exit teardown and exception delivery.
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -138,6 +138,10 @@
+ #include <os/system_event_log.h>
+ 
+ #include <pexpert/pexpert.h>
++
++#if defined(NABU) && NABU && defined(__arm64__)
++#include <kern/nabu_windowserver_trace.h>
++#endif
+ #if SHENG
+ extern void sheng_windowserver_stop(unsigned exception, uint64_t code, uint64_t subcode);
+ #endif
+@@ -1719,6 +1723,9 @@
+ void
+ exit(proc_t p, struct exit_args *uap, int *retval)
+ {
++#if defined(NABU) && NABU && defined(__arm64__)
++	nabu_ws_trace_context("exit-syscall", (uint32_t)uap->rval, 0, 0);
++#endif
+ 	p->p_xhighbits = ((uint32_t)(uap->rval) & 0xFF000000) >> 24;
+ 	exit1(p, W_EXITCODE((uint32_t)uap->rval, 0), retval);
+ 
+@@ -1760,6 +1767,13 @@
+ 	struct uthread *ut;
+ 	int error = 0;
+ 	bool proc_exiting = false;
++
++#if defined(NABU) && NABU && defined(__arm64__)
++	if (p == current_proc())
++		nabu_ws_trace_context("exit-with-reason", (uint32_t)rv,
++		    exit_reason ? exit_reason->osr_code : 0,
++		    exit_reason ? exit_reason->osr_namespace : 0);
++#endif
+ 
+ #if DEVELOPMENT || DEBUG
+ 	/*
+--- a/osfmk/kern/exception.c
++++ b/osfmk/kern/exception.c
+@@ -94,6 +94,10 @@
+ #include <string.h>
+ 
+ #include <pexpert/pexpert.h>
++
++#if defined(NABU) && NABU && defined(__arm64__)
++#include <kern/nabu_windowserver_trace.h>
++#endif
+ 
+ #include <os/log.h>
+ #include <os/system_event_log.h>
+@@ -990,6 +994,9 @@
+ 	task_t   task   = current_task();
+ 
+ 	assert(codeCnt > 0);
++#if defined(NABU) && NABU && defined(__arm64__)
++	nabu_ws_trace_context("exception", (unsigned)exception, code[0], codeCnt > 1 ? code[1] : 0);
++#endif
+ #if SHENG && defined(MACH_BSD)
+ 	sheng_windowserver_stop((unsigned)exception, code[0], codeCnt > 1 ? code[1] : 0);
+ #endif
+--- a/osfmk/kern/task.c
++++ b/osfmk/kern/task.c
+@@ -110,6 +110,10 @@
+ #include <kern/mach_param.h>
+ #include <kern/misc_protos.h>
+ #include <kern/task.h>
++
++#if defined(NABU) && NABU && defined(__arm64__)
++#include <kern/nabu_windowserver_trace.h>
++#endif
+ #include <kern/thread.h>
+ #include <kern/coalition.h>
+ #include <kern/zalloc.h>
+@@ -2988,6 +2992,9 @@
+ 	int                             pid = 0;
+ 
+ 	assert(task != kernel_task);
++#if defined(NABU) && NABU && defined(__arm64__)
++	nabu_ws_trace_terminate(task, (uintptr_t)__builtin_return_address(0));
++#endif
+ 
+ 	self = current_thread();
+ 	self_task = current_task();

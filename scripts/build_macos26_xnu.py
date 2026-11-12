@@ -518,6 +518,8 @@ def prepare() -> dict:
     stage_file(boot_progress_kernel, source / 'pexpert/arm/pe_sheng_boot_progress_kernel.h')
     process_output = PLATFORM / 'log/process_output.h'
     stage_file(process_output, source / 'bsd/kern/sheng_process_output.h')
+    if BOARD == 'nabu':
+        stage_file(PLATFORM / 'log/windowserver_trace.h', source / 'osfmk/kern/nabu_windowserver_trace.h')
     panel_console = PLATFORM / 'log/panel_console.h'
     stage_file(panel_console, source / 'pexpert/arm/pe_sheng_panel.h')
     panel_font = source / 'osfmk/console/iso_font.c'
@@ -592,6 +594,7 @@ def prepare() -> dict:
                     'pexpert/arm/qrcodegen.h'], check=True)
     if BOARD == 'nabu':
         subprocess.run(['git', '-C', source, 'add', '-N',
+                        'osfmk/kern/nabu_windowserver_trace.h',
                         'osfmk/vm/nabu_cpu_compositor_policy.h',
                         'osfmk/vm/nabu_cpu_compositor_kernel.h',
                         'osfmk/vm/nabu_cpu_compositor_pages.h'], check=True)
@@ -599,6 +602,11 @@ def prepare() -> dict:
                   deployment='macOS 26.5', sources=identities,
                   architecture=ARCH, native_el1_pac=ARCH == 'arm64e',
                   el0_pac_lifecycle_qualified=False,
+                  windowserver_trace=(dict(default_off=True, boot_argument='nabu-ws-log=1',
+                      header_sha256=sha(PLATFORM / 'log/windowserver_trace.h'),
+                      output='ESP RAM journal', user_frames=12,
+                      events=['exit-syscall', 'exit-with-reason', 'exception', 'task-terminate'])
+                      if BOARD == 'nabu' else None),
                   cpu_compositor=(dict(default_off=True, boot_argument='nabu-cpu-compositor=1',
                       shared_memory_pages=True, disk_modified=False, runtime_qualified=False,
                       contract_sha256=sha(PLATFORM / 'software-compositor/contract.json'),
