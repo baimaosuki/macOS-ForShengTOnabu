@@ -33,7 +33,7 @@ void NativeGOPDisplay::program_hardware_gated()
             const uint32_t rotation = updated ? at<uint32_t>(swap, 0x268 + i * 4) : at<uint32_t>(this, 0x13dc + i * 4);
             // The family's validity check ignores disabled (zero-area) planes.
             if (!src.width || !src.height || !dst.width || !dst.height) continue;
-            if (fFrames < 4)
+            if (fFrames < 4 && fCopyFailures < 4)
                 IOLog("NABU-DISPLAY: swap=%u mask=%#x layer=%u updated=%u surface=%p src=%d,%d,%d,%d dst=%d,%d,%d,%d rotation=%u\n",
                       swapID, mask, i, updated, surface, src.x, src.y, src.width, src.height,
                       dst.x, dst.y, dst.width, dst.height, rotation);
@@ -134,27 +134,37 @@ bool NativeGOPDisplay::copyLayer(IOSurface *surface, const NabuGopRect &src,
         if (fRow) IOFree(fRow, fRowBytes);
         fRow = replacement; fRowBytes = sourceRowBytes;
     }
-    if (memory->prepare() != kIOReturnSuccess) return false;
+    // IOSurface owns this descriptor and its backing through native retirement.
+    // Match GopFramebuffer's synchronous CPU path: map that backing directly.
+    // Re-preparing it here can re-enter VM wiring while the submitting thread
+    // holds the framebuffer gate; it is not a new DMA transfer owned by us.
     struct FrameRead {
-        IOMemoryDescriptor *memory;
         IOMemoryMap *mapping = nullptr;
-        ~FrameRead() { if (mapping) mapping->release(); memory->complete(); }
-    } frame{memory};
+        ~FrameRead() { if (mapping) mapping->release(); }
+    } frame{};
     uint64_t span = (height - 1) * rowBytes + sourceRowBytes;
+    if (fFrames < 4 && fCopyFailures < 4)
+        IOLog("NABU-DISPLAY: source-map-begin frame=%llu memory=%p format=%#x size=%llux%llu row=%llu base=%llu span=%llu\n",
+              fFrames + 1, memory, format, width, height, rowBytes, base, span);
     if (span <= (512ULL << 20))
         frame.mapping = memory->createMappingInTask(kernel_task, 0, kIOMapAnywhere | kIOMapReadOnly, base, span);
     const uint8_t *source = frame.mapping && frame.mapping->getLength() >= span
         ? reinterpret_cast<const uint8_t *>(frame.mapping->getVirtualAddress()) : nullptr;
+    if (!source) {
+        if (fCopyFailures < 4) IOLog("NABU-DISPLAY: source-map-failed memory=%p span=%llu\n", memory, span);
+        return false;
+    }
+    if (fFrames < 4 && fCopyFailures < 4) IOLog("NABU-DISPLAY: source-map-ready frame=%llu bytes=%llu\n", fFrames + 1, span);
     uint64_t previousY = UINT64_MAX;
     for (int64_t y = clip.y0; y < clip.y1; y++) {
         const uint64_t sy = src.y + uint64_t(y - dst.y) * uint64_t(src.height) / uint64_t(dst.height);
         if (sy != previousY) {
-            if (source) memcpy(fRow, source + sy * rowBytes, sourceRowBytes);
-            else if (memory->readBytes(base + sy * rowBytes, fRow, sourceRowBytes) != sourceRowBytes) return false;
+            memcpy(fRow, source + sy * rowBytes, sourceRowBytes);
             previousY = sy;
         }
         nabuGopLayerRow(fComposition + y * fVideo.v_width, fRow, src, dst, clip,
                        format == kFormatRGhA ? fHalfToByte : nullptr, cursor);
     }
+    if (fFrames < 4 && fCopyFailures < 4) IOLog("NABU-DISPLAY: source-copy-done frame=%llu rows=%llu\n", fFrames + 1, uint64_t(clip.y1 - clip.y0));
     return true;
 }

@@ -182,22 +182,29 @@ static void sheng_panel_putc(unsigned char byte)
     const uintptr_t origin = sheng_panel.base + sheng_panel.y * 16 * scale * sheng_panel.stride +
         sheng_panel.x * 8 * scale * sizeof(uint32_t);
     uintptr_t white = 0;
+    /* One bounded glyph (at most 512 stores), one ownership check and one
+     * completion barrier. Per-scanline leases used 32 full barriers per byte.
+     * The lease prevents GUI handoff from racing any of these pixel stores. */
+    uint64_t saved;
+    if (!sheng_fb_begin(SHENG_FB_BOOT, &saved)) return;
     for (unsigned row = 0; row < 16; row++) {
         const unsigned bits = sheng_panel_font[byte * 16 + row];
         for (unsigned y = 0; y < scale; y++) {
-            uint64_t saved;
-            if (!sheng_fb_begin(SHENG_FB_BOOT, &saved)) return;
             volatile uint32_t *p = (volatile uint32_t *)(origin + (row * scale + y) * sheng_panel.stride);
             for (unsigned col = 0; col < 8; col++) {
                 const uint32_t color = bits & (1u << col) ? 0xffffffffu : 0xff000000u;
                 for (unsigned x = 0; x < scale; x++) p[col * scale + x] = color;
                 if (!white && color == 0xffffffffu) white = (uintptr_t)&p[col * scale];
             }
-            sheng_fb_end(saved);
         }
     }
-    __asm__ volatile ("dsb sy" ::: "memory");
-    if (white && *(volatile uint32_t *)white == 0xffffffffu) sheng_panel_witness = 1;
+    /* One initial readback proves the mapping. Repeating an uncached MMIO
+     * read for every log character serialized the normal console producer. */
+    if (!sheng_panel_witness && white) {
+        __asm__ volatile ("dsb sy" ::: "memory");
+        if (*(volatile uint32_t *)white == 0xffffffffu) sheng_panel_witness = 1;
+    }
+    sheng_fb_end(saved);
     sheng_panel_characters++;
     if (++sheng_panel.x == sheng_panel.columns) sheng_panel_newline();
 }

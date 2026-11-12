@@ -41,6 +41,11 @@ static inline void nabuGopLayerRow(uint32_t *destination, const void *row,
                                    const NabuGopRect &src, const NabuGopRect &dst,
                                    const NabuGopClip &clip, const uint8_t *halfToByte, bool cursor)
 {
+    if (!halfToByte && !cursor && src.width == dst.width) {
+        const uint32_t *pixels = static_cast<const uint32_t *>(row) + src.x;
+        for (int64_t x = clip.x0; x < clip.x1; x++) destination[x] = pixels[x - dst.x] | 0xff000000;
+        return;
+    }
     for (int64_t x = clip.x0; x < clip.x1; x++) {
         uint64_t sx = src.x + uint64_t(x - dst.x) * uint64_t(src.width) / uint64_t(dst.width);
         uint32_t pixel;

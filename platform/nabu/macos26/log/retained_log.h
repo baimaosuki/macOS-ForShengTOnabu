@@ -58,6 +58,28 @@ static void sheng_log_clean(const volatile void *address, size_t bytes)
 }
 
 static uint32_t sheng_log_panel_writer;
+/* Only the retained writer changes this cursor. Publish complete cache-line
+ * batches or lines, rather than performing three full-system barriers per
+ * console byte with interrupts masked. RAM/ESP capture remains immediate. */
+static uint64_t sheng_log_clean_total;
+
+static void sheng_log_flush_pending(struct sheng_log_record *r)
+{
+    uint64_t end = r->total, start = sheng_log_clean_total;
+    if (end < start || end - start > SHENG_LOG_TAIL) start = end > SHENG_LOG_TAIL ? end - SHENG_LOG_TAIL : 0;
+    if (start < end && start < SHENG_LOG_PREFIX) {
+        uint64_t prefix_end = end < SHENG_LOG_PREFIX ? end : SHENG_LOG_PREFIX;
+        sheng_log_clean(r->prefix + start, (size_t)(prefix_end - start));
+    }
+    while (start < end) {
+        unsigned offset = (unsigned)(start % SHENG_LOG_TAIL);
+        uint64_t count = end - start;
+        if (count > SHENG_LOG_TAIL - offset) count = SHENG_LOG_TAIL - offset;
+        sheng_log_clean(r->tail + offset, (size_t)count);
+        start += count;
+    }
+    sheng_log_clean_total = end;
+}
 
 static uint64_t sheng_log_mask_async(void)
 {
@@ -88,7 +110,7 @@ void sheng_log_putc(char byte)
     if (!__atomic_compare_exchange_n(&r->writer, &expected, 1, 0,
                                      __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) {
         __atomic_fetch_add(&r->dropped, 1, __ATOMIC_RELAXED);
-        sheng_log_clean(&r->dropped, sizeof(r->dropped));
+        /* A panic flush publishes drop counters, including contended bytes. */
         sheng_log_restore_async(interrupt_state);
         return;
     }
@@ -98,14 +120,14 @@ void sheng_log_putc(char byte)
     } else {
         if (total < SHENG_LOG_PREFIX) {
             r->prefix[total] = (uint8_t)byte;
-            sheng_log_clean(&r->prefix[total], 1);
         }
         r->tail[total % SHENG_LOG_TAIL] = (uint8_t)byte;
-        sheng_log_clean(&r->tail[total % SHENG_LOG_TAIL], 1);
         __atomic_store_n(&r->total, total + 1, __ATOMIC_RELEASE);
     }
+    int publish = byte == '\n' || r->total - sheng_log_clean_total >= 64 || r->panic_state != 0;
+    if (publish) sheng_log_flush_pending(r);
     __atomic_store_n(&r->writer, 0, __ATOMIC_RELEASE);
-    sheng_log_clean(r, 64);
+    if (publish) sheng_log_clean(r, 64);
     sheng_log_restore_async(interrupt_state);
     /* Slow display updates may be skipped; they must not hold the retained-log writer. */
     expected = 0;
@@ -133,10 +155,14 @@ unsigned sheng_log_snapshot_copy(void *destination, unsigned bytes)
         sheng_log_restore_async(interrupt_state);
         return 0;
     }
+    /* Publish the partial last line too before exporting the retained record.
+     * ESP's separate nabu_capture ring already receives every byte above. */
+    sheng_log_flush_pending(r);
     /* Copy RAM only; never issue storage commands or render while holding the writer. */
     __builtin_memcpy(destination, r, sizeof(*r));
     ((struct sheng_log_record *)destination)->writer = 0;
     __atomic_store_n(&r->writer, 0, __ATOMIC_RELEASE);
+    sheng_log_clean(r, 64);
     sheng_log_restore_async(interrupt_state);
     return sizeof(*r);
 }
@@ -294,6 +320,9 @@ void sheng_log_panic(uint64_t caller, const char *message)
 {
     sheng_fb_enter_panic();
     struct sheng_log_record *r = &sheng_log_buffer;
+    /* Even if the panic interrupted the retained writer, publish every recent
+     * byte without acquiring or stealing its lock. Panic must never wait. */
+    sheng_log_clean(r, sizeof(*r));
     uint32_t expected = 0;
     if (__atomic_compare_exchange_n(&r->panic_state, &expected, 1, 0,
                                     __ATOMIC_ACQUIRE, __ATOMIC_RELAXED)) {

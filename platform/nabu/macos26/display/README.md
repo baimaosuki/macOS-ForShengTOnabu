@@ -51,8 +51,8 @@ against UUID `EA3273B7-AF0F-3E06-B0F5-072DFCDD5395`. In its original code:
   An unset mask bit preserves it. A zero-area rectangle disables drawing.
 - `swap_complete_gated(true)` at `0xfffffe000a8947dc` transfers updated
   surfaces to DisplayedData only after the synchronous pixel copy is done.
-  Each source descriptor's prepare, bounded mapping/read and complete finish
-  before calling it. No surface pointer outlives native family ownership.
+  Each source descriptor's bounded read-only mapping and pixel reads finish,
+  and the mapping is released, before calling it. No surface pointer outlives native family ownership.
 - `dropSwap_gated` at `0xfffffe000a89f2dc` unlinks the request itself, invokes
   `swap_complete_gated(false)`, and clears the current pointer. Because our
   dispatcher has already unlinked the current request, its failure helper
@@ -70,7 +70,7 @@ modes are not inferred from the update mask. Nonzero per-plane rotation is
 rejected with native error retirement; portrait rotation zero is the supported
 board mode.
 
-Source failures leave the scanout untouched and use native error retirement.
+Source validation or mapping failures leave the scanout untouched and use native error retirement.
 The boot console is handed off only after all source rows were staged and the
 whole image was copied under the shared framebuffer owner. A later explicit
 clear can present black. `frame=... copied=1` records actual BGRA/RGhA output
@@ -79,9 +79,21 @@ subsequent native successful completion. These are content/completion evidence,
 not a desktop assertion. The old `vbl` heartbeat counts software callbacks,
 not measured hardware refresh.
 
+The c hardware run reached the first real 1600x2560 layer but did not return
+from the layer-copy region. Its live source descriptor type and exact wait were
+not captured. The CPU path now matches the fixed GopFramebuffer direct read-only
+mapping path: IOSurface owns the backing; the display does not call an extra
+`prepare()`/`complete()` DMA cycle or fall back to repeated `readBytes()` windows.
+Original 25F71 IOSurface allocation uses wired pool descriptors or an allocated
+IOBufferMemoryDescriptor. Mapping lifetime covers every source pixel read and
+ends before native swap completion. First four successful/failed frames record
+mapping entry, readiness and completed CPU row reads to distinguish a source-map
+wait from later scanout or retirement. This removes the extra VM wiring operation;
+a specific prepare-lock deadlock and the hardware fix still require verification.
+
 Host tests exercise the actual `.inc` with a mocked native family and source
 memory descriptors under ASan/UBSan, including retained layers, cursor-only
-updates/moves, clearing, source read fallback, failures and queue retirement.
+updates/moves, clearing, direct mapping, failures and queue retirement.
 The arithmetic tests cover crop, scaling, clipping, BGRA zero alpha, cursor
 blending and half-float conversion. Full kernel compilation still needs the
 macOS builder and paired SDK; real panel appearance and WindowServer acceptance

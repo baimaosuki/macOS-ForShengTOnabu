@@ -11,7 +11,7 @@ static constexpr int kIOReturnSuccess=0,kIOMapAnywhere=0,kIOMapReadOnly=0,kPEDis
 static constexpr uint32_t kFormatBGRA=0x42475241,kFormatRGhA=0x52476841;
 static constexpr size_t kCurrentSwap=6032,kSwapQueueFirst=6040,kSwapQueueLast=6048,kSwapLayers=824,kSwapNext=3192,kSwapPrev=3200;
 static int kernel_task=0;
-static unsigned screenDisabled=0;
+static unsigned screenDisabled=0, activeMaps=0, mapCalls=0, mapReleases=0, prepareCalls=0, completeCalls=0;
 static void *IOMalloc(uint64_t n) {return malloc(n);}
 static void IOFree(void *p,uint64_t) {free(p);}
 static void IOLog(const char *,...) {}
@@ -20,19 +20,20 @@ static void sheng_boot_checkpoint(int) {}
 static uint8_t halfToByte(uint16_t half) {return half==0x3c00?255:0;}
 template<typename T> static T &at(void *p,size_t n) {return *reinterpret_cast<T *>(static_cast<uint8_t *>(p)+n);}
 struct IOMemoryMap {
-    uintptr_t data; uint64_t size;
-    uint64_t getLength() {return size;}
-    uintptr_t getVirtualAddress() {return data;}
-    void release() {delete this;}
+    std::vector<uint8_t> mappedBytes;
+    IOMemoryMap(const uint8_t *data,uint64_t n):mappedBytes(data,data+n) {activeMaps++;mapCalls++;}
+    uint64_t getLength() {return mappedBytes.size();}
+    uintptr_t getVirtualAddress() {return reinterpret_cast<uintptr_t>(mappedBytes.data());}
+    void release() {assert(activeMaps);activeMaps--;mapReleases++;delete this;}
 };
 struct IOMemoryDescriptor {
     std::vector<uint8_t> bytes;
     bool fail=false, mapFail=false; unsigned prepared=0;
     uint64_t getLength() {return bytes.size();}
-    int prepare() {if (fail) return -1;prepared++;return 0;}
-    void complete() {assert(prepared);prepared--;}
+    int prepare() {prepareCalls++;if (fail) return -1;prepared++;return 0;}
+    void complete() {completeCalls++;assert(prepared);prepared--;}
     IOMemoryMap *createMappingInTask(int,int,int,uint64_t off,uint64_t n) {
-        assert(prepared);return mapFail?nullptr:new IOMemoryMap{reinterpret_cast<uintptr_t>(bytes.data()+off),n};
+        assert(!prepared);return (mapFail || fail)?nullptr:new IOMemoryMap(bytes.data()+off,n);
     }
     uint64_t readBytes(uint64_t off,void *out,uint64_t n) {assert(prepared);memcpy(out,bytes.data()+off,n);return n;}
 };
@@ -60,6 +61,7 @@ struct NativeGOPDisplay {
     void failCurrentSwap(IOMFBSwapIORequest *);
     bool copyLayer(IOSurface *,const NabuGopRect &,const NabuGopRect &,bool);
     void swap_complete_gated() {
+        assert(activeMaps==0 && mapCalls==mapReleases && prepareCalls==0 && completeCalls==0);
         auto *swap=at<IOMFBSwapIORequest *>(this,kCurrentSwap);assert(swap);
         for(unsigned i=0;i<4;i++) if(at<uint32_t>(swap,kSwapLayers)&(1u<<i)) {
             auto *surface=at<IOSurface *>(swap,0xac0+i*8);
@@ -101,13 +103,13 @@ int main() {
     present(d,first);assert(d.fFrames==1&&d.nativeComplete==1&&screenDisabled==1);
     assert(scanout[0]==0xffff0000&&scanout[1]==0xff00ff00&&scanout[4]==0xdeadbeef&&scanout[5]==0xdeadbeef);
     assert(d.fLastLit==8&&!root.memory.prepared&&!cursor.memory.prepared);
-    // Cursor-only swap inherits root, restores old cursor pixels, and can fall back to readBytes.
-    root.memory.mapFail=true;IOMFBSwapIORequest moved;layer(moved,1,&cursor,{0,0,2,1},{2,1,2,1});present(d,moved);
+    // Cursor-only swap inherits root, restores old cursor pixels, and maps the retained native backing directly.
+    IOMFBSwapIORequest moved;layer(moved,1,&cursor,{0,0,2,1},{2,1,2,1});present(d,moved);
     assert(d.fFrames==2&&scanout[1]==0xffff0000&&scanout[9]==0xff00ff00);
     // Native null update clears cursor; it cannot erase the retained root plane.
     IOMFBSwapIORequest clear;layer(clear,1,nullptr,{},{ });present(d,clear);
     assert(d.fFrames==3&&scanout[9]==0xffff0000);
-    // Source failure must preserve scanout, retire the unlinked request, and preserve the next queue entry.
+    // Mapping failure must preserve scanout, retire the unlinked request, and preserve the next queue entry.
     root.memory.fail=true;IOMFBSwapIORequest failed,next;
     at<IOMFBSwapIORequest *>(&d,kSwapQueueFirst)=&next;
     at<IOMFBSwapIORequest **>(&next,kSwapPrev)=&at<IOMFBSwapIORequest *>(&d,kSwapQueueFirst);
@@ -129,4 +131,5 @@ int main() {
     IOMFBSwapIORequest badFirst;layer(badFirst,0,&root,{0,0,4,2},{0,0,4,2});present(fresh,badFirst);
     assert(fresh.fFrames==0&&fresh.nativeComplete==0&&fresh.nativeDrop==1&&screenDisabled==1);
     assert(sheng_framebuffer.owner==SHENG_FB_BOOT&&!root.memory.prepared);
+    assert(mapCalls>0 && activeMaps==0 && mapCalls==mapReleases && prepareCalls==0 && completeCalls==0);
 }
