@@ -4,7 +4,11 @@
 OpenDirectory adaptation. It addresses the cold-start dependency exposed by
 the initial PlistFile assertion without pre-setting connection state, replacing
 the original worker, suppressing assertions, or changing kernel scheduling.
-It has not been tested on the device.
+The first device attempt did not activate the candidate: the userland union
+mount returned EPERM and the original shim incorrectly failed required mount
+phase 1. The optional-overlay fallback is now corrected; its rebuilt shim and
+the OD execution path still require device validation. See
+`docs/nabu-20261112-od-overlay-eperm.md`.
 
 The newer 11:03:44 device capture has a registered kauth request timeout and
 does not reproduce the old assertion. See `docs/nabu-20261112-od-registered-kauth.md`.
@@ -99,9 +103,18 @@ before normal OD service launch; they do not precede launchd execution itself.
 The signed shim has `com.apple.private.bindfs-allow`. It checks root:wheel
 ownership and permissions, verifies that visible OD bytes equal the source,
 verifies the original lower `xpcproxy` still resolves to the same device/inode,
-and checks mount source/type/flags. A failed newly mounted overlay is unmounted
-and makes the shim fail. A missing OD source directory retains compatibility
-with older addon bundles. A plain bind mount is never used for this overlay.
+and checks mount source/type/flags. This describes the attempted mechanism;
+the first device mount was refused with EPERM despite the entitlement being
+present in the signed blob. Host mount models do not establish real mount
+authorization or success.
+
+The overlay is optional. Missing/invalid candidate input skips activation and
+continues boot with an explicit inactive log. A refused mount must leave the
+original OD/xpcproxy device/inode and mount source/type/flags unchanged before
+boot continues. A failed newly mounted overlay is unmounted and the original
+namespace verified before continuing. Rollback failure or unexpected namespace
+change remains fatal. Only successful complete validation prints `OD readonly
+union ready`. A plain bind mount is never used for this overlay.
 
 ## Verification and device acceptance
 

@@ -15,7 +15,7 @@
  	page->vmp_cs_nx |= nx;
  
 +#if defined(ARM64_BOARD_CONFIG_NABU) && SHENG && (DEVELOPMENT || DEBUG)
-+	const bool nabu_cpu_page_transformed = nabu_cpu_compositor_page(page, vnode, mo_offset,
++	const bool nabu_cpu_page_transformed __unused = nabu_cpu_compositor_page(page, vnode, mo_offset,
 +	    validated == VMP_CS_ALL_TRUE && tainted == VMP_CS_ALL_FALSE && nx == VMP_CS_ALL_FALSE);
 +#endif
 +

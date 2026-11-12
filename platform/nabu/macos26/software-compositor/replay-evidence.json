@@ -1,0 +1,24 @@
+{
+  "schema": "nabu-25F71-cpu-compositor-replay-v1",
+  "tool": "Unicorn 2.1.4 ARM64",
+  "test": "tests/test_nabu_software_compositor_replay.py",
+  "tests_passed": 3,
+  "input": "original local 25F71 shared-cache text, three full page hashes checked against contract.json",
+  "observed": {
+    "metal_once_callback": "patched original instructions return with original zero-device state",
+    "original_dispatch_once_completion": "modeled at original call boundary: execute actual patched callback then publish original token -1",
+    "original_default_selector": "actual instructions store default_to_metal=1 and WSCompositorActivateDefault branches to activate_compositor_sw at 0x186e7ccb8",
+    "original_shadow_initializer": "actual instructions see completed once and zero-device state; store disabled without environment lookup or Metal wait",
+    "original_framebuffer_pixel_format": "with original RGhA-selection flag, actual original function returns 0x52476841; patched function returns 0x42475241 before allocation",
+    "intermediate_surface_pool_format": "actual patched selection instruction changes original texture format result115 to BGRA8Unorm80 before matching/allocation"
+  },
+  "models_and_limits": [
+    "PACIBSP and AUTIBSP skipped; RETAB modeled as LR return. Does not validate pointer authentication.",
+    "Original dispatch_once runtime implementation not emulated; callback and completion semantics modeled explicitly.",
+    "Original framebuffer brightness method stub returns floating zero; configuration flag selects the real RGhA branch.",
+    "Intermediate pool test stops after selection instruction; actual IOSurface allocation and software rendering are not emulated.",
+    "No device execution, visible desktop or rendering throughput qualification."
+  ],
+  "disk_cache_changed": false,
+  "runtime_qualified": false
+}
