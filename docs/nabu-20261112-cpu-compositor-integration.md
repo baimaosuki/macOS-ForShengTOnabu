@@ -51,3 +51,34 @@ CPU-render package.
 Device acceptance requires successful CPU page application, no repeated Metal
 availability abort, continuing real GOP frames and an observable login/session.
 Build/test success alone does not establish a visible desktop or useful speed.
+
+
+## Successful build and package
+
+Retry CI [43153060721](https://github.com/baimaosuki/macOS-ForShengTOnabu/actions/runs/43153060721)
+succeeded at commit `9e163ddef672895cbdbd8487cafcf6976e6cd5eb` using stable Xcode
+26.5 and the paired KDK. Actual native symbols include all three CPU policy
+globals; the actual build record pins the three-page contract and headers.
+Eight compositor tests now pass, including signature-bitmap-on/off compile and
+a negative control reproducing the first build failure. No warning was disabled.
+
+Final prelink has 35 original components and zero unresolved references. The
+independent verifier passed 1000 pointer, 56031 branch and 1000 kernel-binding
+samples. The final kernel is 314085376 bytes; UUID
+`20A72158-0612-380B-B787-676D8FE7E664`, SHA-256
+`777a259555beea514e44d7b7fbf67c6747d8874c9811dd56003f599430b59359`.
+
+Package `out/nabu-service-startup/nabu-25F71-cpu-compositor-43153060721.zip`:
+172171760 bytes, SHA-256
+`1bd06e65a5e96a6b90a3bfb04fe80afc973631ba8b11bc7575724d4077710ad8`.
+ZIP CRC and every packaged payload hash passed. The addon contains only the
+signed apfs_boot_util, no OD replacement. This actual compiled tool includes
+the corrected optional-overlay fallback. All addon CodeDirectories are in the
+paired trust bundle. Original three Apple trust modules remain intact.
+
+The actual packaged TOML differs from the installed 11:35 TOML by exactly one
+argument: `nabu-cpu-compositor=1`. Existing logger token and other arguments are
+preserved. Install all five ESP files, including TOML; an old four-payload-only
+script would leave the new policy disabled. Root, Data, loader, partitions and
+XNU2LOG.BIN do not need replacement. The device remained in TWRP and this work
+performed no device writes. Desktop/frame output remains unverified.
