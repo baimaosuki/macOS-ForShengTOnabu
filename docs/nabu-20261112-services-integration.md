@@ -7,7 +7,7 @@ Quarantine、UFS/根盘、执行兼容、Preboot、watchdog 策略与 ESP 日志
 
 | 批准项目 | 已落实 | 尚待确认 |
 |---|---|---|
-| 1. OD 内部连接超时 | 原版二进制和最新日志核对，见 `nabu-20261112-od-cold-start.md` | **未修复**；冷启动延迟不能直接证明 worker 或时钟错误 |
+| 1. OD 内部连接超时 | 原版二进制和最新日志核对，见 `nabu-20261112-od-cold-start.md` | 已打包首次连接同步化实验候选；11:03 本轮无断言，另有已注册解析器查询超时，尚未证明候选能修复 |
 | 2. Hardware | 补丁 22 将公共路径映射到已验证的可写 Data，启动前完成真实写入/读回/删除 | 新内核的设备启动结果 |
 | 3. AppleKeyStore | 固定主线软件服务，核对 25F71 libaks selector，接入正常 OSKext 生命周期 | 用户态实际打开及软件 wrap/unwrap；不提供 SEP |
 | 4. 显示 | 25F71 473-slot framebuffer ABI、NABU GOP 几何和身份、ADT、原版图形 families | WindowServer 的有效 root IOSurface、完成呈现及实际 GUI；不提供 Metal/GPU |
@@ -59,3 +59,17 @@ ZIP CRC 检查通过；安装配置只追加 `native-gop-display=1`，原日志 
 保留归档设备的日志 token 和启动项，仅添加显示参数，不重新分配 `XNU2LOG.BIN`。
 
 不以服务 exec、driver start 或 host 校验声明桌面成功。当前 Data 仍为 RAM seed。
+
+
+## 后续 11:03 实机证据
+
+用户提供 `/home/baimao/nabu-boot-log-20261112-110344/boot.txt`，SHA-256
+`92cba1533c3c619c1e6968923c3b32a055748baf66380886b3b56e6040ddf0e5`，
+对应本包已在另一操作侧刷入并启动。Hardware 映射返回 0；软件 AKS 注册并回应
+selector 0/7/17，但 contextstored 的 user client 被 MACF 拒绝。GOP 后端已启动，
+尚无 swap 证据；TimeSync 家族启动，本地 en0 注册，legacy TX 下 fsw 附加被跳过。
+WindowServer/loginwindow 已 exec，不能据此宣称桌面呈现。
+
+OD 这轮未捕获 abort，32 线程高水位不是连接超时证据。另有 kauth 60 秒请求超时，
+意味着解析器曾完成注册；新症状与首次连接断言需要分开。具体候选、成功轻量 CI、
+包校验和和运行限制见 `nabu-20261112-od-cold-start.md`。本代理未对设备进行写入。

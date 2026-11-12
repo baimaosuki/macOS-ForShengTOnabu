@@ -1,6 +1,6 @@
 # OpenDirectory cold-start assertion on 25F71
 
-Approved item 1 remains an investigation. No functional OpenDirectory fix has been established or implemented. The assertion, service launch policy and original five-second connection timeout are unchanged. This work adds no kernel instrumentation, timeout increase, assertion bypass, pre-emptive service restart or startup delay.
+Item 1 now has a built **experimental first-connection repair candidate**, described in `platform/nabu/macos26/od/README.md`. It is not device verified. The later 11:03 capture did not reproduce the old assertion and instead contains a registered-resolver query timeout; the candidate has not been established as a correction for that newer symptom. Historical investigation below is retained as evidence for the old failure.
 
 ## Latest device evidence
 
@@ -52,4 +52,70 @@ The original pthread first-use path does fault the new worker's stack and pthrea
 1. At the failing OD connection wait, obtain the actual relative `semaphore_timedwait` arguments, monotonic elapsed time and return code. This separates a genuine approximately five-second timeout from an immediate/error return or time conversion error.
 2. At that same failure, establish whether the connection worker was created/admitted and its pending or blocked location. The relevant workqueue pending count, thread/idle counts and QoS allowance distinguish admission failure from an already-running worker blocked elsewhere.
 
-No diagnostic ring or general thread introspection implementation was added. Item 1 must remain unresolved until evidence supports a functional correction. Existing call-chain artifacts are `out/nabu-mount-loop/opendirectoryd/boot052546-connection-assertion.json` and `connection-assertion.disasm`; they establish the same original binary branch, not a verified fix.
+No diagnostic ring or general thread introspection implementation was added. Item 1 now has the experimental queue-fence candidate described above, and remains unverified until the device demonstrates successful initial connection and directory operations. Existing call-chain artifacts are `out/nabu-mount-loop/opendirectoryd/boot052546-connection-assertion.json` and `connection-assertion.disasm`; they establish the original binary branch, not device success of the candidate.
+
+
+## 11:03 services build: the failure shape changed
+
+Input `/home/baimao/nabu-boot-log-20261112-110344/boot.txt`, SHA-256
+`92cba1533c3c619c1e6968923c3b32a055748baf66380886b3b56e6040ddf0e5`.
+This is the services integration kernel, SHA-256
+`ebc06c818ca467773b782b4dc53fbeece6a4b83dea2e87e20493eddec9fa6845`.
+No `NABU-ABORT` or captured OD exit occurs. First proxy-to-OD activation still
+costs 52.538432500 seconds. Crossing 32 threads is a single high-watermark event;
+it neither proves continuing thread growth nor identifies a connection wait.
+
+A previously omitted line is concrete: `kauth external resolver timed out
+(1 timeout(s) of 60 seconds).` Prepared `bsd/kern/kern_credential.c` defaults
+to 30 seconds. Only a successful `identitysvc(KAUTH_EXTLOOKUP_REGISTER, message)`
+with the requested timeout in range raises this to 60. The original 25F71
+SystemCache module requests 60 at its registration call. Therefore some resolver
+registration has succeeded; diagnosing this capture as "OD never initialized or
+registered" is incorrect. The complaint is printed before checking whether the
+request remained uncollected, and records no requesting PID or lookup kind.
+It cannot alone prove OD recursively blocked on its own resolver.
+
+The actual original protocol matches the prepared kernel: syscall 293, register
+0, result 1, worker 2, deregister 4, cache-get 8, cache-set 16, clear 32; the
+lookup structure is 0x130 bytes with flags at 8, requester PID at 0xc and extend
+at 0x10. Original OD main already calls `__si_disable_opendirectory`, so adding
+that switch is not a missing bootstrap correction. No general kauth bypass,
+fabricated membership response or fabricated connected flag was added.
+
+## Concrete candidate delivery
+
+- `scripts/prepare_nabu_od_startup.py`: exact original SHA-256 gate, one fresh
+  create call redirected to a 504-byte RX padding clone; general reconnect and
+  original worker/completion/signal remain unchanged.
+- `scripts/sign_nabu_od_startup.py`: owner ad-hoc CodeDirectory, all 263 code
+  pages independently verified, original XML and DER entitlements unchanged.
+- Owner boot shim: read-only union bindfs over `/usr/libexec`, replacement bytes
+  verified and lower `xpcproxy` preserved; signed private bindfs entitlement.
+- `scripts/prepare_nabu_boot_addon.py`: two explicit files and trust membership
+  required independently for every CodeDirectory; original three modules kept.
+- CI `43146327186` succeeded at `2d54ffe60d4819a890496052938991109184b0d8`.
+  This compiled only the boot shim on stable Xcode 26.5. Kernel reuse is exact.
+- 18 focused tests passed: 5 OD machine-code/signature, 3 overlay, 7 existing
+  boot shim, 3 addon tests. Queue scheduling/PAC and mount tests use host models;
+  they do not establish actual Darwin scheduling or hardware PAC acceptance.
+
+Package `out/nabu-service-startup/nabu-25F71-od-startup-43146327186.zip`:
+167998405 bytes, SHA-256
+`11bbc2c1a48c340ab962bef86102dd3970ddbdf0b41a1c938c9fd3683ae55ded`.
+The kernel and ADT match the services package; addon and trust are changed.
+No root/Data rebuild or kernel rebuild is required. The device was not modified
+by this work. A test must establish original directory-query and login progress,
+not only absence of an abort. The unbounded fence and missing clone unwind entry
+are explicit limitations in the candidate README and build report.
+
+
+The follow-up resolver audit found the original listener queue is concurrent and
+uses overcommit, with a capacity semaphore of 16 released after either result
+outcome. Initial kernel root credentials already carry `CRF_NOMEMBERD`; the
+published credential transitions preserve opt-out. Absence of an OD `setgroups`
+import therefore does not demonstrate missing recursion prevention. All 39 OS
+patches at the fixed SHENG reference were checked: none provides an additional
+resolver bootstrap/self-deadlock fix. The matching build enables
+`CONFIG_EXT_RESOLVER`. Audit records are
+`out/nabu-service-startup/od-resolver-bootstrap-audit.json` and
+`od-sheng-resolver-patch-audit.json`. No new resolver bypass was justified.
