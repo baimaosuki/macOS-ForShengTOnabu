@@ -779,8 +779,11 @@ def audit_object(path: Path) -> dict:
 
 
 def compile_sources(args, record: dict) -> None:
-    if platform.system() != 'Darwin' or platform.machine() != 'arm64':
-        raise ValueError('compile on the ARM64 macOS runner; Linux supports --prepare-only')
+    host_arch = platform.machine()
+    if platform.system() != 'Darwin' or host_arch not in ('arm64', 'x86_64'):
+        raise ValueError('compile on an ARM64 or Intel macOS runner; Linux supports --prepare-only')
+    record['build_host'] = dict(system='Darwin', architecture=host_arch,
+                               target=ARCH, cross_compiling=host_arch == 'x86_64')
     record['toolchain'] = {name: capture(*command) for name, command in {
         'xcode': ('xcodebuild', '-version'), 'clang': ('xcrun', 'clang', '--version'),
         'sdk': ('xcrun', '--sdk', 'macosx', '--show-sdk-version'),
@@ -790,6 +793,15 @@ def compile_sources(args, record: dict) -> None:
             raise ValueError('requires the recorded Xcode 27 / SDK 27.0 build tools')
         record['toolchain_sdk_drift'] = True
         print('WARNING: building with drifted SDK', record['toolchain']['sdk'], flush=True)
+    # Host generators execute natively; all kernel recipes retain explicit
+    # ARM64 target selection. Verify this compiler emits that Mach-O before
+    # starting the complete source build on an Intel runner.
+    cross_source = OUT / 'target-probe.c'
+    cross_object = OUT / 'target-probe.o'
+    cross_source.write_text('#ifndef __aarch64__\n#error ARM64 target required\n#endif\nint nabu_target_probe(void) { return 8; }\n')
+    run(['xcrun', '--sdk', 'macosx', 'clang', '-target', f'{ARCH}-apple-macos26.5',
+         '-ffreestanding', '-c', cross_source, '-o', cross_object], 'target-probe', record)
+    record['target_probe'] = audit_object(cross_object)
     kdk_report = json.loads((ROOT / 'out/kdk-verification.json').read_text())
     config = json.loads((ROOT / 'config/macos26.json').read_text())
     if kdk_report['build'] != config['build'] or not kdk_report['trusted_apple_package']:
