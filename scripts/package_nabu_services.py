@@ -225,6 +225,10 @@ task-terminate 记录终止发起者 PID 与内核调用点；外部终止不读
             'root union identity and firmlink semantics']
         delivery['unresolved'] = ['device validation of resolver replies and login client connection',
             'device validation of TimeSync clock and CPU compositor first frame']
+        readme = readme.replace('OD 首次内部连接超时尚未修复；显示后端注册不代表 WindowServer 已完成桌面呈现。',
+            'OD 已注册后的查询超时需要本轮复测；显示后端注册不代表 WindowServer 已完成桌面呈现。')
+        readme = readme.replace('启动配置沿用归档设备的日志 token，仅添加 native-gop-display=1。',
+            '启动配置沿用归档设备的日志 token，并启用 CPU compositor 和 session/退出记录。')
         readme += '''
 本轮 1–5 修复：19.2 MHz 微秒换算、构建 UTC 日历下限、OD/登录 IPC 记录、
 原生命名后的 Ethernet/TimeSync 重新匹配、union 身份和 firmlink 路径语义。

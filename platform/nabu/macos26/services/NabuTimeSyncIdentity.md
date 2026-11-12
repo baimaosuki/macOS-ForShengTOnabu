@@ -30,6 +30,16 @@ contracts against the original collection, as done for other private classes.
 records the source KC hash; it does not claim to validate a compiled object.
 No headers from 26C5035r or 26A428 may supply an unchecked ABI for 25F71.
 
+The session repair keeps its startup worker alive until IONetworkStack assigns
+the real BSD Name (up to 900 one-second waits), then calls registerService once
+on that named interface. Original 25F71 ClockManager installs an
+`gIOMatchedNotification`, verified through the BootKC's GOT slot
+`0xfffffe0008754510`. Re-registration invokes this notification again; it is
+not a first-match-only notification. The original interfaceMatched callback
+requires BSD Name before scheduling clock creation. The worker neither assigns
+an en0 name nor reports a clock as ready. Startup publication and root mounting
+do not wait for the worker.
+
 Original 25F71 `IOTimeSyncClockManager::interfaceMatched` is exported at
 `0xfffffe000accfa4c`. The IONF branch checks `BSD Name`, rejects the name prefix
 `AppleThunderboltIPPort`, and emits `matched first IONF interface`. Thus registry

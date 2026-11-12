@@ -163,3 +163,41 @@ int main(void) {
  assert(writes==129 && strstr(journal,"result=10004003"));
 }
 ''', ROOT / 'platform/nabu/macos26/log')
+
+
+def test_named_interface_rematch_uses_native_name_only():
+    text = (ROOT / 'platform/nabu/macos26/services/NabuTimeSyncIdentity.cpp').read_text()
+    start = text.index('    bool announceNamedInterface()')
+    end = text.index('    void stop(', start)
+    body = text[start:end]
+    source = r'''
+#include <cassert>
+#include <cstring>
+#include <cstdio>
+#define OSDynamicCast(T,p) dynamic_cast<T *>(p)
+#define OSSafeReleaseNULL(p) do {if(p)(p)->release();p=nullptr;} while(0)
+#define IOLog(...) ((void)0)
+struct OSObject {unsigned refs=1;virtual ~OSObject(){};void release(){assert(refs);refs--;}};
+struct OSString:OSObject {const char *s;unsigned getLength(){return strlen(s);}const char *getCStringNoCopy(){return s;}};
+struct Interface {
+ OSObject *value=nullptr;unsigned matches=0;
+ OSObject *copyProperty(const char *k){assert(!strcmp(k,"BSD Name"));if(value)value->refs++;return value;}
+ void registerService(){matches++;}
+};
+struct Controller {Interface *interface=nullptr;
+''' + body + r'''
+};
+int main(){
+ Controller c;assert(!c.announceNamedInterface());
+ Interface i;c.interface=&i;assert(!c.announceNamedInterface() && !i.matches);
+ OSObject wrong;i.value=&wrong;assert(!c.announceNamedInterface() && wrong.refs==1);
+ OSString n;n.s="";i.value=&n;assert(!c.announceNamedInterface() && n.refs==1);
+ n.s="en3";assert(c.announceNamedInterface() && i.matches==1 && n.refs==1);
+}
+'''
+    with tempfile.TemporaryDirectory() as directory:
+        work = Path(directory)
+        (work / 'test.cpp').write_text(source)
+        subprocess.run(['c++', '-std=c++17', '-Wall', '-Wextra', '-Werror',
+                        str(work / 'test.cpp'), '-o', str(work / 'test')], check=True)
+        subprocess.run([str(work / 'test')], check=True)
