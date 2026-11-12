@@ -44,7 +44,9 @@ def analyze(text, cache_map, native=None):
             result['unresolved'] = 'outside cache text; may belong to executable or another mapping'
         return result
 
-    for number, line in enumerate(text.splitlines(), 1):
+    # Console records contain bare CRs as well as CRLF. Match rg/nl line
+    # numbering: only LF terminates a physical journal line.
+    for number, line in enumerate(text.split('\n'), 1):
         if 'NABU-WS ' not in line:
             continue
         fields = dict(re.findall(r'(\w+)=([^\s]+)', line))
@@ -82,7 +84,7 @@ if __name__ == '__main__':
     parser.add_argument('--native', type=Path, help='exact CI native kernel for kernel call-site symbols')
     parser.add_argument('--output', type=Path)
     args = parser.parse_args()
-    report = analyze(args.log.read_text(errors='replace'), args.cache_map, args.native)
+    report = analyze(args.log.read_bytes().decode(errors='replace'), args.cache_map, args.native)
     result = json.dumps(report, indent=2) + '\n'
     if args.output:
         args.output.write_text(result)
