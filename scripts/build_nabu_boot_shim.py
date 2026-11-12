@@ -5,6 +5,7 @@ import hashlib
 import json
 from pathlib import Path
 import platform
+import plistlib
 import re
 import struct
 import subprocess
@@ -13,6 +14,7 @@ import verify_page_hashes
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / 'platform/nabu/macos26/bootshim/apfs_boot_util.c'
+ENTITLEMENTS = SOURCE.parent / 'entitlements.plist'
 TARGET = 'arm64-apple-macos26.5'
 IDENTIFIER = 'org.nabu.apfs-boot-layout'
 
@@ -33,7 +35,8 @@ def build(output):
     run('xcrun', '--sdk', 'macosx', 'clang', '-target', TARGET,
         '-std=c11', '-Os', '-Wall', '-Wextra', '-Werror', SOURCE, '-o', binary)
     run('codesign', '--force', '--sign', '-', '--timestamp=none',
-        '--identifier', IDENTIFIER, binary)
+        '--identifier', IDENTIFIER, '--entitlements', ENTITLEMENTS,
+        '--generate-entitlement-der', binary)
     run('codesign', '--verify', '--strict', '--verbose=2', binary)
     details = run('codesign', '-d', '--verbose=4', binary)
     match = re.search(r'^CDHash=([0-9a-fA-F]{40})$',
@@ -41,6 +44,10 @@ def build(output):
     if match is None:
         raise RuntimeError('codesign did not report the boot shim CDHash')
     data = binary.read_bytes()
+    embedded_entitlements = run('codesign', '-d', '--entitlements', ':-', binary)
+    # Check the signed bytes, not only the source plist passed to codesign.
+    if plistlib.loads(embedded_entitlements.stdout.encode()) != plistlib.loads(ENTITLEMENTS.read_bytes()):
+        raise RuntimeError('signed shim entitlement dictionary differs')
     if len(data) < 32 or struct.unpack_from('<II', data) != (0xfeedfacf, 0x100000c):
         raise RuntimeError('boot shim must be a thin arm64 Mach-O')
     # Reject arm64e (CPU_SUBTYPE_ARM64E = 2), including its capability bits.
@@ -56,6 +63,8 @@ def build(output):
                     architecture='arm64', target=TARGET, identifier=IDENTIFIER,
                     source=str(SOURCE.relative_to(ROOT)),
                     source_sha256=hashlib.sha256(SOURCE.read_bytes()).hexdigest(),
+                    entitlements_sha256=hashlib.sha256(ENTITLEMENTS.read_bytes()).hexdigest(),
+                    bindfs_entitlement_verified=True,
                     page_hashes=pages)
     metadata_path.write_text(json.dumps(metadata, indent=2) + '\n')
     return metadata

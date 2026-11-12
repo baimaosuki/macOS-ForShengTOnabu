@@ -16,7 +16,7 @@ from native_devtree import make_nabu_adt, configure_native_text_state
 from audit_adt import parse_adt
 
 
-def signed_fixture():
+def signed_fixture(subtype=0):
     # A minimal signed Mach-O with one real CodeDirectory page hash. The
     # fixture is never run or shipped; it tests the byte/signature contract.
     limit = 4096
@@ -25,7 +25,7 @@ def signed_fixture():
     cdlen = offset + 32
     signature_size = 20 + cdlen
     raw = bytearray(limit)
-    struct.pack_into('<8I', raw, 0, 0xfeedfacf, 0x100000c, 0, 2, 1, 16, 0, 0)
+    struct.pack_into('<8I', raw, 0, 0xfeedfacf, 0x100000c, subtype, 2, 1, 16, 0, 0)
     struct.pack_into('<4I', raw, 32, 0x1d, 16, limit, signature_size)
     cd = struct.pack('>9I4BI', 0xfade0c02, cdlen, 0x20100, 2, offset, 44,
                      0, 1, limit, 32, 2, 0, 12, 0) + ident + hashlib.sha256(raw).digest()
@@ -62,6 +62,30 @@ class BootAddon(unittest.TestCase):
                 validate_addon(bytes(corrupted))
             with self.assertRaises(ValueError): validate_addon(raw[:-1])
             self.assertFalse(report['gpu_driver_included'])
+
+    def test_both_tools_require_their_own_trust_entry(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            shim = root / 'shim'; shim.mkdir()
+            od = root / 'od'; od.mkdir()
+            for folder, name, subtype in ((shim, 'apfs_boot_util', 0), (od, 'opendirectoryd', 2)):
+                binary = signed_fixture(subtype)
+                (folder / name).write_bytes(binary)
+                (folder / 'build.json').write_text(json.dumps(dict(
+                    sha256=hashlib.sha256(binary).hexdigest(), signature_valid=True,
+                    original_entitlements_preserved=True)))
+            modules = [struct.pack('<I16sI', 2, uuid.UUID(int=i).bytes, 1) +
+                       bytes([i]) * 20 + bytes((2, 0, 0, 0)) for i in (1, 2, 3)]
+            original = struct.pack('<4I', 3, 16, 64, 112) + b''.join(modules)
+            source = root / 'original'; source.write_bytes(original)
+            prepare(shim, source, root / 'old')
+            prepare(shim, source, root / 'new', od_dir=od)
+            checked = validate_addon((root / 'new/kernel.macho.gpuaddon').read_bytes())
+            self.assertEqual(checked['files'], 2)
+            self.assertEqual(checked['entries'][1]['path'], 'od/opendirectoryd')
+            check_trust_membership(checked, (root / 'new/kernel.macho.trustcache').read_bytes())
+            with self.assertRaisesRegex(ValueError, 'od/opendirectoryd'):
+                check_trust_membership(checked, (root / 'old/kernel.macho.trustcache').read_bytes())
 
     def test_only_addon_slot_added_to_working_adt(self):
         with tempfile.TemporaryDirectory() as directory:

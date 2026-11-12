@@ -5,7 +5,7 @@ on:
       target:
         description: Build target; no job deploys to hardware
         type: choice
-        options: [check, preflight, monitor, apple, apple26, macos26-xnu, macos26-kernel, macos26-data, kext, xnu, sheng-xnu, abi-bootstrap, reference-xnu]
+        options: [macos26-boot-tools, check, preflight, monitor, apple, apple26, macos26-xnu, macos26-kernel, macos26-data, kext, xnu, sheng-xnu, abi-bootstrap, reference-xnu]
         default: check
       native_ufs:
         description: Compile the default-off UFS companion; no hardware deployment
@@ -45,7 +45,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   check:
-    if: inputs.target != 'macos26-xnu' && inputs.target != 'macos26-kernel' && inputs.target != 'macos26-data'
+    if: inputs.target != 'macos26-boot-tools' && inputs.target != 'macos26-xnu' && inputs.target != 'macos26-kernel' && inputs.target != 'macos26-data'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
@@ -410,5 +410,25 @@ jobs:
         with:
           name: nabu-macos26-desktop-data
           path: out/nabu-desktop-data/
+          if-no-files-found: error
+          retention-days: 7
+
+  macos26-boot-tools:
+    if: inputs.target == 'macos26-boot-tools' && inputs.board == 'nabu'
+    runs-on: macos-26
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Select stable 26.5 toolchain
+        run: sudo xcode-select -s /Applications/Xcode_26.5.app
+      - name: Build signed owner boot tools
+        run: python3 scripts/build_nabu_boot_shim.py --output out/nabu-boot-tools/boot-shim
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nabu-boot-tools
+          path: out/nabu-boot-tools/
           if-no-files-found: error
           retention-days: 7

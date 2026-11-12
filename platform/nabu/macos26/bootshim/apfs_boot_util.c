@@ -94,6 +94,95 @@ probe_writable(const char *path, dev_t device)
     return error == 0 ? 0 : failure("writable probe", path, error);
 }
 
+#ifdef __APPLE__
+static int
+same_file_bytes(const char *left, const char *right)
+{
+    unsigned char a[8192], b[8192];
+    int l = open(left, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    int r = open(right, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+    int error = 0;
+    if (l == -1 || r == -1) {
+        error = errno;
+    } else {
+        for (;;) {
+            ssize_t na, nb;
+            do { na = read(l, a, sizeof(a)); } while (na == -1 && errno == EINTR);
+            if (na == -1) { error = errno; break; }
+            do { nb = read(r, b, sizeof(b)); } while (nb == -1 && errno == EINTR);
+            if (nb == -1) { error = errno; break; }
+            if (na != nb || (na > 0 && memcmp(a, b, (size_t)na) != 0)) {
+                error = EIO; break;
+            }
+            if (na == 0) break;
+        }
+    }
+    if (l != -1) close(l);
+    if (r != -1) close(r);
+    return error;
+}
+
+static int
+prepare_od_overlay(void)
+{
+    const char *source = "/private/var/ngpu/od";
+    const char *binary = "/private/var/ngpu/od/opendirectoryd";
+    const char *point = "/usr/libexec";
+    const char *visible = "/usr/libexec/opendirectoryd";
+    const char *lower = "/usr/libexec/xpcproxy";
+    struct stat directory, file, before, after;
+    struct statfs filesystem;
+    int mounted = 0, error;
+
+    // A missing candidate retains the original service for older addon bundles.
+    // Any present candidate must be complete, root-owned and immutable to users.
+    if (lstat(source, &directory) == -1)
+        return errno == ENOENT ? 0 : failure("stat OD source", source, errno);
+    if (!S_ISDIR(directory.st_mode) || directory.st_uid != 0 || directory.st_gid != 0 ||
+        (directory.st_mode & 0022) != 0)
+        return failure("validate OD source ownership", source, EPERM);
+    if (lstat(binary, &file) == -1)
+        return failure("stat OD candidate", binary, errno);
+    if (!S_ISREG(file.st_mode) || file.st_uid != 0 || file.st_gid != 0 ||
+        (file.st_mode & 0022) != 0 || (file.st_mode & 0111) == 0 || file.st_size <= 0)
+        return failure("validate OD candidate ownership", binary, EPERM);
+    if (stat(lower, &before) == -1)
+        return failure("lookup lower xpcproxy", lower, errno);
+    if (statfs(point, &filesystem) == -1)
+        return failure("statfs OD mountpoint", point, errno);
+    if (strcmp(filesystem.f_fstypename, "bindfs") == 0 &&
+        strcmp(filesystem.f_mntonname, point) == 0) {
+        if (strcmp(filesystem.f_mntfromname, source) != 0 ||
+            (filesystem.f_flags & (MNT_RDONLY | MNT_UNION)) != (MNT_RDONLY | MNT_UNION))
+            return failure("unexpected OD overlay", point, EBUSY);
+    } else {
+        // MNT_UNION is essential: fallback lookups must still see every sealed
+        // /usr/libexec tool. A plain bind mount would hide xpcproxy and others.
+        if (mount("bindfs", point, MNT_RDONLY | MNT_UNION, (void *)source) == -1)
+            return failure("mount OD union", point, errno);
+        mounted = 1;
+    }
+    error = same_file_bytes(binary, visible);
+    if (error == 0 && stat(lower, &after) == -1)
+        error = errno;
+    if (error == 0 && (before.st_dev != after.st_dev || before.st_ino != after.st_ino))
+        error = EXDEV;
+    if (error == 0 && (statfs(point, &filesystem) == -1 ||
+        strcmp(filesystem.f_fstypename, "bindfs") != 0 ||
+        strcmp(filesystem.f_mntfromname, source) != 0 ||
+        strcmp(filesystem.f_mntonname, point) != 0 ||
+        (filesystem.f_flags & (MNT_RDONLY | MNT_UNION)) != (MNT_RDONLY | MNT_UNION)))
+        error = EIO;
+    if (error != 0) {
+        if (mounted && unmount(point, 0) == -1)
+            return failure("rollback OD union", point, errno);
+        return failure("verify OD union replacement/lower lookup", point, error);
+    }
+    fprintf(stderr, "apfs_boot_util (owner): OD readonly union ready: replacement bytes match; lower xpcproxy preserved\n");
+    return 0;
+}
+#endif
+
 int
 main(int argc, char **argv)
 {
@@ -135,6 +224,10 @@ main(int argc, char **argv)
     if (probe_writable(data, data_status.st_dev) != 0 ||
         probe_writable(vm, data_status.st_dev) != 0)
         return 1;
+#ifdef __APPLE__
+    if (prepare_od_overlay() != 0)
+        return 1;
+#endif
     fprintf(stderr, "apfs_boot_util (owner): phase %s ready: writable Data and VM device=%llu\n",
         argv[1], (unsigned long long)data_status.st_dev);
     return 0;
