@@ -20,3 +20,22 @@ Host: 25 tests plus 17 subtests passed across pixel/lifecycle sanitizer fixtures
 CI must compile/link the native ARM64 kernel, board components, CPU presenter and signed owner tool from the same commit. Package via scripts/package_nabu_services.py with --cpu-compositor --windowserver-log --session-repair --cpu-desktop-repair --cpus 8. Preserve the installed logger allocation/token and existing Data/root image. Root index and dirty worktree are preserved through a temporary Git index.
 
 Device acceptance still required: every secondary registered/running with timer and SGI, original TimeSyncClockManager published, actual source pixels copied/completed, and a visible interactive login/desktop. Build success is not device success.
+
+## First eight-core hardware result
+
+The full ARM64 Intel-host build 43278284580 succeeded. Its kernel UUID
+`EB021EFB-9868-39FD-9E9D-C8135719D07D` matches the device's new panic:
+`cpu 1 failed to boot for the first time, waited 1 seconds @processor.c:1066`.
+The panic caller resolves to `_processor_wait_for_start+0x1b4`; the captured ELR
+resolves to `_machine_idle+0x104` and does not locate the failed secondary.
+The built reset lookup contains the expected Affinity1-preserving instruction.
+This boot fails before userspace; it provides no runtime validation of this
+revision's CPU compositor, TimeSync, session sampler or OD diagnostic.
+
+A verified single-core fallback is available as
+`out/nabu-cpu-desktop-repair/nabu-25F71-cpu-desktop-1core-fallback-43278284580.zip`
+(SHA256 `0209484d820f669e0b511323244790b62ab97e90f50602c7a35be69a0cde4de9`).
+Only ADT secondary nodes and SMP boot arguments differ in the ESP payloads;
+all other kernel/tool/trustcache payload bytes match the delivered eight-core
+package. This bypasses the new SMP blocker and is not an eight-core repair or
+a device-tested desktop result. Do not distribute the `.unverified.zip` attempt.

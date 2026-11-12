@@ -1,0 +1,103 @@
+--- a/ArmCpu/ArmCpu.cpp
++++ b/ArmCpu/ArmCpu.cpp
+@@ -12,6 +12,7 @@
+ // not exported to IOKit; the IRQ path calls the real kernel implementation.
+ extern "C" void rtclock_intr (unsigned int);
+ extern "C" void ml_cpu_init_completed (void);
++extern "C" char nabu_secondary_entry[], nabu_secondary_entry_end[];
+ // Kernel-internal entries used for secondary CPU startup (Darwin 23 osfmk).
+ extern "C" vm_offset_t ml_static_vtop (vm_offset_t);
+ extern "C" char LowResetVectorBase[], LowResetVectorEnd[], ResetHandlerData[], const_boot_args[];
+@@ -33,6 +34,8 @@
+ extern "C" {
+ volatile uint32_t armcpu_registered = 0;
+ volatile uint32_t armcpu_registration_count = 0, armcpu_registration_complete = 0;
++// MMU-off secondary entry writes stage, entry EL, MPIDR, ESR, ELR, FAR, fault EL.
++alignas(64) volatile uint64_t nabu_secondary_boot_state[8][8];
+ volatile uint32_t armcpu_gic_ready = 0;
+ volatile uint64_t armcpu_timer_interrupts = 0;
+ volatile uint32_t armcpu_timer_intid = 19;   // ppi used for the virtual timer
+@@ -56,6 +59,15 @@
+ // System registers seen on each secondary core at initCPU entry: CurrentEL, SCTLR_EL1, TCR_EL1, MAIR_EL1 (low words), MIDR_EL1.
+ volatile uint32_t armcpu_smp_sys[8][5], armcpu_boot_sys[5];
+ volatile int32_t armcpu_smp_psci_rc[8];
++}
++
++// MMU-off writers update PoC while the boot core may have speculatively read
++// the old line. Each CPU owns a separate 64-byte SM8150 cache line. After its
++// initial clean before CPU_ON the boot core never writes this line again.
++static void refreshSecondaryState (unsigned cpu)
++{
++  uintptr_t record = reinterpret_cast<uintptr_t> (nabu_secondary_boot_state[cpu]);
++  __asm__ volatile ("dsb sy\n\tdc ivac, %0\n\tdsb sy\n\tisb" :: "r" (record) : "memory");
+ }
+ 
+ #define ARMCPU_SMP_SLOTS 8
+@@ -483,6 +495,15 @@
+   }
+   // Exactly one registration can observe the final count. Do not set scheduler
+   // internals: its own completion path checks and waits for real CPU startup.
++  for (unsigned cpu = 1; cpu < expected; cpu++) {
++    refreshSecondaryState (cpu);
++    kprintf ("NABU-SMP: registration cpu=%u step=%u fail=%u psci=%d early=%llu entry-el=%llu mpidr=%#llx esr=%#llx elr=%#llx far=%#llx\n",
++        cpu, (unsigned) armcpu_smp_step[cpu], (unsigned) armcpu_smp_fail[cpu],
++        (int) armcpu_smp_psci_rc[cpu], nabu_secondary_boot_state[cpu][0],
++        nabu_secondary_boot_state[cpu][1] >> 2, nabu_secondary_boot_state[cpu][2],
++        nabu_secondary_boot_state[cpu][3], nabu_secondary_boot_state[cpu][4],
++        nabu_secondary_boot_state[cpu][5]);
++  }
+   ml_cpu_init_completed ();
+   IOService::publishResource (gIOAllCPUInitializedKey, kOSBooleanTrue);
+   __atomic_store_n (&armcpu_registration_complete, 1U, __ATOMIC_RELEASE);
+@@ -555,6 +576,10 @@
+   if (secondary) {
+     if (!boot) { panic ("ArmCpu: secondary resume is unsupported"); }
+     armcpu_smp_step[logicalId] = 5;
++    refreshSecondaryState (logicalId);
++    kprintf ("NABU-SMP: cpu=%u entered initCPU early=%llu entry-el=%llu\n",
++        (unsigned) logicalId, nabu_secondary_boot_state[logicalId][0],
++        nabu_secondary_boot_state[logicalId][1] >> 2);
+     uint64_t mpidr;
+     __asm__ volatile ("mrs %0, mpidr_el1" : "=r" (mpidr));
+     armcpu_smp_seen_mpidr[logicalId] = static_cast<uint32_t> (mpidr);
+@@ -570,6 +595,8 @@
+     enableCPUTimeBase (true);
+     setCPUState (kIOCPUStateRunning);
+     armcpu_smp_step[logicalId] = 7;
++    kprintf ("NABU-SMP: cpu=%u GIC and timer ready mpidr=%#x\n",
++        (unsigned) logicalId, (unsigned) armcpu_smp_seen_mpidr[logicalId]);
+     __atomic_fetch_add (&armcpu_smp_running, 1U, __ATOMIC_RELAXED);
+     // XNU clears SIGPdisabled for a core the first time that core takes an IPI, and cpu_signal() silently skips a core until then; Apple's
+     // CPU driver provokes it with a self-IPI from initCPU (osfmk/kern/machine.c, processor_up).
+@@ -808,9 +835,12 @@
+   bool hvc = false;
+   if (!psciConduit (&hvc)) { armcpu_smp_psci_rc[logicalId] = -1001; return KERN_NOT_SUPPORTED; }
+   armcpu_smp_conduit = hvc ? 2 : 1;
+-  // PSCI 0.2 CPU_ON (SMC64 function id); the entry point is the kernel's physical reset vector page, whose reset
+-  // code selects this core's cpu_data entry by MPIDR affinity. The context id is unused by that code.
+-  uint64_t entry = static_cast<uint64_t> (ml_static_vtop (reinterpret_cast<vm_offset_t> (LowResetVectorBase)));
++  // PSCI CPU_ON enters the physical, stackless EL1/EL2 adapter. It normalizes
++  // the reset contract before the original vector selects cpu_data by MPIDR.
++  uint64_t entry = static_cast<uint64_t> (ml_static_vtop (reinterpret_cast<vm_offset_t> (nabu_secondary_entry)));
++  cleanToMemory (nabu_secondary_entry, reinterpret_cast<uintptr_t> (nabu_secondary_entry_end) -
++      reinterpret_cast<uintptr_t> (nabu_secondary_entry));
++  cleanToMemory (const_cast<const uint64_t *> (nabu_secondary_boot_state[logicalId]), 64);
+   cleanToMemory (LowResetVectorBase, 0x10000);   // reset vector, start_cpu and the code up to the MMU enable
+   cleanToMemory (ResetHandlerData, 0x1000);
+   cleanToMemory (const_boot_args, 0x1000);
+@@ -823,8 +853,14 @@
+   cleanToMemory (sheng_boot_pac_bank, 88);
+ #endif
+   armcpu_smp_step[logicalId] = 4;
+-  int64_t result = psciCall (hvc, 0xc4000003ULL, affinity & 0xff00ffffffULL, entry, 0);
++  kprintf ("NABU-SMP: CPU_ON cpu=%u affinity=%#llx entry=%#llx via=%s\n",
++      (unsigned) logicalId, affinity & 0xff00ffffffULL, entry, hvc ? "hvc" : "smc");
++  int64_t result = psciCall (hvc, 0xc4000003ULL, affinity & 0xff00ffffffULL, entry, logicalId);
+   armcpu_smp_psci_rc[logicalId] = static_cast<int32_t> (result);
++  refreshSecondaryState (logicalId);
++  kprintf ("NABU-SMP: CPU_ON cpu=%u rc=%lld early=%llu entry-el=%llu\n",
++      (unsigned) logicalId, result, nabu_secondary_boot_state[logicalId][0],
++      nabu_secondary_boot_state[logicalId][1] >> 2);
+   return result == 0 ? KERN_SUCCESS : KERN_FAILURE;
+ }
+ 

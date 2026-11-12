@@ -115,6 +115,7 @@ CPU_ASM_PATCH = board_patch('machine-cpu-inline-asm.patch')
 CPU_GIC_PATCH = board_patch('machine-cpu-gic-group.patch')
 CPU_TIMER_PATCH = board_patch('nabu-armcpu-timer-intid19.patch')
 CPU_COMPLETION_PATCH = board_patch('machine-cpu-init-completed.patch')
+CPU_COLD_ENTRY_PATCH = board_patch('machine-cpu-cold-entry.patch')
 
 
 # Preserve diagnostics for exported Apple source/tool-generated code on Clang 27.
@@ -927,6 +928,9 @@ def compile_sources(args, record: dict) -> None:
         subprocess.run(['git', 'apply', '--directory=' + str(machine.relative_to(ROOT)),
                         str(CPU_COMPLETION_PATCH)], cwd=ROOT, check=True)
         record['cpu_init_completed_patch_sha256'] = sha(CPU_COMPLETION_PATCH)
+        subprocess.run(['git', 'apply', '--directory=' + str(machine.relative_to(ROOT)),
+                        str(CPU_COLD_ENTRY_PATCH)], cwd=ROOT, check=True)
+        record['cpu_cold_entry_patch_sha256'] = sha(CPU_COLD_ENTRY_PATCH)
         from native_smp import audit_nabu_source
         record['nabu_smp_source'] = audit_nabu_source(source, machine / 'ArmCpu/ArmCpu.cpp')
     record['platform_objects'] = {}

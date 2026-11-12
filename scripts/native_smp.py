@@ -21,6 +21,7 @@ def audit_nabu_source(kernel_source: Path, cpu_source: Path) -> dict:
     reset = (kernel_source / 'osfmk/arm64/start.s').read_text()
     cpu = cpu_source.read_text()
     machine = (kernel_source / 'osfmk/arm64/machine_routines.c').read_text()
+    cpu_kernel = (kernel_source / 'osfmk/arm64/cpu.c').read_text()
     if ('#if HAS_CLUSTER || defined(NABU)' not in reset
             or 'and\t\tx0, x15, #0xFFFF' not in reset):
         raise ValueError('NABU reset lookup must preserve MPIDR Affinity1')
@@ -31,10 +32,19 @@ def audit_nabu_source(kernel_source: Path, cpu_source: Path) -> dict:
             or 'IOService::publishResource (gIOAllCPUInitializedKey, kOSBooleanTrue);' not in cpu
             or 'armcpu_smp_psci_rc[cpu]' not in cpu):
         raise ValueError('NABU requires the original processor boot and CPU completion barrier')
+    if ('LEXT(nabu_secondary_entry)' not in reset or 'msr\t\telr_el2' not in reset
+            or 'cmp\t\tx12, #4' not in reset or 'cmp\t\tx12, #8' not in reset
+            or 'nabu_publish_cpu_translation_tables(cpu_ttep, 1);' not in cpu_kernel
+            or 'bootstrap_pagetables, BOOTSTRAP_TABLE_SIZE' not in cpu_kernel
+            or 'reinterpret_cast<vm_offset_t> (nabu_secondary_entry)' not in cpu
+            or 'refreshSecondaryState (logicalId);' not in cpu):
+        raise ValueError('NABU requires an EL1/EL2 cold adapter and published secondary translation tables')
     return dict(reset_affinity_bits=16, registration_completion='ml_cpu_init_completed',
                 completion_after_all_registrations=True, psci_failure_blocks_completion=True,
                 secondary_start='ml_processor_register -> processor_boot -> PSCI CPU_ON',
                 psci_method='smc', virtual_timer_intid=19, ipi='ICC_SGI1R_EL1',
+                cold_entry_levels=[1, 2], cold_entry_fault_records=True,
+                translation_tables_published_to_poc=True,
                 hardware_qualified=False)
 
 
@@ -58,14 +68,18 @@ def configure(build: dict, count: int, graphics: bool, boot_args: str, *, board:
         asm_patch = components / 'machine-cpu-inline-asm.patch'
         timer_patch = components / 'nabu-armcpu-timer-intid19.patch'
         completion_patch = components / 'machine-cpu-init-completed.patch'
+        cold_entry_patch = components / 'machine-cpu-cold-entry.patch'
         source = build.get('nabu_smp_source', {})
         if (build.get('cpu_smp_patch_sha256') != hashlib.sha256(patch.read_bytes()).hexdigest()
                 or build.get('cpu_inline_asm_patch_sha256') != hashlib.sha256(asm_patch.read_bytes()).hexdigest()
                 or build.get('cpu_timer_intid_patch_sha256') != hashlib.sha256(timer_patch.read_bytes()).hexdigest()
                 or build.get('cpu_init_completed_patch_sha256') != hashlib.sha256(completion_patch.read_bytes()).hexdigest()
+                or build.get('cpu_cold_entry_patch_sha256') != hashlib.sha256(cold_entry_patch.read_bytes()).hexdigest()
                 or not build.get('cpu_sgi_instructions')
                 or source.get('reset_affinity_bits') != 16
                 or source.get('completion_after_all_registrations') is not True
+                or source.get('cold_entry_levels') != [1, 2]
+                or source.get('translation_tables_published_to_poc') is not True
                 or source.get('virtual_timer_intid') != 19
                 or source.get('psci_method') != 'smc'):
             raise ValueError('nabu SMP requires compiled SGI, SMC PSCI, timer INTID 19, Affinity1 reset lookup and CPU registration completion')

@@ -27,7 +27,8 @@ class NabuSmp(unittest.TestCase):
             names = ('machine-driver-declarations.patch', 'machine-cpu-registration.patch',
                      'machine-cpu-interrupt-order.patch', 'machine-cpu-smp-bootstrap.patch',
                      'machine-cpu-inline-asm.patch', 'machine-cpu-gic-group.patch',
-                     'nabu-armcpu-timer-intid19.patch', 'machine-cpu-init-completed.patch')
+                     'nabu-armcpu-timer-intid19.patch', 'machine-cpu-init-completed.patch',
+                     'machine-cpu-cold-entry.patch')
             for name in names:
                 subprocess.run(['git', 'apply', '--unsafe-paths', '--directory=' + directory,
                                 str(components / name)], check=True, capture_output=True)
@@ -35,8 +36,12 @@ class NabuSmp(unittest.TestCase):
             reset.parent.mkdir(parents=True)
             shutil.copy2(ROOT / 'sources/macos26/xnu/osfmk/arm64/start.s', reset)
             shutil.copy2(ROOT / 'sources/macos26/xnu/osfmk/arm64/machine_routines.c', reset.parent)
+            shutil.copy2(ROOT / 'sources/macos26/xnu/osfmk/arm64/cpu.c', reset.parent)
             subprocess.run(['git', 'apply', '--unsafe-paths', '--directory=' + directory,
                             str(ROOT / 'platform/nabu/macos26/patches/0005-nabu-secondary-reset-affinity.patch')],
+                           check=True, capture_output=True)
+            subprocess.run(['git', 'apply', '--unsafe-paths', '--directory=' + directory,
+                            str(ROOT / 'platform/nabu/macos26/patches/0006-nabu-secondary-cold-entry.patch')],
                            check=True, capture_output=True)
             source_path = work / 'ArmCpu/ArmCpu.cpp'
             evidence = audit_nabu_source(work, source_path)
@@ -44,6 +49,7 @@ class NabuSmp(unittest.TestCase):
             build = dict(cpu_smp_patch_sha256=sha(names[3]), cpu_inline_asm_patch_sha256=sha(names[4]),
                          cpu_timer_intid_patch_sha256=sha(names[6]),
                          cpu_init_completed_patch_sha256=sha(names[7]),
+                         cpu_cold_entry_patch_sha256=sha(names[8]),
                          cpu_sgi_instructions={'verified': True}, nabu_smp_source=evidence)
             for count in (2, 4, 8):
                 result = configure(build, count, False, '-v cpus=1', board='nabu')
@@ -68,6 +74,10 @@ class NabuSmp(unittest.TestCase):
 volatile uint32_t armcpu_registration_count, armcpu_registration_complete;
 volatile uint32_t armcpu_smp_fail[8];
 volatile int32_t armcpu_smp_psci_rc[8];
+volatile uint32_t armcpu_smp_step[8];
+volatile uint64_t nabu_secondary_boot_state[8][8];
+void refreshSecondaryState(unsigned) {}
+void kprintf(const char *, ...) {}
 unsigned maximum, completed, published;
 int ml_get_max_cpu_number() { return maximum; }
 void ml_cpu_init_completed() { ++completed; }

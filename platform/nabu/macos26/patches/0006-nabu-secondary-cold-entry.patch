@@ -1,0 +1,180 @@
+--- a/osfmk/arm64/start.s
++++ b/osfmk/arm64/start.s
+@@ -100,6 +100,113 @@
+  */
+ 	.text
+ 	.align 12
++#if defined(NABU)
++/* PSCI cold entry has no stack or address translation. CPU_ON may arrive at
++ * EL1 or EL2; detect it before accessing EL-specific state. PC-relative symbol
++ * addresses resolve to physical addresses while this code runs with MMU off.
++ * One cache line per affinity records early progress/faults before initCPU.
++ */
++	.globl EXT(nabu_secondary_entry)
++LEXT(nabu_secondary_entry)
++	msr		daifset, #15
++	mrs		x9, mpidr_el1
++	ubfx	x10, x9, #8, #8
++	cmp		x10, #8
++	b.hs	Lnabu_secondary_park
++	adrp	x11, EXT(nabu_secondary_boot_state)@page
++	add		x11, x11, EXT(nabu_secondary_boot_state)@pageoff
++	add		x11, x11, x10, lsl #6
++	mov		x12, #1
++	str		x12, [x11]
++	mrs		x12, CurrentEL
++	str		x12, [x11, #8]
++	str		x9, [x11, #16]
++	dsb		sy
++	cmp		x12, #4
++	b.eq	Lnabu_secondary_el1
++	cmp		x12, #8
++	b.ne	Lnabu_secondary_park
++
++	adrp	x9, EXT(nabu_secondary_vectors)@page
++	add		x9, x9, EXT(nabu_secondary_vectors)@pageoff
++	msr		vbar_el2, x9
++	/* AArch64 EL1, no stage-2 translation or traps inherited from firmware. */
++	mov		x9, #0x80000000
++	msr		hcr_el2, x9
++	mov		x9, #0x33ff
++	msr		cptr_el2, x9
++	msr		hstr_el2, xzr
++	mov		x9, #3
++	msr		cnthctl_el2, x9
++	msr		cntvoff_el2, xzr
++	mrs		x9, icc_sre_el2
++	orr		x9, x9, #1
++	orr		x9, x9, #8
++	msr		icc_sre_el2, x9
++	isb
++	/* Set the EL1 reset value required by the existing common_start path,
++	 * with M/C/I cleared until that path installs its translation tables. */
++	MOV64	x9, (SCTLR_EL1_DEFAULT & ~(SCTLR_M_ENABLED | SCTLR_C_ENABLED | SCTLR_I_ENABLED))
++	msr		sctlr_el1, x9
++	adr		x9, Lnabu_secondary_el1
++	msr		elr_el2, x9
++	mov		x9, #0x3c5
++	msr		spsr_el2, x9
++	isb
++	eret
++
++Lnabu_secondary_el1:
++	/* EL1h is the native reset-vector contract. No stack is used here. */
++	msr		SPSel, #1
++	mov		x12, #2
++	str		x12, [x11]
++	dsb		sy
++	b		EXT(reset_vector)
++
++Lnabu_secondary_park:
++	wfe
++	b		Lnabu_secondary_park
++
++	.align 11
++	.globl EXT(nabu_secondary_vectors)
++LEXT(nabu_secondary_vectors)
++	.rept 16
++	b		Lnabu_secondary_fault
++	.space 124
++	.endr
++Lnabu_secondary_fault:
++	mrs		x9, mpidr_el1
++	ubfx	x10, x9, #8, #8
++	cmp		x10, #8
++	b.hs	Lnabu_secondary_park
++	adrp	x11, EXT(nabu_secondary_boot_state)@page
++	add		x11, x11, EXT(nabu_secondary_boot_state)@pageoff
++	add		x11, x11, x10, lsl #6
++	mrs		x12, CurrentEL
++	cmp		x12, #8
++	b.eq	Lnabu_secondary_el2_fault
++	mrs		x13, esr_el1
++	mrs		x14, elr_el1
++	mrs		x15, far_el1
++	b		Lnabu_secondary_save_fault
++Lnabu_secondary_el2_fault:
++	mrs		x13, esr_el2
++	mrs		x14, elr_el2
++	mrs		x15, far_el2
++Lnabu_secondary_save_fault:
++	str		x12, [x11, #48]
++	str		x13, [x11, #24]
++	str		x14, [x11, #32]
++	str		x15, [x11, #40]
++	mov		x12, #0xf0
++	str		x12, [x11]
++	dsb		sy
++	b		Lnabu_secondary_park
++	.globl EXT(nabu_secondary_entry_end)
++LEXT(nabu_secondary_entry_end)
++	.align 12
++#endif /* NABU */
++
+ 	.globl EXT(LowResetVectorBase)
+ LEXT(LowResetVectorBase)
+ 	/*
+@@ -132,8 +239,13 @@
+ 
+ #if !(defined(KERNEL_INTEGRITY_KTRR) || defined(KERNEL_INTEGRITY_CTRR) || defined(KERNEL_INTEGRITY_PV_CTRR))
+ 	// Set low reset vector before attempting any loads
++#if defined(NABU)
++	adrp    x0, EXT(nabu_secondary_vectors)@page
++	add     x0, x0, EXT(nabu_secondary_vectors)@pageoff
++#else
+ 	adrp    x0, EXT(LowExceptionVectorBase)@page
+ 	add     x0, x0, EXT(LowExceptionVectorBase)@pageoff
++#endif
+ 	msr     VBAR_EL1, x0
+ #endif
+ 
+--- a/osfmk/arm64/cpu.c
++++ b/osfmk/arm64/cpu.c
+@@ -86,6 +86,29 @@
+ vm_address_t   start_cpu_paddr;
+ #endif
+ 
++#if defined(NABU)
++/* The cold secondary walks TTBR1 with caches disabled. Publish all valid
++ * table pages, including dynamically allocated descendants, not mapped data.
++ * This target's ARM_TT_ROOT is L1; L3 entries are leaves even when type == 3.
++ * Kernel table pages are not reclaimed during this initial CPU bring-up.
++ */
++static void
++nabu_publish_cpu_translation_tables(pmap_paddr_t root, unsigned level)
++{
++	tt_entry_t *table = (tt_entry_t *)phystokv(root);
++	if (level < 3) {
++		for (unsigned index = 0; index < TTE_PGENTRIES; index++) {
++			tt_entry_t entry = table[index];
++			if ((entry & (ARM_TTE_VALID | ARM_TTE_TYPE_MASK)) ==
++			    (ARM_TTE_VALID | ARM_TTE_TYPE_TABLE)) {
++				nabu_publish_cpu_translation_tables(entry & ARM_TTE_TABLE_MASK, level + 1);
++			}
++		}
++	}
++	CleanPoC_DcacheRegion_Force((vm_offset_t)table, ARM_PGBYTES);
++}
++#endif /* NABU */
++
+ #if __ARM_KERNEL_PROTECT__
+ extern void exc_vectors_table;
+ #endif /* __ARM_KERNEL_PROTECT__ */
+@@ -964,6 +987,17 @@
+ 		}
+ #endif
+ #endif /* CONFIG_SPTM */
++
++#if defined(NABU)
++		/* start.s reads these with data caches and MMU disabled. The ordinary
++		 * cpu_start flushes above already publish CpuDataEntries and cpu_data,
++		 * but do not publish the translation root or bootstrap table pool. */
++		extern uint8_t bootstrap_pagetables[];
++		CleanPoC_DcacheRegion_Force((vm_offset_t)&cpu_ttep, sizeof(cpu_ttep));
++		CleanPoC_DcacheRegion_Force((vm_offset_t)bootstrap_pagetables, BOOTSTRAP_TABLE_SIZE);
++		nabu_publish_cpu_translation_tables(cpu_ttep, 1);
++		__builtin_arm_dsb(DSB_SY);
++#endif
+ 
+ 		PE_cpu_start_internal(cpu_data_ptr->cpu_id, (vm_offset_t)NULL, (vm_offset_t)NULL);
+ 
