@@ -5,6 +5,7 @@
 #include <IOKit/IODeviceTreeSupport.h>
 #include <kern/thread.h>
 #include <libkern/c++/OSData.h>
+#include <libkern/c++/OSString.h>
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
 #pragma clang diagnostic ignored "-Wdeprecated-anon-enum-enum-conversion"
@@ -28,6 +29,22 @@ public:
     // Avoid an IOResources -> IOBSD wait cycle; BSD attaches asynchronously.
     UInt32 getFeatures() const override { return kIONetworkFeatureNoBSDWait; }
     bool start(IOService *provider) override;
+    bool announceNamedInterface() {
+        if (!interface) return false;
+        OSObject *value = interface->copyProperty("BSD Name");
+        OSString *name = OSDynamicCast(OSString, value);
+        if (!name || !name->getLength()) {
+            OSSafeReleaseNULL(value);
+            return false;
+        }
+        // ClockManager's original first-match callback ignores interfaces
+        // without BSD Name. Re-match only after IONetworkStack assigned one;
+        // publishing a made-up en0 here would bypass native naming.
+        IOLog("NabuTimeSyncIdentity: native BSD Name=%s; rematching named interface\n", name->getCStringNoCopy());
+        value->release();
+        interface->registerService();
+        return true;
+    }
     void stop(IOService *provider) override {
         setLinkStatus(kIONetworkLinkValid, nullptr, 0);
         if (interface) { detachInterface(interface); OSSafeReleaseNULL(interface); }
@@ -109,6 +126,14 @@ static void nabuTimeSyncWorker(void *, wait_result_t)
         if (attached) controller->detach(parent);
         OSSafeReleaseNULL(controller);
         IOLog("NabuTimeSyncIdentity: startup failed (%d)\n", nabu_timesync_identity_state);
+    } else {
+        // A separate worker waits; root mounting and service publication never
+        // wait for configd. Cold boot may take minutes on the single CPU.
+        IOLog("NabuTimeSyncIdentity: awaiting native BSD naming asynchronously\n");
+        unsigned attempts = 0;
+        while (attempts++ < 900 && !controller->announceNamedInterface()) IOSleep(1000);
+        if (attempts > 900)
+            IOLog("NabuTimeSyncIdentity: BSD naming still unavailable; no clock readiness claimed\n");
     }
     thread_terminate(current_thread());
 }

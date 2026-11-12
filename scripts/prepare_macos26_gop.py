@@ -66,6 +66,17 @@ def prepare(root: Path, destination: Path, *, board: str = "sheng") -> dict:
         text = text.replace(marker, '    if (!nabuDisplayConsoleValid(fVideo.v_baseAddr, fVideo.v_width, fVideo.v_height, fVideo.v_rowBytes)) return false;\n' + marker)
         text = text.replace('"5348454E-472D-474F-5000-000000000001"', 'NABU_DISPLAY_UUID')
         text = text.replace('Sheng Boot Framebuffer', 'Xiaomi Pad 5 Boot Framebuffer')
+        heartbeat = '    if (++fTicks % 625 == 0 && fSubmitted + fFrames + fDropped + fStalled != fReported)'
+        if text.count(heartbeat) != 1:
+            raise ValueError('paired framebuffer heartbeat entry changed')
+        text = text.replace(heartbeat, '''    unsigned sessionLog = 0;
+    if ((fTicks == 0 || fTicks % 625 == 624) && fTicks < 7500 &&
+        PE_parse_boot_argn("nabu-session-log", &sessionLog, sizeof(sessionLog)) && sessionLog == 1)
+        IOLog("NABU-DISPLAY: vbl=%llu on=%u power=%u/%u submitted=%llu shown=%llu wait_failures=%llu queue=%p current=%p\\n",
+              fTicks, fDisplayOn, at<uint32_t>(this, kSystemPowerState), at<uint32_t>(this, kAPIPowerState),
+              fSubmitted, fFrames, fWaitFailures, at<IOMFBSwapIORequest *>(this, kSwapQueueFirst),
+              at<IOMFBSwapIORequest *>(this, kCurrentSwap));
+''' + heartbeat)
         source.write_text(text)
         for name in ('nabu_display_policy.h', 'nabu_gop_scanout.h'):
             path = root / 'platform/nabu/macos26/display' / name
@@ -99,6 +110,7 @@ def prepare(root: Path, destination: Path, *, board: str = "sheng") -> dict:
             'reason': 'mainline iOS17 ABI differs from paired 25F71 473-slot family',
         }
         evidence['compositor_qualified'] = False
+        evidence['session_heartbeat'] = 'nabu-session-log=1; real VBL, queue and completion counters'
         evidence['scanout_geometry'] = dict(base=0x9c000000, width=1600,
                                             height=2560, stride=6400, rotation=0)
     (destination / 'source.json').write_text(json.dumps(evidence, indent=2) + '\n')

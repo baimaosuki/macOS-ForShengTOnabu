@@ -34,7 +34,7 @@ nabu_ws_trace_selected(int pid)
 {
     char name[32] = {0};
     proc_name(pid, name, sizeof(name));
-    return !strcmp(name, "WindowServer");
+    return !strcmp(name, "WindowServer") || !strcmp(name, "loginwindow");
 }
 
 static inline void __attribute__((format(printf, 1, 2)))

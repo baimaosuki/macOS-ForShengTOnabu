@@ -13,6 +13,7 @@ import struct
 import subprocess
 import sys
 import tempfile
+import time
 
 ROOT = Path(__file__).resolve().parents[1]
 BOARD = os.environ.get('MACOS26_BOARD', 'sheng')
@@ -521,6 +522,15 @@ def prepare() -> dict:
     if BOARD == 'nabu':
         stage_file(PLATFORM / 'log/windowserver_trace.h', source / 'osfmk/kern/nabu_windowserver_trace.h')
         stage_file(PLATFORM / 'log/windowserver_trace.h', source / 'bsd/kern/nabu_windowserver_trace.h')
+        for directory in ('bsd/kern', 'osfmk/ipc'):
+            stage_file(PLATFORM / 'log/session_trace.h', source / directory / 'nabu_session_trace.h')
+        build_epoch = int(os.environ.get('SOURCE_DATE_EPOCH', str(int(time.time()))))
+        if not 1704067200 <= build_epoch < 4102444800:
+            raise ValueError('NABU calendar floor requires a UTC build timestamp in 2024..2099')
+        epoch_header = source / 'bsd/kern/nabu_boot_epoch.h'
+        epoch_text = f'/* Recorded UTC build floor; no PMIC RTC claim. */\n#define NABU_BUILD_EPOCH {build_epoch}ULL\n'
+        if not epoch_header.exists() or epoch_header.read_text() != epoch_text:
+            epoch_header.write_text(epoch_text)
     panel_console = PLATFORM / 'log/panel_console.h'
     stage_file(panel_console, source / 'pexpert/arm/pe_sheng_panel.h')
     panel_font = source / 'osfmk/console/iso_font.c'
@@ -597,6 +607,8 @@ def prepare() -> dict:
         subprocess.run(['git', '-C', source, 'add', '-N',
                         'osfmk/kern/nabu_windowserver_trace.h',
                         'bsd/kern/nabu_windowserver_trace.h',
+                        'bsd/kern/nabu_session_trace.h', 'osfmk/ipc/nabu_session_trace.h',
+                        'bsd/kern/nabu_boot_epoch.h',
                         'osfmk/vm/nabu_cpu_compositor_policy.h',
                         'osfmk/vm/nabu_cpu_compositor_kernel.h',
                         'osfmk/vm/nabu_cpu_compositor_pages.h'], check=True)
@@ -604,6 +616,11 @@ def prepare() -> dict:
                   deployment='macOS 26.5', sources=identities,
                   architecture=ARCH, native_el1_pac=ARCH == 'arm64e',
                   el0_pac_lifecycle_qualified=False,
+                  session_repair=(dict(microtime_frequency_hz=19200000,
+                      calendar_floor_utc=build_epoch, session_trace_arg='nabu-session-log=1',
+                      session_trace_sha256=sha(PLATFORM / 'log/session_trace.h'),
+                      filesystem_patch_sha256=sha(PLATFORM / 'desktop/session-filesystem.patch'),
+                      device_verified=False) if BOARD == 'nabu' else None),
                   windowserver_trace=(dict(default_off=True, boot_argument='nabu-ws-log=1',
                       header_sha256=sha(PLATFORM / 'log/windowserver_trace.h'),
                       output='ESP RAM journal', user_frames=12,
@@ -1162,6 +1179,7 @@ def main() -> None:
             raise ValueError('desktop integrated filesystem patch changed')
         PATCHES.append(integrated)
         PATCHES.append(desktop / 'late-storage-start.patch')
+        PATCHES.append(desktop / 'session-filesystem.patch')
         DESKTOP_CFLAGS = (' -DXNU_OWNER_ROOT_AUDIT=1 -DXNU_OWNER_ROOT_TRUST=1 '
             '-DXNU_OWNER_CACHE_MOUNT=1 -DXNU_OWNER_CACHE_STARTUP=1 -DXNU_OWNER_BOOT_MANIFEST=1 '
             '-DXNU_OWNER_UNION_SYSTEMOS=1 -DXNU_OWNER_DATA_MOUNT=1 -DXNU_NATIVE_RAM_BLOCK=1 '

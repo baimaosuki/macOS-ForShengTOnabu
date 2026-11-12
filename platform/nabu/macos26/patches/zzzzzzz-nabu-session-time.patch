@@ -1,0 +1,132 @@
+Correct 19.2 MHz microtime, initialize the boot calendar and trace identity/session IPC to ESP RAM.
+--- a/osfmk/arm/rtclock.c
++++ b/osfmk/arm/rtclock.c
+@@ -468,7 +468,7 @@
+ 	*secs = t64 = abstime / rtclock_sec_divisor;
+ 	abstime -= (t64 * rtclock_sec_divisor);
+ 
+-	*microsecs = (uint32_t)(abstime / rtclock_usec_divisor);
++	*microsecs = (uint32_t)((abstime * USEC_PER_SEC) / rtclock_sec_divisor);
+ }
+ 
+ void
+--- a/bsd/kern/kern_time.c
++++ b/bsd/kern/kern_time.c
+@@ -255,6 +255,18 @@
+ 	 * is gotten from the calendar.
+ 	 */
+ 	microtime(&tv);
++#if defined(NABU) && NABU
++#include "nabu_boot_epoch.h"
++	/* No board RTC yet. Preserve a valid platform clock; otherwise use the
++	 * build's recorded UTC floor, as SHENG's platform calendar does. */
++	if (tv.tv_sec < (time_t)NABU_BUILD_EPOCH) {
++		tv.tv_sec = (time_t)NABU_BUILD_EPOCH;
++		tv.tv_usec = 0;
++		setthetime(&tv);
++		printf("NABU calendar: build UTC floor=%llu applied (RTC unavailable or older)\n",
++		    (unsigned long long)NABU_BUILD_EPOCH);
++	}
++#endif
+ 
+ 	if (tv.tv_sec < 0 || tv.tv_usec < 0) {
+ 		printf("WARNING: preposterous time in Real Time Clock");
+--- a/bsd/kern/kern_credential.c
++++ b/bsd/kern/kern_credential.c
+@@ -63,6 +63,14 @@
+ #include <kern/smr_hash.h>
+ #include <kern/task.h>
+ #include <kern/locks.h>
++
++#if defined(NABU) && NABU
++#include "nabu_session_trace.h"
++#else
++#define nabu_session_emit(...) ((void)0)
++#define nabu_session_ipc(...) ((void)0)
++#endif
++
+ #ifdef MACH_ASSERT
+ # undef MACH_ASSERT
+ #endif
+@@ -402,7 +410,12 @@
+ 	 * work.
+ 	 */
+ 	wakeup_one((caddr_t)&kauth_resolver_unsubmitted);
++	nabu_session_emit(0, "event=kauth-submit seq=%u flags=%x uid=%u gid=%u resolver=%d\n",
++	    workp->kr_seqno, workp->kr_work.el_flags, workp->kr_work.el_uid,
++	    workp->kr_work.el_gid, kauth_resolver_identity);
+ 	error = __KERNEL_IS_WAITING_ON_EXTERNAL_CREDENTIAL_RESOLVER__(workp);
++	nabu_session_emit(0, "event=kauth-wake seq=%u queue=%x error=%d result=%d resolver=%d\n",
++	    workp->kr_seqno, workp->kr_flags, error, workp->kr_result, kauth_resolver_identity);
+ 
+ 	/* if the request was processed, copy the result */
+ 	if (error == 0) {
+@@ -552,6 +565,7 @@
+ 			kauth_resolver_identity = new_id;
+ 			kauth_resolver_registered = 1;
+ 			kauth_identitysvc_has_registered = 1;
++			nabu_session_emit(0, "event=kauth-register resolver=%d timeout=%d\n", new_id, kauth_resolver_timeout);
+ 			wakeup(&kauth_resolver_unsubmitted);
+ 		}
+ 		KAUTH_RESOLVER_UNLOCK();
+@@ -798,6 +812,8 @@
+ 	workp->kr_flags &= ~KAUTH_REQUEST_UNSUBMITTED;
+ 	workp->kr_flags |= KAUTH_REQUEST_SUBMITTED;
+ 	TAILQ_INSERT_TAIL(&kauth_resolver_submitted, workp, kr_link);
++	nabu_session_emit(0, "event=kauth-getwork seq=%u flags=%x uid=%u gid=%u\n",
++	    workp->kr_seqno, workp->kr_work.el_flags, workp->kr_work.el_uid, workp->kr_work.el_gid);
+ 
+ out:
+ 	KAUTH_RESOLVER_UNLOCK();
+@@ -881,6 +897,8 @@
+ 		return error;
+ 	}
+ 
++	nabu_session_emit(0, "event=kauth-result seq=%u flags=%x status=%u\n",
++	    extl.el_seqno, extl.el_flags, extl.el_result);
+ 	KAUTH_RESOLVER_LOCK();
+ 
+ 	error = 0;
+--- a/osfmk/ipc/mach_msg.c
++++ b/osfmk/ipc/mach_msg.c
+@@ -84,6 +84,14 @@
+ #include <kern/ipc_mig.h>
+ #include <kern/task.h>
+ #include <kern/thread.h>
++
++#if defined(NABU) && NABU
++#include "nabu_session_trace.h"
++#else
++#define nabu_session_emit(...) ((void)0)
++#define nabu_session_ipc(...) ((void)0)
++#endif
++
+ #include <kern/sched_prim.h>
+ #include <kern/exception.h>
+ #include <kern/misc_protos.h>
+@@ -293,6 +301,7 @@
+ 	mach_msg_option64_t     options = self->ith_option;
+ 	ipc_kmsg_t              kmsg    = self->ith_kmsg;
+ 
++	nabu_session_ipc("ipc-receive-result", options, 0, 0, 0, mr);
+ 	mach_msg_recv_bufs_t recv_bufs = self->ith_recv_bufs;
+ 	mach_msg_recv_result_t msgr = {
+ 		.msgr_seqno     = self->ith_seqno,
+@@ -946,6 +955,8 @@
+ 
+ 	KDBG(MACHDBG_CODE(DBG_MACH_IPC, MACH_IPC_KMSG_INFO) | DBG_FUNC_START);
+ 
++	nabu_session_ipc("ipc-enter", option64, (uint32_t)(mv_id >> 32),
++	    (uint32_t)mr_lp, (uint32_t)(dc_rn >> 32), 0);
+ 	mr = ipc_preflight_msg_option64(option64);
+ 	if (mr != MACH_MSG_SUCCESS) {
+ 		goto send_fail;
+@@ -1047,6 +1058,8 @@
+ 	}
+ 
+ end:
++	nabu_session_ipc("ipc-return", option64, (uint32_t)(mv_id >> 32),
++	    (uint32_t)mr_lp, (uint32_t)(dc_rn >> 32), mr);
+ 	/* unblock call is idempotent */
+ 	ipc_port_thread_group_unblocked();
+ 	return mr;

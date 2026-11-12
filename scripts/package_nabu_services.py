@@ -27,7 +27,7 @@ def sha(path):
 
 
 def package(artifact, metadata, output, installed_toml, identity_file, *, cpu_compositor=False,
-            windowserver_log=False):
+            windowserver_log=False, session_repair=False):
     metadata = json.loads(metadata.read_text())
     if metadata['conclusion'] != 'success':
         raise ValueError('requires a successful native CI build')
@@ -51,6 +51,16 @@ def package(artifact, metadata, output, installed_toml, identity_file, *, cpu_co
             raise ValueError('WindowServer observer differs from the compiled kernel')
         if b'NABU-WS event=' not in native.read_bytes():
             raise ValueError('native kernel omitted the WindowServer journal observer')
+    if session_repair:
+        repair = build.get('session_repair') or {}
+        if not cpu_compositor or not windowserver_log:
+            raise ValueError('session repair package requires CPU compositor and session exit observers')
+        if repair.get('session_trace_sha256') != sha(ROOT / 'platform/nabu/macos26/log/session_trace.h'):
+            raise ValueError('session observer differs from the compiled kernel')
+        if repair.get('filesystem_patch_sha256') != sha(ROOT / 'platform/nabu/macos26/desktop/session-filesystem.patch'):
+            raise ValueError('session filesystem fixes differ from the compiled kernel')
+        if '_native_union_visflags' not in symbols(native):
+            raise ValueError('native kernel omitted root union visibility fixes')
     output.mkdir(parents=True, exist_ok=False)
 
     def run(arguments, name):
@@ -133,6 +143,8 @@ def package(artifact, metadata, output, installed_toml, identity_file, *, cpu_co
         match = matches[0]
         changes = {'nabu-ws-log': '1', 'sheng-windowserver-stop': '0',
                    'sheng-stderr-log': '2', 'sheng-stderr-name': 'WindowServer'}
+        if session_repair:
+            changes.update({'nabu-session-log': '1', 'sheng-stderr-name': 'boot-filesystems'})
         args = [a for a in match.group(2).split() if a.split('=', 1)[0] not in changes]
         args += [key + '=' + value for key, value in changes.items()]
         text = text[:match.start(2)] + ' '.join(args) + text[match.end(2):]
@@ -152,6 +164,7 @@ def package(artifact, metadata, output, installed_toml, identity_file, *, cpu_co
         unresolved=['OD first-launch internal connection timeout',
                     'device validation of new services and actual WindowServer presentation'],
         cpu_compositor=cpu_compositor, windowserver_log=windowserver_log, od_overlay_included=False,
+        session_repair=build.get('session_repair') if session_repair else None,
         gpu_acceleration=False, sep_backed=False, network_connectivity=False,
         device_tested=False, desktop_verified=False, root_reflash_required=False,
         data_reflash_required=False, esp_logger_allocation_preserved=True,
@@ -206,6 +219,20 @@ task-terminate 记录终止发起者 PID 与内核调用点；外部终止不读
 同时打开 WindowServer stdout/stderr。为让 journal 线程继续提交，关闭首异常强制停机；
 这不改变原异常投递和原进程退出处理。本版增强诊断，不代表已修复桌面。
 '''
+    if session_repair:
+        delivery['implemented'] += ['19.2MHz normalized microtime', 'build UTC calendar floor',
+            'identity resolver and login IPC journal', 'named Ethernet interface rematch',
+            'root union identity and firmlink semantics']
+        delivery['unresolved'] = ['device validation of resolver replies and login client connection',
+            'device validation of TimeSync clock and CPU compositor first frame']
+        readme += '''
+本轮 1–5 修复：19.2 MHz 微秒换算、构建 UTC 日历下限、OD/登录 IPC 记录、
+原生命名后的 Ethernet/TimeSync 重新匹配、union 身份和 firmlink 路径语义。
+NABU-SESSION 记录 kauth-submit/getwork/result/wake 与登录 IPC；
+NABU-DISPLAY 报告实际 VBL/队列/提交/显示计数；WS 退出观察也覆盖 loginwindow。
+新增 nabu-session-log=1，stdout/stderr 选择 boot-filesystems；日志 token 保持不变。
+这些是代码与构建结果；仍需本机确认登录连接、第一帧和 Dock/Finder。
+'''
     (output / 'README.txt').write_text(readme)
     (output / 'delivery.json').write_text(json.dumps(delivery, indent=2) + '\n')
     archive = output.with_suffix('.zip')
@@ -232,6 +259,8 @@ if __name__ == '__main__':
         parser.add_argument('--' + name, type=Path, required=True)
     parser.add_argument('--cpu-compositor', action='store_true')
     parser.add_argument('--windowserver-log', action='store_true')
+    parser.add_argument('--session-repair', action='store_true')
     args = parser.parse_args()
     package(args.artifact, args.metadata, args.output, args.installed_toml, args.identity_file,
-            cpu_compositor=args.cpu_compositor, windowserver_log=args.windowserver_log)
+            cpu_compositor=args.cpu_compositor, windowserver_log=args.windowserver_log,
+            session_repair=args.session_repair)
