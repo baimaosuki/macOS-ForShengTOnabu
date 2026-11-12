@@ -217,6 +217,11 @@ def build(root, out, compile_record, source, run, record, env, *, transport='vir
         ram_source = integration / 'drivers/NativeRamBlock/NativeRamBlock.cpp'
         ram_revision = subprocess.check_output(['git', '-C', ram_checkout, 'rev-parse', 'HEAD'], text=True).strip()
         ram_text = subprocess.check_output(['git', '-C', ram_checkout, 'show', ram_revision + ':NativeRamBlock.cpp'], text=True)
+        if board == 'nabu':
+            from nabu_storage_source import adapt_nabu_ram_medium
+            ram_text = adapt_nabu_ram_medium(ram_text)
+            shutil.copy2(root / 'platform/nabu/macos26/storage/NabuStorageCharacteristics.h',
+                         ram_source.parent / 'NabuStorageCharacteristics.h')
         marker = '    if(logical>0x80000000ULL){'
         if ram_text.count(marker) != 1:
             raise ValueError('unreviewed RAM Data capacity-selection source')

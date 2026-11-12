@@ -83,7 +83,7 @@ int main(void) {
     assert (tmp_path / 'nabu-session-probe.sh').read_text() == script
     assert (tmp_path / 'nabu-session-probe.sh').stat().st_mode & 0o777 == 0o600
     console = (tmp_path / 'console.txt').read_text()
-    assert 'NABU-SESSION-PROBE started pid=' in console and 'version=3' in console
+    assert 'NABU-SESSION-PROBE started pid=' in console and 'version=4' in console
     assert 'NABU-SESSION-PROBE shell exit=0' in console
     assert not (tmp_path / 'org.nabu.session-probe.plist').exists()
     result = subprocess.run([executable], cwd=tmp_path,
@@ -105,7 +105,9 @@ def test_probe_waits_for_real_pids_and_samples_before_blocked_launchctl(tmp_path
         path.write_text('#!/bin/sh\n' + body)
         path.chmod(0o755)
         return str(path)
-    ps = tool('ps', f"""n=0
+    ps = tool('ps', f"""test "$1" = -axo || exit 97
+test "$2" = pid=,ucomm= || exit 98
+n=0
 [ ! -f '{counter}' ] || n=$(cat '{counter}')
 n=$((n + 1)); echo "$n" > '{counter}'
 [ "$n" -gt 1 ] || exit 0
@@ -118,13 +120,14 @@ ROWS
 """)
     sample = tool('sample', f"""case "$1" in ''|*[!0-9]*) exit 99 ;; esac
 echo "$1" >> '{invocations}'
+[ "$2" = 0 ] && [ "$3" = 100 ] || exit 98
 while [ "$1" != -file ]; do shift; done
 shift
 echo "Call graph for real target" > "$1"
 echo "sample diagnostic preserved"
 """)
-    launchctl = tool('launchctl', 'trap '' TERM\nwhile :; do /bin/sleep 0.1; done\n')
-    sleep = tool('sleep', 'case "$1" in 15|1) /bin/sleep 0.1 ;; *) : ;; esac\n')
+    launchctl = tool('launchctl', "trap '' TERM\nwhile :; do /bin/sleep 0.1; done\n")
+    sleep = tool('sleep', 'case "$1" in 15|5|1) /bin/sleep 0.1 ;; *) : ;; esac\n')
     script = (SHIM / 'session_probe.sh').read_text()
     script = script[:script.rindex('\nsleep 15')]
     script = script.replace('/bin/ps', ps).replace('/usr/bin/sample', sample)

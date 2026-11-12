@@ -51,8 +51,9 @@ against UUID `EA3273B7-AF0F-3E06-B0F5-072DFCDD5395`. In its original code:
   An unset mask bit preserves it. A zero-area rectangle disables drawing.
 - `swap_complete_gated(true)` at `0xfffffe000a8947dc` transfers updated
   surfaces to DisplayedData only after the synchronous pixel copy is done.
-  Each source descriptor's bounded read-only mapping and pixel reads finish,
-  and the mapping is released, before calling it. No surface pointer outlives native family ownership.
+  Every CPU source read finishes before calling it. A retained mapping keeps
+  its own descriptor/backing reference; no borrowed IOSurface pointer outlives
+  native family ownership.
 - `dropSwap_gated` at `0xfffffe000a89f2dc` unlinks the request itself, invokes
   `swap_complete_gated(false)`, and clears the current pointer. Because our
   dispatcher has already unlinked the current request, its failure helper
@@ -71,8 +72,11 @@ rejected with native error retirement; portrait rotation zero is the supported
 board mode.
 
 Source validation or mapping failures leave the scanout untouched and use native error retirement.
-The boot console is handed off only after all source rows were staged and the
-whole image was copied under the shared framebuffer owner. A later explicit
+After all source rows are staged, the first frame claims the shared framebuffer
+owner and disables/drains the native text console before the first scanout store.
+Native vcputc does not consult the diagnostic owner, so disabling it only after
+the copy allowed it to overwrite GUI pixels. A failed first transfer restores
+the console only while the owner remains GUI/BOOT; a panic keeps ownership. A later explicit
 clear can present black. `frame=... copied=1` records actual BGRA/RGhA output
 pixels, lit RGB count and center pixel; `complete=...` separately records the
 subsequent native successful completion. These are content/completion evidence,
@@ -86,14 +90,40 @@ mapping path: IOSurface owns the backing; the display does not call an extra
 `prepare()`/`complete()` DMA cycle or fall back to repeated `readBytes()` windows.
 Original 25F71 IOSurface allocation uses wired pool descriptors or an allocated
 IOBufferMemoryDescriptor. Mapping lifetime covers every source pixel read and
-ends before native swap completion. First four successful/failed frames record
+may extend beyond native swap completion through its own backing reference. First four successful/failed frames record
 mapping entry, readiness and completed CPU row reads to distinguish a source-map
 wait from later scanout or retirement. This removes the extra VM wiring operation;
 a specific prepare-lock deadlock and the hardware fix still require verification.
 
+The d hardware run confirms direct source mapping and all 2560 CPU row copies
+completed. Its last marker precedes the old map destructor; the unchanged native
+console handoff was also before the next existing completed-frame marker. It
+does not uniquely locate a deadlock. XNU IOMemoryMap::free synchronously takes
+gIOMemoryLock, unmaps with mach_vm_deallocate and removes itself from the source
+descriptor's mappings. The fixed SHENG CPU implementation also releases its map
+synchronously, so a gate/unmap lock cycle is not established merely by reading
+that source.
+
+Nabu now retains one mapping per plane and reuses it for the same descriptor,
+offset and span. Replacement transfers the old strong map reference to a
+separate kernel worker. That worker has no display pointer and drains VM unmaps
+outside the framebuffer gate. Its eight-entry queue permits four normal pending
+maps and reserves four entries for stop; at most nine mapping references exist
+across current slots, pending entries and the one unmap in flight. A full queue
+refuses replacement, preserves the old slot and retires the new swap as an error.
+Worker creation failure refuses display startup. Stop closes native activity,
+transfers its four slots and returns without waiting for an unmap; the worker
+frees its own lock/state after draining. No IOSurface ownership or GPU completion
+is fabricated. First-frame stage markers distinguish source return, planes,
+owner claim, console disable, scanout copy and native completion. Reaper entry
+and return records are limited to four.
+
 Host tests exercise the actual `.inc` with a mocked native family and source
 memory descriptors under ASan/UBSan, including retained layers, cursor-only
-updates/moves, clearing, direct mapping, failures and queue retirement.
+updates/moves, clearing, mapping reuse, failures and queue retirement. A host
+thread executes the actual reaper. Tests hold an unmap indefinitely and verify
+bounded queue refusal, nonblocking stop, final map reclamation, worker creation
+failure, console restoration on transfer failure and panic ownership preservation.
 The arithmetic tests cover crop, scaling, clipping, BGRA zero alpha, cursor
 blending and half-float conversion. Full kernel compilation still needs the
 macOS builder and paired SDK; real panel appearance and WindowServer acceptance

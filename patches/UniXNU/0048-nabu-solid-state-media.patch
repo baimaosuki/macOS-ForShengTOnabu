@@ -1,0 +1,21 @@
+--- a/drivers/NativeUfs/NativeUfs.cpp
++++ b/drivers/NativeUfs/NativeUfs.cpp
+@@ -41,6 +41,7 @@
+ #include "SmmuTakeover.h"
+ #include "NabuUfsWindowPlan.h"
+ #include "NabuRootMedia.h"
++#include "NabuStorageCharacteristics.h"
+ 
+ static UfsRootDiagnostics gRootDiagnostic;
+ static bool gRootDiagnosticEnabled;
+@@ -1541,6 +1542,10 @@
+ bool NativeUfsBlock::start (IOService *provider)
+ {
+   if (!bounce || !windowLock || !IOBlockStorageDevice::start (provider)) {
++    return false;
++  }
++  if (!nabuSetSolidStateMedium (this)) {
++    IOBlockStorageDevice::stop (provider);
+     return false;
+   }
+   online = true;

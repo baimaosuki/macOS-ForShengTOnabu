@@ -38,17 +38,30 @@ void NativeGOPDisplay::program_hardware_gated()
                       swapID, mask, i, updated, surface, src.x, src.y, src.width, src.height,
                       dst.x, dst.y, dst.width, dst.height, rotation);
             if (rotation || !copyLayer(surface, src, dst, i == 1 &&
-                ioSurfaceWidth(surface) <= 256 && ioSurfaceHeight(surface) <= 256)) { success = false; break; }
+                ioSurfaceWidth(surface) <= 256 && ioSurfaceHeight(surface) <= 256, i)) { success = false; break; }
             active |= 1u << i;
         }
     }
+    if (fFrames < 4 && fCopyFailures < 4)
+        IOLog("NABU-DISPLAY: planes-done swap=%u active=%#x success=%u\n", swapID, active, success);
     // Do not replace the diagnostics with an empty first scene. A later
     // explicit plane clear is a valid black presentation.
     if (!active && !fFrames) success = false;
     if (success) {
         const bool first = fFrames == 0;
         bool claimed = !first || sheng_fb_claim_gui();
+        if (fFrames < 4 && fCopyFailures < 4)
+            IOLog("NABU-DISPLAY: claim swap=%u claimed=%u first=%u\n", swapID, claimed, first);
         if (claimed) {
+            // Native vcputc does not consult the shared diagnostic owner.
+            // All source pixels are staged; drain/disable that console before
+            // the first GOP store so it cannot overwrite the new GUI image.
+            if (first) {
+                IOLog("NABU-DISPLAY: console-disable-begin swap=%u\n", swapID);
+                PE_initialize_console(nullptr, kPEDisableScreen);
+                IOLog("NABU-DISPLAY: console-disable-done swap=%u\n", swapID);
+            }
+            if (fFrames < 4 && fCopyFailures < 4) IOLog("NABU-DISPLAY: scanout-copy-begin swap=%u\n", swapID);
             uint64_t lit = 0, center = 0;
             for (uint64_t y = 0; y < fVideo.v_height; y++) {
                 uint32_t *row = fComposition + y * fVideo.v_width;
@@ -62,19 +75,23 @@ void NativeGOPDisplay::program_hardware_gated()
 #if defined(__aarch64__)
             __asm__ volatile("dsb sy" ::: "memory");
 #endif
+            if (fFrames < 4 && fCopyFailures < 4) IOLog("NABU-DISPLAY: scanout-copy-done swap=%u rows=%lu success=%u\n", swapID, fVideo.v_height, success);
             success = success && __atomic_load_n(&sheng_framebuffer.owner, __ATOMIC_ACQUIRE) == SHENG_FB_GUI;
             if (success) {
                 fFrames++;
                 fLastLit = lit; fLastCenter = center;
                 if (first) {
                     sheng_panel_ready = 0; sheng_status_pixels = 0;
-                    PE_initialize_console(nullptr, kPEDisableScreen);
                     sheng_boot_checkpoint(9);
                 }
                 if (fFrames <= 8 || fFrames % 50 == 0)
                     IOLog("NABU-DISPLAY: frame=%llu swap=%u update=%#x active=%#x pixels=%llu lit=%llu centre=%#llx copied=1\n",
                           fFrames, swapID, mask, active, uint64_t(fVideo.v_width) * fVideo.v_height, lit, center);
-            } else if (first) sheng_fb_abort_gui();
+            } else if (first && __atomic_load_n(&sheng_framebuffer.owner, __ATOMIC_ACQUIRE) == SHENG_FB_GUI) {
+                sheng_fb_abort_gui();
+                if (__atomic_load_n(&sheng_framebuffer.owner, __ATOMIC_ACQUIRE) == SHENG_FB_BOOT)
+                    PE_initialize_console(nullptr, kPEEnableScreen);
+            }
         } else success = false;
     }
     if (!success) {
@@ -88,6 +105,7 @@ void NativeGOPDisplay::program_hardware_gated()
         fDropped++;
         return;
     }
+    if (fFrames <= 4) IOLog("NABU-DISPLAY: native-complete-begin swap=%u\n", swapID);
     swap_complete_gated();
     fCompleted++;
     if (fCompleted <= 8 || fCompleted % 50 == 0)
@@ -109,7 +127,7 @@ void NativeGOPDisplay::failCurrentSwap(IOMFBSwapIORequest *swap)
 }
 
 bool NativeGOPDisplay::copyLayer(IOSurface *surface, const NabuGopRect &src,
-                                const NabuGopRect &dst, bool cursor)
+                                const NabuGopRect &dst, bool cursor, unsigned plane)
 {
     uint64_t width = ioSurfaceWidth(surface), height = ioSurfaceHeight(surface);
     uint64_t rowBytes = ioSurfaceBytesPerRow(surface), base = ioSurfaceBaseOffset(surface);
@@ -138,23 +156,29 @@ bool NativeGOPDisplay::copyLayer(IOSurface *surface, const NabuGopRect &src,
     // Match GopFramebuffer's synchronous CPU path: map that backing directly.
     // Re-preparing it here can re-enter VM wiring while the submitting thread
     // holds the framebuffer gate; it is not a new DMA transfer owned by us.
-    struct FrameRead {
-        IOMemoryMap *mapping = nullptr;
-        ~FrameRead() { if (mapping) mapping->release(); }
-    } frame{};
-    uint64_t span = (height - 1) * rowBytes + sourceRowBytes;
-    if (fFrames < 4 && fCopyFailures < 4)
-        IOLog("NABU-DISPLAY: source-map-begin frame=%llu memory=%p format=%#x size=%llux%llu row=%llu base=%llu span=%llu\n",
-              fFrames + 1, memory, format, width, height, rowBytes, base, span);
-    if (span <= (512ULL << 20))
-        frame.mapping = memory->createMappingInTask(kernel_task, 0, kIOMapAnywhere | kIOMapReadOnly, base, span);
-    const uint8_t *source = frame.mapping && frame.mapping->getLength() >= span
-        ? reinterpret_cast<const uint8_t *>(frame.mapping->getVirtualAddress()) : nullptr;
-    if (!source) {
-        if (fCopyFailures < 4) IOLog("NABU-DISPLAY: source-map-failed memory=%p span=%llu\n", memory, span);
-        return false;
+    const uint64_t span = (height - 1) * rowBytes + sourceRowBytes;
+    NabuGopSourceMap &slot = fSourceMaps[plane];
+    if (slot.mapping && (slot.memory != memory || slot.base != base || slot.span != span)) {
+        if (!fSourceReaper || !fSourceReaper->retire(slot.mapping)) return false;
+        slot = {};
     }
-    if (fFrames < 4 && fCopyFailures < 4) IOLog("NABU-DISPLAY: source-map-ready frame=%llu bytes=%llu\n", fFrames + 1, span);
+    if (!slot.mapping) {
+        if (fFrames < 4 && fCopyFailures < 4)
+            IOLog("NABU-DISPLAY: source-map-begin frame=%llu memory=%p format=%#x size=%llux%llu row=%llu base=%llu span=%llu\n",
+                  fFrames + 1, memory, format, width, height, rowBytes, base, span);
+        if (span > (512ULL << 20)) return false;
+        IOMemoryMap *mapping = memory->createMappingInTask(kernel_task, 0,
+            kIOMapAnywhere | kIOMapReadOnly, base, span);
+        if (!mapping) return false;
+        // Even a refused mapping stays in its bounded slot until the worker
+        // can release it; no synchronous VM unmap occurs under this gate.
+        slot = {mapping, memory, base, span};
+    }
+    const uint8_t *source = slot.mapping->getLength() >= span
+        ? reinterpret_cast<const uint8_t *>(slot.mapping->getVirtualAddress()) : nullptr;
+    if (!source) return false;
+    if (fFrames < 4 && fCopyFailures < 4)
+        IOLog("NABU-DISPLAY: source-map-ready frame=%llu bytes=%llu cached=1\n", fFrames + 1, span);
     uint64_t previousY = UINT64_MAX;
     for (int64_t y = clip.y0; y < clip.y1; y++) {
         const uint64_t sy = src.y + uint64_t(y - dst.y) * uint64_t(src.height) / uint64_t(dst.height);
@@ -166,5 +190,7 @@ bool NativeGOPDisplay::copyLayer(IOSurface *surface, const NabuGopRect &src,
                        format == kFormatRGhA ? fHalfToByte : nullptr, cursor);
     }
     if (fFrames < 4 && fCopyFailures < 4) IOLog("NABU-DISPLAY: source-copy-done frame=%llu rows=%llu\n", fFrames + 1, uint64_t(clip.y1 - clip.y0));
+    // The slot keeps the map+IOMD alive. No map destructor/unmap runs here.
+    if (fFrames < 4 && fCopyFailures < 4) IOLog("NABU-DISPLAY: source-copy-return frame=%llu plane=%u retained=1\n", fFrames + 1, plane);
     return true;
 }

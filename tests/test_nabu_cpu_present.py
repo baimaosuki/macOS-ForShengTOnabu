@@ -23,7 +23,7 @@ class NabuCpuPresent(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             binary = Path(temp) / 'lifecycle'
             subprocess.run([compiler, '-std=c++17', '-Wall', '-Wextra', '-Werror',
-                            '-Wno-missing-field-initializers', '-fsanitize=address,undefined',
+                            '-Wno-missing-field-initializers', '-pthread', '-fsanitize=address,undefined',
                             str(Path(__file__).with_name('nabu_cpu_present_lifecycle.cpp')),
                             '-o', str(binary)], check=True, capture_output=True)
             subprocess.run([str(binary)], check=True, capture_output=True)

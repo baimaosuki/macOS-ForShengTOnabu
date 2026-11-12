@@ -8,6 +8,20 @@ import shutil
 import subprocess
 
 
+def adapt_nabu_ram_medium(text: str) -> str:
+    """Publish the real RAM medium before its IOStorage driver can match."""
+    include = '#include "DirectDisk.h"'
+    start = '  if (!IOBlockStorageDevice::start(provider)) return false;'
+    if text.count(include) != 1 or text.count(start) != 1:
+        raise ValueError('unreviewed RAM storage characteristics source')
+    return text.replace(include, include + '\n#include "NabuStorageCharacteristics.h"').replace(
+        start, start + '''
+  if (!nabuSetSolidStateMedium(this)) {
+    IOBlockStorageDevice::stop(provider);
+    return false;
+  }''')
+
+
 def stage(root: Path, destination: Path, *, board: str) -> tuple[Path, dict]:
     if board not in ('sheng', 'nabu'):
         raise ValueError('unsupported UFS board')
@@ -29,7 +43,7 @@ def stage(root: Path, destination: Path, *, board: str) -> tuple[Path, dict]:
     for patch in sorted((root / 'patches/UniXNU').glob('*.patch')):
         if 'a/drivers/NativeUfs/' not in patch.read_text():
             continue
-        if patch.name.startswith(('0040-', '0041-', '0042-', '0043-', '0044-', '0046-', '0047-')) and board != 'nabu':
+        if patch.name.startswith(('0040-', '0041-', '0042-', '0043-', '0044-', '0046-', '0047-', '0048-')) and board != 'nabu':
             continue
         subprocess.run(['git', 'apply', '--include=drivers/NativeUfs/*', str(patch.resolve())],
                        cwd=destination, check=True, capture_output=True,

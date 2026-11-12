@@ -3,7 +3,7 @@
 PATH=/usr/bin:/bin:/usr/sbin:/sbin
 export PATH
 umask 077
-echo "NABU-SESSION-PROBE started pid=$$ version=3"
+echo "NABU-SESSION-PROBE started pid=$$ version=4"
 trap 'echo "NABU-SESSION-PROBE shell exit=$?"' 0
 
 # Diagnostics must not block later samples. Keep child output off the console
@@ -52,22 +52,27 @@ snapshot()
     # not evidence that loginwindow or WindowServer exists. Sample each real
     # PID as soon as it appears, without waiting on launchctl first.
     attempt=0
-    while [ "$attempt" -lt 60 ]; do
+    while [ "$attempt" -lt 30 ]; do
         attempt=$((attempt + 1))
-        run_bounded 15 "$process_list" /bin/ps -axo pid=,comm=
+        # ucomm is the kernel's short process name. comm asks ps to resolve
+        # executable paths, which can block on the filesystem during boot.
+        run_bounded 5 "$process_list" /bin/ps -axo pid=,ucomm=
         listing_status=$?
         if [ "$listing_status" -ne 0 ]; then
             echo "NABU-SESSION-PROBE process-list status=$listing_status attempt=$attempt"
             /usr/bin/head -c 16384 "$process_list"
         else
-            for process in opendirectoryd loginwindow lsd WindowServer; do
+            for process in opendirectoryd loginwindow lsd WindowServer launchservicesd; do
                 case "$sampled" in *" $process "*) continue ;; esac
                 target=$(find_pid "$process") || continue
                 report="/private/var/tmp/nabu-sample-$process.txt"
                 diagnostic="/private/var/tmp/nabu-sample-$process.stderr"
                 /bin/rm -f "$report"
                 echo "NABU-SESSION-PROBE sample process=$process pid=$target round=$1"
-                run_bounded 15 "$diagnostic" /usr/bin/sample "$target" 2 10 -mayDie -file "$report"
+                # Duration zero selects the tool's single-snapshot mode.
+                # -mayDie preloads symbols before sampling; boot daemons are
+                # stable targets and do not need that costly preload.
+                run_bounded 15 "$diagnostic" /usr/bin/sample "$target" 0 100 -file "$report"
                 result=$?
                 echo "NABU-SESSION-PROBE sample-result process=$process pid=$target status=$result"
                 /usr/bin/head -c 16384 "$diagnostic"
@@ -78,19 +83,17 @@ snapshot()
                 sampled="$sampled$process "
             done
         fi
-        if [ "$sampled" = " opendirectoryd loginwindow lsd WindowServer " ]; then
-            break
-        fi
-        # Targets can appear in any order; do not require launch order.
+        # lsd belongs to the later user session. Capture it or launchservicesd
+        # opportunistically, without keeping pre-login polling alive for lsd.
         remaining=0
-        for process in opendirectoryd loginwindow lsd WindowServer; do
+        for process in opendirectoryd loginwindow WindowServer; do
             case "$sampled" in *" $process "*) ;; *) remaining=$((remaining + 1)) ;; esac
         done
         [ "$remaining" -eq 0 ] && break
         if [ "$attempt" = 1 ] || [ $((attempt % 12)) -eq 0 ]; then
             echo "NABU-SESSION-PROBE awaiting-processes remaining=$remaining attempt=$attempt"
         fi
-        /bin/sleep 5
+        /bin/sleep 10
     done
     for process in opendirectoryd loginwindow lsd WindowServer; do
         case "$sampled" in *" $process "*) ;; *) echo "NABU-SESSION-PROBE target-not-observed process=$process round=$1" ;; esac
@@ -111,8 +114,4 @@ snapshot()
 
 sleep 15
 snapshot 1
-sleep 180
-snapshot 2
-sleep 180
-snapshot 3
 echo "NABU-SESSION-PROBE finished"

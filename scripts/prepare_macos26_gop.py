@@ -66,12 +66,15 @@ def prepare(root: Path, destination: Path, *, board: str = "sheng") -> dict:
         text = text.replace(marker, '    if (!nabuDisplayConsoleValid(fVideo.v_baseAddr, fVideo.v_width, fVideo.v_height, fVideo.v_rowBytes)) return false;\n' + marker)
         text = text.replace('"5348454E-472D-474F-5000-000000000001"', 'NABU_DISPLAY_UUID')
         text = text.replace('Sheng Boot Framebuffer', 'Xiaomi Pad 5 Boot Framebuffer')
-        text = text.replace('#include "nabu_display_policy.h"', '#include "nabu_display_policy.h"\n#include "nabu_cpu_present.h"')
+        text = text.replace('#include "nabu_display_policy.h"', '#include "nabu_display_policy.h"\n#include "nabu_cpu_present.h"\n#include "nabu_source_maps.h"')
         text = text.replace('    void copySurface(IOSurface *);',
-                            '    bool copyLayer(IOSurface *, const NabuGopRect &, const NabuGopRect &, bool);\n    void failCurrentSwap(IOMFBSwapIORequest *);')
+                            '    bool copyLayer(IOSurface *, const NabuGopRect &, const NabuGopRect &, bool, unsigned);\n    void failCurrentSwap(IOMFBSwapIORequest *);')
         text = text.replace('    uint32_t fSurfaceFormat = 0;\n    uint64_t fSourceWidth = 0, fSourceHeight = 0;\n', '')
         text = text.replace('    uint64_t fLayerShape = 0;',
-                            '    uint32_t *fComposition = nullptr;\n    uint64_t fCompleted = 0, fCopyFailures = 0;')
+                            '    uint32_t *fComposition = nullptr;\n    NabuGopSourceMap fSourceMaps[4]{};\n    NabuGopSourceReaper *fSourceReaper = nullptr;\n    uint64_t fCompleted = 0, fCopyFailures = 0;')
+        text = text.replace('    fScanout = reinterpret_cast<uint8_t *>(fScanoutMap->getVirtualAddress());', '    fScanout = reinterpret_cast<uint8_t *>(fScanoutMap->getVirtualAddress());\n    fSourceReaper = NabuGopSourceReaper::create();\n    if (!fSourceReaper) { OSSafeReleaseNULL(fScanoutMap); return false; }')
+        text = text.replace('        IOLog("NativeGOPDisplay: IOMobileFramebufferLegacy::start failed\\n");', '        IOLog("NativeGOPDisplay: IOMobileFramebufferLegacy::start failed\\n");\n        IOMemoryMap *empty[4]{}; fSourceReaper->finish(empty); fSourceReaper = nullptr;')
+        text = text.replace('    IOMobileFramebufferLegacy::stop(provider);', '    IOMobileFramebufferLegacy::stop(provider);\n    if (fSourceReaper) {\n        IOMemoryMap *maps[4]{};\n        for (unsigned i = 0; i < 4; i++) { maps[i] = fSourceMaps[i].mapping; fSourceMaps[i] = {}; }\n        fSourceReaper->finish(maps); fSourceReaper = nullptr;\n    }')
         text = text.replace('            dropSwap_gated(swap, false);', '            failCurrentSwap(swap);')
         begin = text.index('// Copy the compatible scene before completing the swap.')
         end = text.index('static constexpr uint32_t kFormatBGRA', begin)
@@ -93,7 +96,7 @@ def prepare(root: Path, destination: Path, *, board: str = "sheng") -> dict:
               at<IOMFBSwapIORequest *>(this, kCurrentSwap));
 ''' + heartbeat)
         source.write_text(text)
-        for name in ('nabu_display_policy.h', 'nabu_gop_scanout.h', 'nabu_cpu_present.h', 'nabu_cpu_present.inc'):
+        for name in ('nabu_display_policy.h', 'nabu_gop_scanout.h', 'nabu_cpu_present.h', 'nabu_cpu_present.inc', 'nabu_source_maps.h'):
             path = root / 'platform/nabu/macos26/display' / name
             shutil.copyfile(path, destination / name)
             board_inputs[name] = digest(path.read_bytes())
