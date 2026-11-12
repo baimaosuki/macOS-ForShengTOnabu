@@ -1,0 +1,47 @@
+{
+  "schema": "nabu-25F71-cpu-compositor-v1",
+  "build": "25F71",
+  "cache_uuid": "46E0097F-F385-36C8-84A9-A40D315A32D1",
+  "text_cache_uuid": "2401A023-10BA-3495-AD2F-03CB5372681B",
+  "boot_argument": "nabu-cpu-compositor=1",
+  "default_off": true,
+  "shared_page_scope": true,
+  "runtime_qualified": false,
+  "sites": [
+    {
+      "name": "metal-capability-no-device",
+      "unslid_va": "0x186f298c8",
+      "file": "dyld_shared_cache_arm64e.01",
+      "file_offset": 115998720,
+      "page_sha256": "41989a0cecf2b58bcd361c77e467e4eaa02053d50a27ac62d06b99350ebe9f46",
+      "patched_page_sha256": "16b97da4febac322d53b3c3686bdc2b0c8d8ee4a398ceb4cfc750633bd8e3875",
+      "edit_offset": 6348,
+      "before": "ff4302d1f65706a9",
+      "after": "ff2303d5c0035fd6",
+      "pacibsp": "7f2303d5"
+    },
+    {
+      "name": "bgra-before-surface-allocation",
+      "unslid_va": "0x18a92eae0",
+      "file": "dyld_shared_cache_arm64e.01",
+      "file_offset": 176832512,
+      "page_sha256": "7159ed4bc4165dc9ac5db41923c4ccd24ee736efc9c161ac102f1bad1d0e83d2",
+      "patched_page_sha256": "df774ff2cc6020b9f0f66f768708b3455a40fa3a61c4c4afa45fa93aa85f99ed",
+      "edit_offset": 10980,
+      "before": "e923bc6df65701a9f44f02a9fd7b03a9",
+      "after": "20488a52e048a872ff2303d5c0035fd6",
+      "pacibsp": "7f2303d5"
+    },
+    {
+      "name": "software-pool-bgra-before-match-and-allocation",
+      "unslid_va": "0x1870f0844",
+      "file": "dyld_shared_cache_arm64e.01",
+      "file_offset": 117866496,
+      "page_sha256": "fc90dc40b51e8506f8d8a371c10810d78b932d66936569f4418aa418f55e6d68",
+      "patched_page_sha256": "525b73cf8c05089cc2e73d5564f2afc5652e277b6b83d62f670f04bf887960bd",
+      "edit_offset": 2116,
+      "before": "f40300aa",
+      "after": "140a80d2"
+    }
+  ]
+}

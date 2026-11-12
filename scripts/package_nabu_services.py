@@ -26,7 +26,7 @@ def sha(path):
     return digest.hexdigest()
 
 
-def package(artifact, metadata, output, installed_toml, identity_file):
+def package(artifact, metadata, output, installed_toml, identity_file, *, cpu_compositor=False):
     metadata = json.loads(metadata.read_text())
     if metadata['conclusion'] != 'success':
         raise ValueError('requires a successful native CI build')
@@ -36,6 +36,14 @@ def package(artifact, metadata, output, installed_toml, identity_file):
         raise ValueError('CI kernel differs from its build record')
     if '_native_owner_hardware_volume_status' not in symbols(native):
         raise ValueError('native kernel omitted the writable Hardware view')
+    if cpu_compositor:
+        needed = {'_nabu_cpu_compositor_enabled', '_nabu_cpu_compositor_pages_applied',
+                  '_nabu_cpu_compositor_page_mask'}
+        if not needed <= symbols(native).keys() or not build.get('cpu_compositor'):
+            raise ValueError('native kernel omitted the CPU compositor policy')
+        contract = ROOT / 'platform/nabu/macos26/software-compositor/contract.json'
+        if build['cpu_compositor']['contract_sha256'] != sha(contract):
+            raise ValueError('CPU compositor contract differs from the compiled kernel')
     output.mkdir(parents=True, exist_ok=False)
 
     def run(arguments, name):
@@ -97,6 +105,18 @@ def package(artifact, metadata, output, installed_toml, identity_file):
             raise ValueError('expected one unambiguous installed args line')
         match = matches[0]
         text = text[:match.start(2)] + match.group(2) + ' native-gop-display=1' + text[match.end(2):]
+    if cpu_compositor:
+        parsed_args = tomllib.loads(text)['entry'][0]['args'].split()
+        if any(t.startswith('sheng-recovery-ui=') and t != 'sheng-recovery-ui=0' for t in parsed_args):
+            raise ValueError('CPU compositor conflicts with the legacy recovery page policies')
+        if any(t.startswith('nabu-cpu-compositor=') and t != 'nabu-cpu-compositor=1' for t in parsed_args):
+            raise ValueError('CPU compositor boot argument conflicts')
+        if 'nabu-cpu-compositor=1' not in parsed_args:
+            matches = list(re.finditer(r'(?m)^(\s*args\s*=\s*")([^"\n]*)("\s*)$', text))
+            if len(matches) != 1:
+                raise ValueError('expected one installed args line')
+            match = matches[0]
+            text = text[:match.end(2)] + ' nabu-cpu-compositor=1' + text[match.end(2):]
     config_path = candidate / 'EFI/UniXNU/unixnu.toml'
     config_path.write_text(text)
     final_config = tomllib.loads(text)
@@ -112,7 +132,7 @@ def package(artifact, metadata, output, installed_toml, identity_file):
                      'CPU scanout backend', 'local Ethernet identity for original TimeSync'],
         unresolved=['OD first-launch internal connection timeout',
                     'device validation of new services and actual WindowServer presentation'],
-        gpu_acceleration=False, sep_backed=False, network_connectivity=False,
+        cpu_compositor=cpu_compositor, gpu_acceleration=False, sep_backed=False, network_connectivity=False,
         device_tested=False, desktop_verified=False, root_reflash_required=False,
         data_reflash_required=False, esp_logger_allocation_preserved=True,
         payload_sha256={name: sha(payload / name) for name in names},
@@ -138,6 +158,24 @@ adb reboot
 新日志检查 Hardware status、NABU AKS、NabuTimeSyncIdentity、TimeSync、GOP swap；
 继续保存完整日志，以区分 OD 连接、时钟和 GUI 的实际状态。
 '''
+    if cpu_compositor:
+        delivery['implemented'].append('original CompositorSW with BGRA screen/intermediate allocation')
+        delivery['unresolved'].append('device validation of CPU compositor frames and login desktop')
+        readme = '''NABU macOS 26.5 / 25F71 — CPU compositor test candidate
+
+本包保留已实机启动的 2–5 项服务，新增 nabu-cpu-compositor=1。
+通过三个原版缓存代码页的明确开发适配，让 Metal 能力检查返回无设备，
+由原版 WindowServer 选择 CompositorSW，并在最终及中间表面分配前选择 BGRA。
+该改动作用于共享内存代码页；不改根盘上的共享缓存，不提供 Metal/GPU。
+页原始签名和完整 SHA-256 必须匹配，重载时重新验证再应用。
+尚未在 NABU 验证首帧或登录桌面，软件路径的速度也未测定。
+本包不携带 OD 同步队列候选，保留原版 OD 用户态。
+
+TWRP 中备份现有五文件，然后替换 EFI/UniXNU 下五文件，sync 后重启。
+无需重刷 root_image.bin、data.dbr、引导器或分区。不覆盖 XNU2LOG.BIN。
+检查日志 NABU: CPU compositor page 0/1/2 applied、GOP swap，
+以及 WindowServer 不再从 Metal 设备检查退出和实际画面。
+'''
     (output / 'README.txt').write_text(readme)
     (output / 'delivery.json').write_text(json.dumps(delivery, indent=2) + '\n')
     archive = output.with_suffix('.zip')
@@ -159,5 +197,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('artifact', 'metadata', 'output', 'installed-toml', 'identity-file'):
         parser.add_argument('--' + name, type=Path, required=True)
+    parser.add_argument('--cpu-compositor', action='store_true')
     args = parser.parse_args()
-    package(args.artifact, args.metadata, args.output, args.installed_toml, args.identity_file)
+    package(args.artifact, args.metadata, args.output, args.installed_toml, args.identity_file,
+            cpu_compositor=args.cpu_compositor)

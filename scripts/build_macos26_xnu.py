@@ -556,6 +556,12 @@ def prepare() -> dict:
     stage_file(recovery_ui, source / 'osfmk/vm/sheng_recovery_ui.h')
     stage_file(recovery_ui_kernel, source / 'osfmk/vm/sheng_recovery_ui_kernel.h')
     stage_file(recovery_ui_generated, source / 'osfmk/vm/sheng_recovery_ui_pages.h')
+    if BOARD == 'nabu':
+        compositor = PLATFORM / 'software-compositor'
+        for original, staged in (('policy.h', 'nabu_cpu_compositor_policy.h'),
+                                 ('kernel.h', 'nabu_cpu_compositor_kernel.h'),
+                                 ('nabu_cpu_compositor_pages.h', 'nabu_cpu_compositor_pages.h')):
+            stage_file(compositor / original, source / ('osfmk/vm/' + staged))
     from native_language_trace import render as render_language_trace
     language_manifest = ROOT / 'config/macos26-language-trace.json'
     language_generated = OUT / 'sheng_language_trace_pages.h'
@@ -584,10 +590,21 @@ def prepare() -> dict:
                     'pexpert/arm/pe_sheng_framebuffer.h', 'pexpert/arm/pe_sheng_smp_log.h',
                     'pexpert/arm/pe_sheng_qr_encoder.h', 'pexpert/arm/pe_sheng_qr_runtime.h',
                     'pexpert/arm/qrcodegen.h'], check=True)
+    if BOARD == 'nabu':
+        subprocess.run(['git', '-C', source, 'add', '-N',
+                        'osfmk/vm/nabu_cpu_compositor_policy.h',
+                        'osfmk/vm/nabu_cpu_compositor_kernel.h',
+                        'osfmk/vm/nabu_cpu_compositor_pages.h'], check=True)
     record = dict(xnu='12377.121.6', darwin='25.5.0', build='25F71', machine=MACHINE,
                   deployment='macOS 26.5', sources=identities,
                   architecture=ARCH, native_el1_pac=ARCH == 'arm64e',
                   el0_pac_lifecycle_qualified=False,
+                  cpu_compositor=(dict(default_off=True, boot_argument='nabu-cpu-compositor=1',
+                      shared_memory_pages=True, disk_modified=False, runtime_qualified=False,
+                      contract_sha256=sha(PLATFORM / 'software-compositor/contract.json'),
+                      headers_sha256={name: sha(PLATFORM / 'software-compositor' / name)
+                          for name in ('policy.h', 'kernel.h', 'nabu_cpu_compositor_pages.h')})
+                      if BOARD == 'nabu' else None),
                   pac_key_origin='unchanged EL1 firmware handoff banks' if ARCH == 'arm64e' else None,
                   hardware_source_commit=upstream['commit'],
                   patches={str(p.relative_to(ROOT)): sha(p) for p in PATCHES},

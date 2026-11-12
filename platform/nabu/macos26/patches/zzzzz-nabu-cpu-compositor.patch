@@ -1,0 +1,39 @@
+--- a/osfmk/vm/vm_fault.c
++++ b/osfmk/vm/vm_fault.c
+@@ -8904,6 +8904,9 @@
+ #if SHENG && (DEVELOPMENT || DEBUG)
+ #include <vm/sheng_recovery_ui_kernel.h>
+ #endif
++#if defined(ARM64_BOARD_CONFIG_NABU) && SHENG && (DEVELOPMENT || DEBUG)
++#include <vm/nabu_cpu_compositor_kernel.h>
++#endif
+ 
+ void
+ vm_page_validate_cs_mapped_slow(
+@@ -8955,6 +8958,11 @@
+ 	page->vmp_cs_tainted |= tainted;
+ 	page->vmp_cs_nx |= nx;
+ 
++#if defined(ARM64_BOARD_CONFIG_NABU) && SHENG && (DEVELOPMENT || DEBUG)
++	const bool nabu_cpu_page_transformed = nabu_cpu_compositor_page(page, vnode, mo_offset,
++	    validated == VMP_CS_ALL_TRUE && tainted == VMP_CS_ALL_FALSE && nx == VMP_CS_ALL_FALSE);
++#endif
++
+ #if SHENG && (DEVELOPMENT || DEBUG)
+ 	sheng_recovery_ui_page(page, vnode, mo_offset,
+ 	    validated == VMP_CS_ALL_TRUE && tainted == VMP_CS_ALL_FALSE && nx == VMP_CS_ALL_FALSE);
+@@ -8960,7 +8968,13 @@
+ 
+ #if CHECK_CS_VALIDATION_BITMAP
+ 	if (page->vmp_cs_validated == VMP_CS_ALL_TRUE &&
+-	    page->vmp_cs_tainted == VMP_CS_ALL_FALSE) {
++	    page->vmp_cs_tainted == VMP_CS_ALL_FALSE
++#if defined(ARM64_BOARD_CONFIG_NABU) && SHENG && (DEVELOPMENT || DEBUG)
++	    /* A discarded converted page reloads original disk bytes. Force that
++	     * reload through signature validation and the exact-page policy. */
++	    && !nabu_cpu_page_transformed
++#endif
++	    ) {
+ 		vnode_pager_cs_check_validation_bitmap(object->pager,
+ 		    mo_offset,
+ 		    CS_BITMAP_SET);
