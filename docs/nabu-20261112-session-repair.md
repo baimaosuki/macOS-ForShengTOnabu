@@ -79,3 +79,31 @@ network identity alone is not a TimeSync-ready result. WindowServer's clients
 must establish a connection and the panel must receive a genuine userland frame
 with completion before desktop presentation is claimed. Dock/Finder and input
 are subsequent session checkpoints.
+
+## Built candidate
+
+- Source/runtime commit: `bd6d8380b06bd80d9a567a3b874a9ad1265580f3`.
+- Source-only CI 43223481836 passed. It does not produce a linked kernel;
+  the subsequent **full kernel CI 43224981411 passed** with native storage,
+  GOP and desktop owner integration selected.
+- Host checks: **31 passed, 19 subtests passed**.
+- Native UUID: `D6BD9A47-3049-3482-BBD6-60A95E671519`.
+- Native SHA-256: `062109599609a260f15f2d33efb3cb6c07a4837a7cf254465c97e40bd84ba00e`.
+- Final kernel SHA-256: `534ed5ad75c70dee7602a5c03dbac0add384e5625561c333229eff12bacc10b7`.
+- Package: `out/nabu-session-repair/nabu-25F71-session-repair-43224981411.zip`,
+  172177287 bytes, SHA-256
+  `aa4ba6d6b401b7e7160807090ab66dc6f7a6524e0429b7cff2334b72e01f2fec`.
+- Independent prelink verification passed: 1000 pointer samples, all 56031
+  branch relocations, 1000 kernel binding samples; companion registration,
+  executable bytes and resolved pointers also passed.
+- Actual native disassembly confirms remainder multiplied by 1000000 before
+  full-frequency division in both microtime functions. These function bytes,
+  calendar initialization and root visibility function are unchanged in the
+  final prelinked image. The final image includes the named-interface rematch,
+  display progress and session trace strings.
+- Compiled calendar floor: UTC epoch `1794489253`. Final arguments are 462 bytes.
+  ZIP contents/hashes, existing journal token and unchanged Data seed verified.
+
+Verification output is saved in `out/nabu-session-repair/delivery-verification.json`,
+`native-time-and-root.disasm`, `host-tests.txt` and the package's `verify.log`.
+No ESP write, device reboot or desktop verification was performed in this change.
