@@ -14,6 +14,10 @@ static const char *const nabu_minimal_boot_allowlist[] = {
     "com.apple.distnoted.xpc.agent",
     "com.apple.configd",
     "com.apple.powerd",
+    /* 25F71 powerd initializes ResourceHint synchronously through this job's
+     * com.apple.powerexperienced.resourceusage Mach service. GX snapshots at
+     * 199s/259s show the wait while our gate holds this exact proxy label. */
+    "com.apple.powerexperienced",
     "com.apple.xpc.roleaccountd",
     "com.apple.smd",
     /* Paired 25F71 job labels required before GUI/session initialization.
@@ -86,6 +90,7 @@ nabu_minimal_boot_allowed(const char *label)
 
 #ifndef NABU_MINIMAL_BOOT_POLICY_ONLY
 volatile unsigned int nabu_minimal_boot_parked;
+volatile unsigned int nabu_minimal_boot_admitted;
 volatile unsigned int nabu_minimal_boot_hold_failures;
 
 static bool
@@ -116,7 +121,23 @@ nabu_minimal_boot_apply(proc_t p, struct image_params *imgp, task_t task)
 {
     if (strcmp(p->p_comm, "xpcproxy") || !nabu_minimal_boot_enabled()) return 0;
     const char *label = nabu_minimal_boot_label(imgp);
-    if (label && nabu_minimal_boot_allowed(label)) return 0;
+    if (label && nabu_minimal_boot_allowed(label)) {
+        /* Independent credit: a storm of parked jobs must not hide admission
+         * of a later GUI/PM dependency. These are decisions, not readiness. */
+        unsigned count = os_atomic_inc_orig(&nabu_minimal_boot_admitted, relaxed) + 1;
+        if (count <= 64) {
+            char line[256];
+            int length = snprintf(line, sizeof(line),
+                "NABU-MINIMAL: allow pid=%d ppid=%d label=%s seq=%u\n",
+                proc_getpid(p), proc_ppid(p), label, count);
+            if (length > 0 && (size_t)length < sizeof(line))
+                nabu_capture_append(line, (unsigned)length);
+        } else if (count == 65) {
+            static const char capped[] = "NABU-MINIMAL: allow-record-limit=64 further-allow-records-suppressed\n";
+            nabu_capture_append(capped, sizeof(capped) - 1);
+        }
+        return 0;
+    }
 
     /* This is a kernel hold, independent of POSIX_SPAWN_START_SUSPENDED and
      * user_stop_count. launchd's normal resume cannot consume it. Keep the

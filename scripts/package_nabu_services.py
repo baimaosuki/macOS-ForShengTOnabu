@@ -355,9 +355,12 @@ LS 实机第二轮栈已落在 CFIterateDirectory/opendir；尚未捕获具体�
 包括 loginwindow.UUID、SecurityAgent 的实例和用户指定的核心服务命名空间。
 补回 sandboxd、iconservices 及 CoreServices 实际等待的 diskarbitrationd；
 完整放行 tccd、lsd、iconservicesd/iconservicesagent 的系统/用户任务与动态代理标签。
+放行 powerd 实际同步依赖的 com.apple.powerexperienced（resourceusage 服务）；
+GX 两次现场栈均停在此同步 XPC；该任务此前被门控挂起。实机效果仍待验证。
 cloudd、apsd、mds、trustd、syspolicyd、endpointsecurityd、keybagd 等继续拦截。
 其他 xpcproxy 在进入用户态前施加内核 task hold：保持 PID 存活，避免普通退出触发
-KeepAlive 重拉；正常 task resume / SIGCONT 不释放该独立内核 hold。记录前64次挂起。
+KeepAlive 重拉；正常 task resume / SIGCONT 不释放该独立内核 hold。
+放行和挂起各有独立的64次日志额度；放行记录不等于服务已就绪。
 这不是按进程名杀服务；直接执行且未经过 xpcproxy 的服务不在该门控范围。
 被屏蔽服务的客户端仍可能等待或超时；本包用于实机验证最小服务集，未验证桌面。
 

@@ -16,7 +16,7 @@ typedef int kern_return_t;
 #define os_atomic_inc(p, order) (++*(p))
 #define os_atomic_inc_orig(p, order) ((*(p))++)
 static unsigned present, value, logs, holds, parent_waits;
-static char journal[20000];
+static char journal[40000];
 static int PE_parse_boot_argn(const char *name, void *out, unsigned size) {
     assert(!strcmp(name, "nabu-minimal-boot") && size == sizeof(uint32_t));
     if (present) *(uint32_t *)out = value;
@@ -61,11 +61,13 @@ int main(void) {
     const char *session_dependencies[]={"com.apple.bsd.dirhelper","com.apple.logind",
         "com.apple.mobile.usermanagerd","com.apple.UserEventAgent-System",
         "com.apple.UserEventAgent-LoginWindow","com.apple.UserEventAgent-Aqua",
-        "com.apple.xpc.smd","com.apple.loginwindow"};
+        "com.apple.xpc.smd","com.apple.loginwindow",
+        /* GX: real powerd ResourceHint initialization waits for this job. */
+        "com.apple.powerexperienced"};
     for(unsigned i=0;i<sizeof(session_dependencies)/sizeof(*session_dependencies);i++) {
         char args[256];memcpy(args,"xpcproxy",9);strcpy(args+9,session_dependencies[i]);
         struct image_params allow=image(args,10+strlen(args+9),2);
-        assert(!nabu_minimal_boot_apply(&proxy,&allow,&task) && !holds && !logs);
+        assert(!nabu_minimal_boot_apply(&proxy,&allow,&task) && !holds);
     }
     /* Real MS capture regression and the explicitly requested namespaces. */
     const char *dynamic_jobs[]={
@@ -80,7 +82,7 @@ int main(void) {
     for(unsigned i=0;i<sizeof(dynamic_jobs)/sizeof(*dynamic_jobs);i++) {
         char args[256];memcpy(args,"xpcproxy",9);strcpy(args+9,dynamic_jobs[i]);
         struct image_params allow=image(args,10+strlen(args+9),2);
-        assert(!nabu_minimal_boot_apply(&proxy,&allow,&task) && !holds && !logs);
+        assert(!nabu_minimal_boot_apply(&proxy,&allow,&task) && !holds);
     }
     /* Fully admit system/user service jobs, aliases and dynamic proxy labels. */
     const char *xpc_services[]={"com.apple.tccd", "com.apple.tccd.system",
@@ -93,7 +95,7 @@ int main(void) {
     for(unsigned i=0;i<sizeof(xpc_services)/sizeof(*xpc_services);i++) {
         char args[256];memcpy(args,"xpcproxy",9);strcpy(args+9,xpc_services[i]);
         struct image_params allow=image(args,10+strlen(args+9),2);
-        assert(!nabu_minimal_boot_apply(&proxy,&allow,&task) && !holds && !logs);
+        assert(!nabu_minimal_boot_apply(&proxy,&allow,&task) && !holds);
     }
     const char *blocked[]={"com.apple.cloudd","com.apple.apsd","com.apple.metadata.mds",
         "com.apple.mds_stores","com.apple.trustd","com.apple.syspolicyd",
@@ -106,7 +108,8 @@ int main(void) {
         "com.apple.bluetoothd", "com.apple.endpointsecurity.endpointsecurityd",
         "com.apple.mobile.softwareupdated", "com.apple.loginwindowFake.session",
         "com.apple.coreservicesFake.example", "com.apple.cfprefsdFake.example",
-        "com.apple.distnotedFake.example", "com.apple.iconservicesFake.example"};
+        "com.apple.distnotedFake.example", "com.apple.iconservicesFake.example",
+        "com.apple.powerexperiencedFake", "com.apple.powerexperienced.extra"};
     for(unsigned i=0;i<sizeof(blocked)/sizeof(*blocked);i++) {
         char args[256];memcpy(args,"xpcproxy",9);strcpy(args+9,blocked[i]);
         struct image_params block=image(args,10+strlen(args+9),2);
@@ -131,8 +134,16 @@ int main(void) {
     /* A user resume drains only user holds; independent kernel hold persists. */
     task.user_holds=1;task.user_holds--;assert(task.kernel_holds && !task.user_holds);
     for(unsigned i=0;i<100;i++) assert(!nabu_minimal_boot_apply(&proxy,&im,&task));
-    assert(logs==65 && nabu_minimal_boot_parked>100 && !parent_waits);
+    assert(logs==130 && nabu_minimal_boot_parked>100 && !parent_waits);
     assert(strstr(journal,"further-records-suppressed"));
+    assert(strstr(journal,"allow-record-limit=64 further-allow-records-suppressed"));
+    /* An exhausted park budget does not consume independent allow credit. */
+    nabu_minimal_boot_admitted=0;
+    const char pm[]="xpcproxy\0com.apple.powerexperienced\0";
+    im=image(pm,sizeof(pm)-1,2);before=holds;unsigned log_before=logs;
+    assert(!nabu_minimal_boot_apply(&proxy,&im,&task) && holds==before);
+    assert(logs==log_before+1 && nabu_minimal_boot_admitted==1);
+    assert(strstr(journal,"allow pid=101 ppid=44 label=com.apple.powerexperienced seq=1"));
     puts("minimal boot policy: exact jobs, requested namespaces, noncore denies, hold and bounded log passed");
     return 0;
 }
