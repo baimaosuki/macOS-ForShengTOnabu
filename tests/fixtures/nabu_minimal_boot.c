@@ -67,6 +67,21 @@ int main(void) {
         struct image_params allow=image(args,10+strlen(args+9),2);
         assert(!nabu_minimal_boot_apply(&proxy,&allow,&task) && !holds && !logs);
     }
+    /* Real MS capture regression and the explicitly requested namespaces. */
+    const char *dynamic_jobs[]={
+        "com.apple.loginwindow.49A8D542-60C9-45F4-B0A0-7FECD5AD98D4",
+        "com.apple.security.agent.login.49a8d542-60c9-45f4-b0a0-7fecd5ad98d4",
+        "com.apple.loginwindow.session", "com.apple.WindowServer.session",
+        "com.apple.SecurityAgent.session", "com.apple.coreservices.example",
+        "com.apple.cfprefsd.xpc.agent.session", "com.apple.distnoted.xpc.agent.session",
+        "com.apple.iconservices.iconservicesagent.session", "com.apple.tccd.system.session",
+        "com.apple.sandboxd", "com.apple.diskarbitrationd",
+        "com.apple.iconservices.iconservicesd", "com.apple.iconservices.iconservicesagent"};
+    for(unsigned i=0;i<sizeof(dynamic_jobs)/sizeof(*dynamic_jobs);i++) {
+        char args[256];memcpy(args,"xpcproxy",9);strcpy(args+9,dynamic_jobs[i]);
+        struct image_params allow=image(args,10+strlen(args+9),2);
+        assert(!nabu_minimal_boot_apply(&proxy,&allow,&task) && !holds && !logs);
+    }
     const char *blocked[]={"com.apple.cloudd","com.apple.apsd","com.apple.metadata.mds",
         "com.apple.mds_stores","com.apple.trustd","com.apple.syspolicyd",
         "com.apple.endpointsecurityd","com.apple.Kerberos.digest-service",
@@ -74,7 +89,11 @@ int main(void) {
         "com.apple.duetexpertd","com.apple.contextstored","com.apple.locationd",
         "com.apple.airportd","com.apple.audio.coreaudiod","com.apple.appleh13camerad",
         "com.apple.symptomsd","com.apple.watchdogd","com.apple.lsd.extra",
-        "com.apple.unknown", "com.apple.security.agent.bad"};
+        "com.apple.unknown", "com.apple.mobile.keybagd", "com.apple.keybagd",
+        "com.apple.bluetoothd", "com.apple.endpointsecurity.endpointsecurityd",
+        "com.apple.mobile.softwareupdated", "com.apple.loginwindowFake.session",
+        "com.apple.coreservicesFake.example", "com.apple.cfprefsdFake.example",
+        "com.apple.distnotedFake.example", "com.apple.iconservicesFake.example"};
     for(unsigned i=0;i<sizeof(blocked)/sizeof(*blocked);i++) {
         char args[256];memcpy(args,"xpcproxy",9);strcpy(args+9,blocked[i]);
         struct image_params block=image(args,10+strlen(args+9),2);
@@ -101,6 +120,6 @@ int main(void) {
     for(unsigned i=0;i<100;i++) assert(!nabu_minimal_boot_apply(&proxy,&im,&task));
     assert(logs==65 && nabu_minimal_boot_parked>100 && !parent_waits);
     assert(strstr(journal,"further-records-suppressed"));
-    puts("minimal boot policy: exact whitelist, hold, malformed argv, off switch and bounded log passed");
+    puts("minimal boot policy: exact jobs, requested namespaces, noncore denies, hold and bounded log passed");
     return 0;
 }

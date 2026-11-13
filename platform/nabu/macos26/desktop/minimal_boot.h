@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later
- * Opt-in development policy. Match launchd job labels exactly, never prefixes.
+ * Opt-in development policy. Exact jobs plus explicitly selected namespaces.
  */
 #ifndef NABU_MINIMAL_BOOT_H
 #define NABU_MINIMAL_BOOT_H
@@ -40,9 +40,28 @@ static const char *const nabu_minimal_boot_allowlist[] = {
     "com.apple.runningboardd",
     "com.apple.tccd",
     "com.apple.tccd.system",
+    "com.apple.sandboxd",
+    "com.apple.iconservices.iconservicesd",
+    "com.apple.iconservices.iconservicesagent",
+    /* Native CoreServices FS initialization waits for Disk Arbitration. */
+    "com.apple.diskarbitrationd",
     /* Paired 25F71 SecurityAgent job labels, not executable/service guesses. */
     "com.apple.security.agent",
     "com.apple.security.agent.login",
+};
+
+/* Explicitly requested namespaces. In particular MultipleInstances produces
+ * loginwindow.<UUID> and security.agent.login.<UUID> proxy job labels. */
+static const char *const nabu_minimal_boot_allow_prefixes[] = {
+    "com.apple.loginwindow.",
+    "com.apple.WindowServer",
+    "com.apple.SecurityAgent",
+    "com.apple.security.agent",
+    "com.apple.coreservices.",
+    "com.apple.cfprefsd.",
+    "com.apple.distnoted.",
+    "com.apple.iconservices.",
+    "com.apple.tccd",
 };
 
 static inline bool
@@ -51,6 +70,11 @@ nabu_minimal_boot_allowed(const char *label)
     for (unsigned i = 0; i < sizeof(nabu_minimal_boot_allowlist) /
         sizeof(nabu_minimal_boot_allowlist[0]); ++i) {
         if (!strcmp(label, nabu_minimal_boot_allowlist[i])) return true;
+    }
+    for (unsigned i = 0; i < sizeof(nabu_minimal_boot_allow_prefixes) /
+        sizeof(nabu_minimal_boot_allow_prefixes[0]); ++i) {
+        const char *prefix = nabu_minimal_boot_allow_prefixes[i];
+        if (!strncmp(label, prefix, strlen(prefix))) return true;
     }
     return false;
 }

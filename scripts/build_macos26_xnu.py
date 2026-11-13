@@ -634,6 +634,8 @@ def prepare() -> dict:
                       lifecycle_diagnostics_patch_sha256=sha(PLATFORM / 'desktop/lifecycle-diagnostics.patch'),
                       minimal_boot=dict(default_off=True, boot_argument='nabu-minimal-boot=1',
                           header_sha256=sha(PLATFORM / 'desktop/minimal_boot.h'),
+                          matching='exact job labels and explicitly requested namespace prefixes',
+                          instance_namespaces=['com.apple.loginwindow.', 'com.apple.security.agent'],
                           patch_sha256=sha(PLATFORM / 'desktop/minimal-boot.patch'),
                           blocked_policy='kernel task hold before xpcproxy userspace entry; proxy stays alive',
                           log_limit=64, device_verified=False),

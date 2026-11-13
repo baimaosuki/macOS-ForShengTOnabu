@@ -351,8 +351,10 @@ LS 实机第二轮栈已落在 CFIterateDirectory/opendir；尚未捕获具体�
     if minimal_boot:
         readme = '''NABU 25F71 / 8-core Minimal GUI Boot test ESP
 
-本包启用 nabu-minimal-boot=1。仅放行 minimal_boot.h 中的精确 xpcproxy 服务标签，
-包括用户要求的最小服务及原版 SecurityAgent 的 com.apple.security.agent / .login。
+本包启用 nabu-minimal-boot=1。放行 minimal_boot.h 中的指定 xpcproxy 服务标签及前缀，
+包括 loginwindow.UUID、SecurityAgent 的实例和用户指定的核心服务命名空间。
+补回 sandboxd、iconservices 及 CoreServices 实际等待的 diskarbitrationd；
+cloudd、apsd、mds、trustd、syspolicyd、endpointsecurityd、keybagd 等继续拦截。
 其他 xpcproxy 在进入用户态前施加内核 task hold：保持 PID 存活，避免普通退出触发
 KeepAlive 重拉；正常 task resume / SIGCONT 不释放该独立内核 hold。记录前64次挂起。
 这不是按进程名杀服务；直接执行且未经过 xpcproxy 的服务不在该门控范围。

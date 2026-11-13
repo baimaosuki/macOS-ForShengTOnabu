@@ -1,8 +1,8 @@
 # NABU Minimal GUI Boot test ESP
 
-用户要求以可回退的白名单隔离并发服务负载。boot-arg `nabu-minimal-boot=1`精确开启；缺省、0或其他值不启用。初版25个指定标签加两个原版SecurityAgent标签，共27个；实机暴露会话依赖缺失后，按下面证据补7个精确job标签，现共34个。
+用户要求以可回退的白名单隔离并发服务负载。boot-arg `nabu-minimal-boot=1`精确开启；缺省、0或其他值不启用。初版25个指定标签加两个原版SecurityAgent标签，共27个；实机暴露会话依赖缺失后，按下面证据补7个精确job标签，上一版共34个；最新MS实机回归证明动态实例仍被误拦，本版为38个精确标签加9个显式前缀，见末节。
 
-实现位于`platform/nabu/macos26/desktop/minimal_boot.h`与`minimal-boot.patch`。构建只追加补丁，不修改既有integrated/upstream固定hash。门控位于kern_exec.c原生POSIX_SPAWN_START_SUSPENDED处理前，使用成功复制的kernel argv[1]，不重复读取父任务可变的userspace argv。只处理实际p_comm=xpcproxy的新映像，标签精确比较；未知、缺失、过长或截断标签保持代理挂起。
+实现位于`platform/nabu/macos26/desktop/minimal_boot.h`与`minimal-boot.patch`。构建只追加补丁，不修改既有integrated/upstream固定hash。门控位于kern_exec.c原生POSIX_SPAWN_START_SUSPENDED处理前，使用成功复制的kernel argv[1]，不重复读取父任务可变的userspace argv。只处理实际p_comm=xpcproxy的新映像，标签先精确比较，再对9个指定命名空间使用strncmp前缀比较；未知、缺失、过长或截断标签保持代理挂起。
 
 被阻止的任务调用原生`task_hold_and_wait(task,false)`，对新的子任务增加kernel suspend_count；不会增加user_stop_count。因此launchd原有START_SUSPENDED的resume或SIGCONT不能释放这份独立内核hold。父spawn任务不被hold，继续原生属性、签名、端口绑定和返回。任务停在进入dyld/xpcproxy用户态前，不执行服务主体；PID存活，避免正常退出引发KeepAlive循环。代理仍可被原生终止/系统重启清除；若launchd另有显式kill/超时策略，仍需实机确认，未伪造check-in或服务就绪。
 
@@ -12,7 +12,7 @@
 
 打包新增`--minimal-boot`：核对编译元数据里的header/patch SHA256和native符号后才写入唯一`nabu-minimal-boot=1`，继续保持cpus8、原ADT/TimeSync/CPU显示、签名trustcache和logger token；ZIP只携带ESP五个替换文件及说明，不改root、Data和原日志。删除参数或设为0关闭；备份旧五文件可回退。
 
-测试：生产头文件ASan/UBSan覆盖27个allow标签、22个deny/近似标签、非proxy映像、无开关/0/其他值、非法标签、失败hold、非PID1父任务、64条限流；真实准备XNU上应用patch，并核对原task.c中kernel hold/user resume分离与current thread不自等待的合同。完整source prepare和Intel ARM64 CI编译、最终机器码检查、ZIP与ADT等交付验证另记build-plan。
+测试：生产头文件ASan/UBSan覆盖全部静态标签、实际UUID实例、指定前缀及非核心deny/近似标签、非proxy映像、无开关/0/其他值、非法标签、失败hold、非PID1父任务、64条限流；真实准备XNU上应用patch，并核对原task.c中kernel hold/user resume分离与current thread不自等待的合同。完整source prepare和Intel ARM64 CI编译、最终机器码检查、ZIP与ADT等交付验证另记build-plan。
 
 这是用户指定的最小依赖试验，不承诺列出的集合完整，屏蔽trustd等服务可能令某些允许服务仍等待。没有以白名单消除全部SEP调用、修复LS store、5秒启动或实机点亮的结果声明。
 
@@ -61,3 +61,39 @@ send size0x18、receive limit0x2c、timeout0；它构造的请求ID为47213(0xb8
 ASan/UBSan生产头测试增加独立的8标签回归表（包括既有loginwindow），
 防止仅遍历生产数组的测试漏掉必要标签被删除。新内核/ESP仍需实机验证，
 不能预先声称上述7项已组成完整依赖闭包或已经解除原来的LS等待。
+
+## MS 实机动态实例误拦修复（本版）
+
+XNU2LOG-ms.BIN SHA256为1fd82e60be9c4540deb85b4e1307e3e6fb73b5c688f771ba1fe870036cb2f5b6。
+双slot有效，最新seq9770，boot_id=71518641000000004d25000000000000；
+正文634188字节，raw SHA256=c82d6d4d7619f9a9642571fef7092f40641eeeaf38c58689724151e5d19d25d8。
+完整3922行正文及13组栈审阅见out/nabu-minimal-instance-repair/full-log-review.json。
+
+原TXT第1536行直接记录：
+```
+NABU-MINIMAL: parked pid=109 ppid=1 label=com.apple.loginwindow.49A8D542-60C9-45F4-B0A0-7FECD5AD98D4 mode=kernel-hold seq=60
+```
+原plist的基础label不等于MultipleInstances运行时label；前版只匹配基础label的规则确实误拦了loginwindow本尊。
+原SecurityAgent登录job同样有MultipleInstances，因此同时放行其实际小写security.agent命名空间。
+按用户明确要求，本版使用以下9个前缀，而不是仅接受canonical UUID：
+```
+com.apple.loginwindow.
+com.apple.WindowServer
+com.apple.SecurityAgent
+com.apple.security.agent
+com.apple.coreservices.
+com.apple.cfprefsd.
+com.apple.distnoted.
+com.apple.iconservices.
+com.apple.tccd
+```
+
+另外补入sandboxd、iconservices.iconservicesd、iconservices.iconservicesagent、diskarbitrationd四个精确job，共38项。
+前三项为用户要求且MS中sandboxd/iconservicesd确有parked；最后一项由同轮coreservicesd两个线程的
+DAServerSessionCreate/DASessionCreate栈和diskarbitrationd被parked共同支持。
+MS中WS已走过旧dirhelper阻塞，现停在RBSConnection握手/HID会话初始化；不把已放行的runningboardd推定为已死。
+
+其余任务继续default deny并施加独立kernel hold。测试明确保留cloudd、apsd、mds、trustd、
+syspolicyd、endpointsecurityd、keybagd、contextstored、bluetoothd、locationd、coreaudiod、softwareupdated拒绝，
+并覆盖相似但不属于带点命名空间的loginwindowFake/coreservicesFake/cfprefsdFake等标签。
+这是修复门控引入的确定回归及已证实缺失的DA依赖；不声明已解决原LS等待或真机桌面已显示。

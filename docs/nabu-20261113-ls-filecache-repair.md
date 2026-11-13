@@ -54,3 +54,15 @@ UserEventAgent-System也被挂起。原loginwindow标签仍是com.apple.loginwin
 现按原25F71 job定义补7项，共34个精确标签；详细地址、端口及原始日志hash见
 docs/nabu-20261113-minimal-gui-boot.md的实机回归节。
 本次先修复隔离试验引入的前置依赖阻断，不把它冒充为原LS建库等待已修复。
+
+
+## MS 后续：动态会话 label 误拦
+
+完整校验双slot及634188字节MS正文（seq9770）后，确认pid109实际代理标签是
+com.apple.loginwindow.49A8D542-60C9-45F4-B0A0-7FECD5AD98D4，已被前版精确基础标签规则parked。
+MultipleInstances的运行时UUID后缀必须放行；本版按用户要求加入9个显式命名空间strncmp匹配，
+补sandboxd/两个iconservices/原生Disk Arbitration共4个精确标签，现38项加9前缀。
+coreservicesd的两个线程分别在DAServerSessionCreate→DASessionCreate→_FSNode_VolumeMounted和
+_FSGetDiskArbSession→FSScheduleFileVolumeOperations等待，而diskarbitrationd已parked，故同批恢复此依赖。
+MS中WS已不在dirhelper，现是RBSConnection握手/HID初始化；没有实机证据表明原FileCache/LS根因已修。
+完整hash、实例标签和前缀清单见nabu-20261113-minimal-gui-boot.md最新节。
