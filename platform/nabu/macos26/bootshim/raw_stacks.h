@@ -26,6 +26,10 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <sys/wait.h>
+/* Exported by the original libsystem_kernel and used by original sample.
+ * Public SDKs do not all expose the BSD read-port declaration. This exact
+ * prototype is the matching XNU bsd/sys/proc_private.h declaration. */
+extern int task_read_for_pid(unsigned int, int, unsigned int *);
 #endif
 
 #define NABU_RAW_MAX_FRAMES 32u
