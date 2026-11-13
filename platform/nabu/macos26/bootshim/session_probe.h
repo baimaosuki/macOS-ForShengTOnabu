@@ -4,11 +4,10 @@
 #include "nabu_session_probe_script.h"
 
 static int
-nabu_session_probe_enabled(void)
+nabu_probe_bootarg_enabled(const char *arg)
 {
     char args[2048];
     size_t length = sizeof(args);
-    const char *arg = "nabu-session-probe=1";
     if (sysctlbyname("kern.bootargs", args, &length, NULL, 0) != 0 ||
         length == 0 || length > sizeof(args)) return 0;
     args[length - 1] = '\0';
@@ -17,6 +16,12 @@ nabu_session_probe_enabled(void)
         if ((p == args || p[-1] == ' ') && (p[n] == '\0' || p[n] == ' ')) return 1;
     }
     return 0;
+}
+
+static int
+nabu_session_probe_enabled(void)
+{
+    return nabu_probe_bootarg_enabled("nabu-session-probe=1");
 }
 
 static int
@@ -74,7 +79,9 @@ nabu_install_session_probe(void)
     if (!error) error = posix_spawn_file_actions_addopen(&actions, 2, "/dev/console", O_WRONLY, 0);
     pid_t pid = -1;
     char *arguments[] = {"/bin/sh", "/private/var/db/nabu-session-probe.sh", NULL};
-    char *environment[] = {"PATH=/usr/bin:/bin:/usr/sbin:/sbin", "HOME=/var/root", NULL};
+    char *environment[] = {"PATH=/usr/bin:/bin:/usr/sbin:/sbin", "HOME=/var/root", NULL, NULL};
+    if (nabu_probe_bootarg_enabled("nabu-session-symbols=1"))
+        environment[2] = "NABU_SESSION_SYMBOLS=1";
     if (!error) error = posix_spawn(&pid, "/bin/sh", &actions, &attributes, arguments, environment);
     posix_spawnattr_destroy(&attributes);
     posix_spawn_file_actions_destroy(&actions);

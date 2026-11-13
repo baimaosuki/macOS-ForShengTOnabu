@@ -59,7 +59,10 @@ static int fixture_spawn(pid_t *pid,const char *path,const posix_spawn_file_acti
     assert(!strcmp(path,"/bin/sh")&&!strcmp(args[0],path));
     assert(!strcmp(args[1],"/private/var/db/nabu-session-probe.sh")&&!args[2]);
     assert(!strcmp(env[0],"PATH=/usr/bin:/bin:/usr/sbin:/sbin"));
-    assert(!strcmp(env[1],"HOME=/var/root")&&!env[2]);
+    assert(!strcmp(env[1],"HOME=/var/root"));
+    if (getenv("EXPECT_SYMBOLS"))
+        assert(env[2]&&!strcmp(env[2],"NABU_SESSION_SYMBOLS=1")&&!env[3]);
+    else assert(!env[2]);
     if(getenv("SPAWN_FAIL"))return EACCES;
     /* Execute the real installed script. Stop at its first delay after its
      * actual start marker, without running macOS sampling tools on Linux. */
@@ -93,8 +96,17 @@ int main(void) {
     assert (tmp_path / 'nabu-session-probe.sh').read_text() == script
     assert (tmp_path / 'nabu-session-probe.sh').stat().st_mode & 0o777 == 0o600
     console = (tmp_path / 'console.txt').read_text()
-    assert 'NABU-SESSION-PROBE started pid=' in console and 'version=5' in console
+    assert 'NABU-SESSION-PROBE started pid=' in console and 'version=6' in console
     assert 'NABU-SESSION-PROBE shell exit=0' in console
+    for args, enabled in (
+        ('nabu-session-probe=1 nabu-session-symbols=1', True),
+        ('nabu-session-probe=1 nabu-session-symbols=10', False),
+        ('nabu-session-probe=1 x-nabu-session-symbols=1', False),
+    ):
+        env = dict(os.environ, PROBE_ARGS=args)
+        if enabled:
+            env['EXPECT_SYMBOLS'] = '1'
+        subprocess.run([executable], cwd=tmp_path, env=env, check=True, capture_output=True)
     assert not (tmp_path / 'org.nabu.session-probe.plist').exists()
     result = subprocess.run([executable], cwd=tmp_path,
         env=dict(os.environ, PROBE_ARGS='nabu-session-probe=1', SPAWN_FAIL='1'),
@@ -155,7 +167,14 @@ echo "sample diagnostic preserved"
     script += '\nsnapshot 1\n'
     path = tmp_path / 'run.sh'
     path.write_text(script)
-    result = subprocess.run(['/bin/sh', str(path)], capture_output=True, text=True, timeout=10)
+    # Default mode never invokes ps/sample/launchctl: only the raw watcher.
+    default = subprocess.run(['/bin/sh', str(path)], capture_output=True, text=True,
+                             timeout=10, env=dict(os.environ, NABU_SESSION_SYMBOLS='0'))
+    assert default.returncode == 0 and 'sample-skipped reason=online-symbols-disabled' in default.stdout
+    assert 'raw-watcher status=0' in default.stdout
+    assert not counter.exists() and not invocations.exists()
+    result = subprocess.run(['/bin/sh', str(path)], capture_output=True, text=True,
+                            timeout=10, env=dict(os.environ, NABU_SESSION_SYMBOLS='1'))
     assert result.returncode == 0, result.stderr
     assert int(counter.read_text()) >= 2
     assert invocations.read_text().splitlines() == ['88', '123', '151', '120']

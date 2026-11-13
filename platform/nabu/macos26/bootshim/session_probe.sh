@@ -3,7 +3,7 @@
 PATH=/usr/bin:/bin:/usr/sbin:/sbin
 export PATH
 umask 077
-echo "NABU-SESSION-PROBE started pid=$$ version=5"
+echo "NABU-SESSION-PROBE started pid=$$ version=6"
 trap 'echo "NABU-SESSION-PROBE shell exit=$?"' 0
 
 # Diagnostics must not block later samples. Keep child output off the console
@@ -53,6 +53,13 @@ snapshot()
     # symbol processing. Every actual raw record uses fd2 single-line writes.
     "$shim" --nabu-raw-stacks --watch >"$reports/nabu-raw-stacks.txt" 2>&1 &
     raw_watcher=$!
+    if [ "${NABU_SESSION_SYMBOLS:-0}" != 1 ]; then
+        echo "NABU-SESSION-PROBE sample-skipped reason=online-symbols-disabled enable=nabu-session-symbols=1"
+        wait "$raw_watcher"
+        echo "NABU-SESSION-PROBE raw-watcher status=$? report=$reports/nabu-raw-stacks.txt"
+        echo "NABU-SESSION-PROBE end round=$1"
+        return
+    fi
     sampled=" "
     # Mount phase 2 precedes Early boot complete. A fixed 15-second delay is
     # not evidence that loginwindow or WindowServer exists. Sample each real

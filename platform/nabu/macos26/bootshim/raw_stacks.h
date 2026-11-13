@@ -50,7 +50,7 @@ nabu_raw_printf(const char *format, ...)
     va_start(arguments, format);
     static const char prefix[] = "NABU-RAWSTACK ";
     int length = snprintf(line, sizeof(line),
-        "NABU-RAWSTACK target_pid=%ld round=%u t_ns=%" PRIu64 " ",
+        "NABU-RAWSTACK target_pid=%ld round=%u t_ns=%" PRIu64 " clock=mach-uptime ",
         nabu_raw_pid, nabu_raw_round, nabu_raw_timestamp_ns);
     if (!strncmp(format, prefix, sizeof(prefix) - 1))
         format += sizeof(prefix) - 1;
@@ -275,7 +275,7 @@ static uint64_t
 nabu_raw_clock_ns(void)
 {
     struct timespec now;
-    if (clock_gettime(CLOCK_MONOTONIC, &now)) return 0;
+    if (clock_gettime(CLOCK_UPTIME_RAW, &now)) return 0;
     return (uint64_t)now.tv_sec * UINT64_C(1000000000) + (uint64_t)now.tv_nsec;
 }
 
@@ -332,11 +332,12 @@ nabu_probe_relay(const char *name)
 static int
 nabu_raw_watch(void)
 {
-    const char *names[] = {"opendirectoryd", "loginwindow", "WindowServer"};
-    unsigned rounds[3] = {0}, done = 0;
-    uint64_t first[3] = {0}, started = nabu_raw_clock_ns();
-    printf("NABU-RAWSTACK watch begin timeout=480 polling_ms=500 rounds=2 second_after_discovery=150\n");
-    while (done != 7 && nabu_raw_clock_ns() - started < UINT64_C(480000000000)) {
+    const char *names[] = {"opendirectoryd", "loginwindow", "WindowServer", "lsd"};
+    unsigned rounds[4] = {0}, done = 0, observed = 0;
+    uint64_t first[4] = {0}, started = nabu_raw_clock_ns();
+    printf("NABU-RAWSTACK watch begin timeout=480 polling_ms=500 rounds=3 after_discovery=0,150,300\n");
+    while ((done & (7u | (observed & 8u))) != (7u | (observed & 8u)) &&
+        nabu_raw_clock_ns() - started < UINT64_C(480000000000)) {
         int mib[] = {CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0};
         size_t bytes = 0;
         if (!sysctl(mib, 4, NULL, &bytes, NULL, 0) && bytes && bytes <= 8 * 1024 * 1024) {
@@ -346,13 +347,14 @@ nabu_raw_watch(void)
                 bytes = capacity;
                 if (!sysctl(mib, 4, list, &bytes, NULL, 0) && bytes <= capacity && !(bytes % sizeof(*list))) {
                     for (size_t i = 0; i < bytes / sizeof(*list); ++i) {
-                        for (unsigned n = 0; n < 3; ++n) {
+                        for (unsigned n = 0; n < 4; ++n) {
                             uint64_t now = nabu_raw_clock_ns();
                             if (!now || (done & (1u << n)) ||
-                                (rounds[n] && now - first[n] < UINT64_C(150000000000)) ||
+                                (rounds[n] && now - first[n] < (uint64_t)rounds[n] * UINT64_C(150000000000)) ||
                                 list[i].kp_proc.p_pid <= 1 ||
                                 strncmp(list[i].kp_proc.p_comm, names[n], sizeof(list[i].kp_proc.p_comm)))
                                 continue;
+                            observed |= 1u << n;
                             nabu_raw_pid = list[i].kp_proc.p_pid;
                             nabu_raw_round = rounds[n] + 1;
                             nabu_raw_timestamp_ns = now;
@@ -372,7 +374,7 @@ nabu_raw_watch(void)
                                     waited > 0 && WIFSIGNALED(status) ? WTERMSIG(status) : 0,
                                     waited < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0);
                                 if (!rounds[n]) first[n] = now;
-                                if (++rounds[n] >= 2) done |= 1u << n;
+                                if (++rounds[n] >= 3) done |= 1u << n;
                             } else {
                                 printf("NABU-RAWSTACK watch fork errno=%d\n", errno);
                             }
@@ -386,11 +388,12 @@ nabu_raw_watch(void)
         } else {
             printf("NABU-RAWSTACK watch sysctl-size errno=%d bytes=%zu\n", errno, bytes);
         }
-        if (done != 7)
+        if ((done & (7u | (observed & 8u))) != (7u | (observed & 8u)))
             usleep(500000);
     }
-    printf("NABU-RAWSTACK watch end observed_mask=%u required_mask=7\n", done);
-    return done == 7 ? 0 : 1;
+    if (!(observed & 8u)) printf("NABU-RAWSTACK watch optional-not-observed target=lsd\n");
+    printf("NABU-RAWSTACK watch end observed_mask=%u completed_mask=%u required_mask=7 optional_mask=8\n", observed, done);
+    return (done & 7u) == 7u ? 0 : 1;
 }
 #endif
 

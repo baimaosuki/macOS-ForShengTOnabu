@@ -65,16 +65,17 @@ static int mach_vm_deallocate(unsigned self,uint64_t at,uint64_t length){assert(
 static int task_info(unsigned task,unsigned flavor,int *out,unsigned *count){assert(task==42&&flavor==17);if(!dyld_mode)return 5;struct task_dyld_info *info=(void*)out;info->all_image_info_addr=0x5000;info->all_image_info_size=sizeof(image_data);info->all_image_info_format=2;*count=6;return 0;}
 static int mach_vm_read_overwrite(unsigned task,uint64_t at,uint64_t length,uint64_t destination,uint64_t *actual){assert(task==42);reads++;if(dyld_mode&&at>=0x5000){const void *src=0;if(at==0x5000&&length==sizeof(image_data))src=&image_data;else if(at==0x6000&&length==sizeof(image_entry))src=&image_entry;else if(at>=0x7000&&at+length<=0x7000+sizeof(image_commands))src=image_commands+at-0x7000;assert(src);memcpy((void*)(uintptr_t)destination,src,length);*actual=length;return 0;}assert(length==16);uint64_t *out=(void*)(uintptr_t)destination;*actual=length;if(mode==5){*actual=8;return 0;}if(mode==6)return 1;assert(at>=0x2000&&at<0x3000&&(at&15)==0);frame_calls++;out[0]=(mode==7)?at:mode==8?at+16:at==0x2000?0x2020:0;out[1]=0xfedc000018731234;return 0;}
 static ssize_t fixture_write(int fd,const void *data,size_t n){assert(fd==2&&n<=512&&n>14);assert(!memcmp(data,"NABU-RAWSTACK ",14));assert(((const char*)data)[n-1]=='\n');for(size_t i=0;i+1<n;i++)assert(((const char*)data)[i]!='\n');assert(used+n+1<sizeof(output));memcpy(output+used,data,n);used+=n;output[used]=0;return (ssize_t)n;}
+#define CLOCK_UPTIME_RAW 8
 #define CTL_KERN 1
 #define KERN_PROC 14
 #define KERN_PROC_ALL 0
 struct kinfo_proc {struct {pid_t p_pid;char p_comm[17];} kp_proc;};
-static uint64_t clock_seconds=1;static unsigned forks,waits;
-static int fixture_clock(int clock,struct timespec *now){assert(clock==CLOCK_MONOTONIC);now->tv_sec=(time_t)clock_seconds;now->tv_nsec=0;return 0;}
+static uint64_t clock_seconds=1;static unsigned forks,waits,watch_count=3;
+static int fixture_clock(int clock,struct timespec *now){assert(clock==CLOCK_UPTIME_RAW);now->tv_sec=(time_t)clock_seconds;now->tv_nsec=0;return 0;}
 static int fixture_usleep(unsigned micros){assert(micros==500000);clock_seconds+=75;return 0;}
 static pid_t fixture_fork(void){forks++;return 777;}
 static pid_t fixture_wait(pid_t pid,int *status,int flags){assert(pid==777&&!flags);*status=0;waits++;return pid;}
-static int sysctl(int *mib,unsigned n,void *out,size_t *bytes,void *in,size_t inbytes){assert(mib[0]==1&&n==4&&!in&&!inbytes);if(!out){*bytes=3*sizeof(struct kinfo_proc);return 0;}assert(*bytes>=3*sizeof(struct kinfo_proc));struct kinfo_proc *p=out;const char *names[]={"opendirectoryd","loginwindow","WindowServer"};for(unsigned i=0;i<3;i++){p[i].kp_proc.p_pid=(clock_seconds>=151?400:300)+(int)i;strcpy(p[i].kp_proc.p_comm,names[i]);}*bytes=3*sizeof(*p);return 0;}
+static int sysctl(int *mib,unsigned n,void *out,size_t *bytes,void *in,size_t inbytes){assert(mib[0]==1&&n==4&&!in&&!inbytes);if(!out){*bytes=watch_count*sizeof(struct kinfo_proc);return 0;}assert(*bytes>=watch_count*sizeof(struct kinfo_proc));struct kinfo_proc *p=out;const char *names[]={"opendirectoryd","loginwindow","WindowServer","lsd"};for(unsigned i=0;i<watch_count;i++){p[i].kp_proc.p_pid=(clock_seconds>=151?400:300)+(int)i;strcpy(p[i].kp_proc.p_comm,names[i]);}*bytes=watch_count*sizeof(*p);return 0;}
 #define clock_gettime fixture_clock
 #define usleep fixture_usleep
 #define fork fixture_fork
@@ -107,7 +108,8 @@ int main(void){
  struct mach_header_64 *mh=(void*)image_commands;*mh=(struct mach_header_64){.magic=MH_MAGIC_64,.cputype=CPU_TYPE_ARM64,.ncmds=1,.sizeofcmds=24};struct uuid_command *uc=(void*)(image_commands+sizeof(*mh));*uc=(struct uuid_command){.cmd=LC_UUID,.cmdsize=24};uc->uuid[0]=0xcd;
  args[1]="321";assert(!nabu_raw_stacks_command(2,args));assert(strstr(output,"cache slide=0x123000")&&strstr(output,"uuid=ab0000")&&strstr(output,"uuid=cd0000")&&strstr(output,"images-consistent=1"));
  assert(nabu_probe_relay("../escape")==2);
- reset(0);assert(!nabu_raw_watch());assert(forks==6&&waits==6);assert(strstr(output,"target_pid=300 round=1")&&strstr(output,"target_pid=400 round=2")&&strstr(output,"observed_mask=7"));
+ reset(0);assert(!nabu_raw_watch());assert(forks==9&&waits==9);assert(strstr(output,"target_pid=300 round=1")&&strstr(output,"target_pid=400 round=2")&&strstr(output,"target_pid=400 round=3")&&strstr(output,"clock=mach-uptime")&&strstr(output,"completed_mask=7")&&strstr(output,"optional-not-observed target=lsd"));
+ reset(0);watch_count=4;clock_seconds=1;forks=waits=0;assert(!nabu_raw_watch());assert(forks==12&&waits==12);assert(strstr(output,"target_pid=303 round=1")&&strstr(output,"target_pid=403 round=3")&&strstr(output,"completed_mask=15")&&!strstr(output,"optional-not-observed"));
  const char *invalid[]={"0","1","-3","321x","2147483648","999999999999999999999",""};
  for(unsigned i=0;i<sizeof(invalid)/sizeof(*invalid);i++){args[1]=(char*)invalid[i];assert(nabu_raw_stacks_command(2,args)==2);}
  return 0;

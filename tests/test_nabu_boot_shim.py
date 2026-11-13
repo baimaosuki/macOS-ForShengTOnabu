@@ -8,9 +8,51 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import importlib.util
+import hashlib
+import json
+import plistlib
 
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / 'platform/nabu/macos26/bootshim/apfs_boot_util.c'
+
+
+def test_shipping_builder_records_exact_script_and_probe_sources(tmp_path, monkeypatch):
+    sys.path.insert(0, str(ROOT / 'scripts'))
+    spec = importlib.util.spec_from_file_location('shim_builder_fixture', ROOT / 'scripts/build_nabu_boot_shim.py')
+    builder = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(builder)
+    cdhash = '12' * 20
+    raw = bytearray(64)
+    import struct
+    struct.pack_into('<III', raw, 0, 0xfeedfacf, 0x100000c, 0)
+
+    def run(*args):
+        if args[0] == 'xcrun':
+            assert '-target' in args and 'arm64-apple-macos26.5' in args
+            Path(args[args.index('-o') + 1]).write_bytes(raw)
+        output = ''
+        if '--verbose=4' in args:
+            output = f'CDHash={cdhash}\n'
+        if '--entitlements' in args and ':-' in args:
+            output = (SOURCE.parent / 'entitlements.plist').read_text()
+        return subprocess.CompletedProcess(args, 0, stdout=output, stderr='')
+
+    monkeypatch.setattr(builder.platform, 'system', lambda: 'Darwin')
+    monkeypatch.setattr(builder, 'run', run)
+    monkeypatch.setattr(builder.verify_page_hashes, 'verify', lambda _: dict(
+        signed=True, ok=True, code_slots=1, cdhash=cdhash))
+    result = builder.build(tmp_path / 'build')
+    assert result['probe_policy'] == builder.probe_policy()
+    assert result['probe_policy']['version'] == 6
+    assert result['probe_policy']['default'] == 'raw-only'
+    assert result['probe_policy']['optional_targets'] == ['lsd']
+    assert result['build_script_sha256'] == hashlib.sha256(Path(builder.__file__).read_bytes()).hexdigest()
+    assert result['raw_stacks_header_sha256'] == hashlib.sha256((SOURCE.parent / 'raw_stacks.h').read_bytes()).hexdigest()
+    assert result['session_probe_script_sha256'] == hashlib.sha256((SOURCE.parent / 'session_probe.sh').read_bytes()).hexdigest()
+    assert json.loads((tmp_path / 'build/build.json').read_text()) == result
+    entitlements = plistlib.loads((SOURCE.parent / 'entitlements.plist').read_bytes())
+    assert entitlements['com.apple.system-task-ports.read'] and entitlements['com.apple.system-task-ports.read.safe']
 
 
 @unittest.skipUnless(sys.platform.startswith('linux'), 'Linux host logic tests')

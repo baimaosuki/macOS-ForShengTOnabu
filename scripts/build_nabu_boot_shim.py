@@ -19,6 +19,32 @@ TARGET = 'arm64-apple-macos26.5'
 IDENTIFIER = 'org.nabu.apfs-boot-layout'
 
 
+def probe_policy():
+    """Fail packaging metadata when its declared behavior drifts from inputs."""
+    script = (SOURCE.parent / 'session_probe.sh').read_text()
+    header = (SOURCE.parent / 'raw_stacks.h').read_text()
+    installer = (SOURCE.parent / 'session_probe.h').read_text()
+    for marker in ('version=6', 'NABU_SESSION_SYMBOLS:-0', 'sample-skipped reason=online-symbols-disabled',
+                   'run_bounded 120 "$diagnostic" /usr/bin/sample'):
+        if marker not in script:
+            raise RuntimeError('session probe policy script mismatch: ' + marker)
+    for marker in ('CLOCK_UPTIME_RAW', 'clock=mach-uptime', 'rounds=3 after_discovery=0,150,300',
+                   '"WindowServer", "lsd"', 'alarm(515)', 'alarm(10)'):
+        if marker not in header:
+            raise RuntimeError('session probe policy header mismatch: ' + marker)
+    if 'nabu_probe_bootarg_enabled("nabu-session-symbols=1")' not in installer:
+        raise RuntimeError('session symbol policy must come from exact bootarg parsing')
+    return dict(version=6, default='raw-only', symbols_bootarg='nabu-session-symbols=1',
+                sample_timeout_seconds=120, raw_clock='CLOCK_UPTIME_RAW',
+                raw_clock_label='mach-uptime', rounds=3,
+                after_discovery_seconds=[0, 150, 300],
+                required_targets=['opendirectoryd', 'loginwindow', 'WindowServer'],
+                optional_targets=['lsd'], discovery_timeout_seconds=480,
+                watchdog_timeout_seconds=515, per_target_timeout_seconds=10,
+                frames_per_thread=32, threads='enumerate-all-within-time-bound',
+                report_policy='preserve-full-files-relay-bounded-16KiB')
+
+
 def run(*args):
     return subprocess.run([str(arg) for arg in args], check=True,
                           text=True, capture_output=True)
@@ -70,6 +96,8 @@ def build(output):
                     session_probe_script_sha256=hashlib.sha256(probe.read_bytes()).hexdigest(),
                     session_probe_header_sha256=hashlib.sha256((SOURCE.parent / 'session_probe.h').read_bytes()).hexdigest(),
                     raw_stacks_header_sha256=hashlib.sha256((SOURCE.parent / 'raw_stacks.h').read_bytes()).hexdigest(),
+                    build_script_sha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+                    probe_policy=probe_policy(),
                     entitlements_sha256=hashlib.sha256(ENTITLEMENTS.read_bytes()).hexdigest(),
                     bindfs_entitlement_verified=True,
                     page_hashes=pages)
