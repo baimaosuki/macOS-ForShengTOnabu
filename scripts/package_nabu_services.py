@@ -298,6 +298,11 @@ NABU-DISPLAY 报告实际 VBL/队列/提交/显示计数；WS 退出观察也覆
                           ('lifecycle-diagnostics.patch', 'lifecycle_diagnostics_patch_sha256')]:
             if repairs[key] != sha(ROOT / 'platform/nabu/macos26/desktop' / name):
                 raise ValueError('functional repair differs from the compiled kernel: ' + name)
+        directory_progress = repairs.get('directory_progress_patch_sha256')
+        if directory_progress:
+            if directory_progress != sha(ROOT / 'platform/nabu/macos26/desktop/directory-progress.patch'):
+                raise ValueError('directory progress repair differs from compiled kernel')
+            delivery['implemented'].append('reject same-mount union directory fallback for getdirentries64 and getdirentriesattr')
         probe_build = json.loads((artifact / 'boot-shim/build.json').read_text())
         delivery['probe_policy'] = probe_build['probe_policy']
         delivery['implemented'] += [
@@ -325,6 +330,13 @@ nabu-session-symbols=1 才启用120秒符号sample，已确认会干扰启动，
 TWRP 挂载现有 ESP 后，先保存旧文件，再替换本包 EFI 下五个对应文件并 sync/reboot。
 不需要重刷 Data、root、引导器或分区，不覆盖 XNU2LOG.BIN；日志token沿用现有分配。
 """
+        if directory_progress:
+            readme += '''
+本轮新增公共 lookup_traverse_union 进展检查，覆盖 libc opendir 的 getdirentries64
+以及 getdirentriesattr；保持正常下层目录、原始错误和 vnode 清理。
+LS 实机第二轮栈已落在 CFIterateDirectory/opendir；尚未捕获具体目录及同mount回退命中。
+此包修复可复现的重复枚举缺陷，尚未实机验证解决 lsd 等待或黑屏。
+'''
     (output / 'README.txt').write_text(readme)
     (output / 'delivery.json').write_text(json.dumps(delivery, indent=2) + '\n')
     archive = output.with_suffix('.zip')

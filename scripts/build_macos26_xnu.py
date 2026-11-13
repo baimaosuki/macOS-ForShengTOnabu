@@ -628,6 +628,7 @@ def prepare() -> dict:
                       session_ipc_sha256=sha(PLATFORM / 'log/session_ipc.h'),
                       filesystem_patch_sha256=sha(PLATFORM / 'desktop/session-filesystem.patch'),
                       bulk_progress_patch_sha256=sha(PLATFORM / 'desktop/bulk-progress.patch'),
+                      directory_progress_patch_sha256=sha(PLATFORM / 'desktop/directory-progress.patch'),
                       lifecycle_diagnostics_patch_sha256=sha(PLATFORM / 'desktop/lifecycle-diagnostics.patch'),
                       login_ipc_policy='call-paired per-tid 60-second epochs, explicit late phase at 400s',
                       od_wait_trace_sha256=sha(PLATFORM / 'log/od_wait_trace.h'),
@@ -1213,6 +1214,7 @@ def main() -> None:
         PATCHES.append(desktop / 'late-storage-start.patch')
         PATCHES.append(desktop / 'session-filesystem.patch')
         PATCHES.append(desktop / 'bulk-progress.patch')
+        PATCHES.append(desktop / 'directory-progress.patch')
         PATCHES.append(desktop / 'lifecycle-diagnostics.patch')
         DESKTOP_CFLAGS = (' -DXNU_OWNER_ROOT_AUDIT=1 -DXNU_OWNER_ROOT_TRUST=1 '
             '-DXNU_OWNER_CACHE_MOUNT=1 -DXNU_OWNER_CACHE_STARTUP=1 -DXNU_OWNER_BOOT_MANIFEST=1 '

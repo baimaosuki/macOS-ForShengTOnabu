@@ -1,0 +1,17 @@
+Require progress at the shared union directory fallback, including libc opendir.
+Apply after integrated.patch and session-filesystem.patch.
+--- a/bsd/vfs/vfs_lookup.c
++++ b/bsd/vfs/vfs_lookup.c
+@@ -1942,8 +1942,11 @@
+ 		/*
+ 		 * Only a directory below can hold the name: the base system keeps a symlink where the
+ 		 * mounted system has a framework directory, and searching that symlink gave ENOTDIR.
++		 * As in lookup(), following a lower symlink back into the current mount
++		 * is not a descent. Reject it here so getdirentries/getdirentriesattr
++		 * cannot reset their descriptor offset and enumerate the upper directory again.
+ 		 */
+-		if (nd.ni_vp->v_type != VDIR) {
++		if (nd.ni_vp->v_type != VDIR || nd.ni_vp->v_mount == dvp->v_mount) {
+ 			vnode_put(nd.ni_vp);
+ 			error = ENOENT;
+ 		} else {
