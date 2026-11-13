@@ -79,6 +79,37 @@ nabu_session_emit(unsigned channel, const char *format, ...)
     nabu_capture_append(text, length);
 }
 
+/* Call-reserved loginwindow records bypass event sampling. Each admission
+ * reserves the maximum bytes before entry; the fixed-size writer cannot spend
+ * more than that reservation. Physical journal contention/overwrite is still
+ * measured by NabuLogCore, not claimed away by this producer. */
+static inline void __attribute__((format(printf, 2, 3)))
+nabu_session_reserved_emit(unsigned capacity, const char *format, ...)
+{
+    char text[512];
+    if (capacity > sizeof(text) || capacity < 64 || !nabu_session_enabled()) return;
+    uint64_t ns = 0;
+    absolutetime_to_nanoseconds(mach_absolute_time(), &ns);
+    int prefix = snprintf(text, capacity, "NABU-SESSION pid=%d tid=%llu t_ns=%llu ",
+        proc_selfpid(), (unsigned long long)thread_tid(current_thread()), (unsigned long long)ns);
+    if (prefix <= 0 || (unsigned)prefix >= capacity) return;
+    va_list args;
+    va_start(args, format);
+    int count = vsnprintf(text + prefix, capacity - (unsigned)prefix, format, args);
+    va_end(args);
+    if (count <= 0) return;
+    unsigned length = (unsigned)prefix + (unsigned)count;
+    if (length >= capacity) {
+        static const char tail[] = " truncated=1\n";
+        length = capacity - 1;
+        memcpy(text + length - (sizeof(tail) - 1), tail, sizeof(tail) - 1);
+    } else if (text[length - 1] != '\n') {
+        if (length == capacity - 1) text[length - 1] = '\n';
+        else text[length++] = '\n';
+    }
+    nabu_capture_append(text, length);
+}
+
 /* Called only outside IPC locks. Thread ids correlate trap entry with receive
  * completion even when the receive resumes through a continuation. */
 static inline void

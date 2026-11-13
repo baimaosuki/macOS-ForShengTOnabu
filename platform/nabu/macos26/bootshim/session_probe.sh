@@ -3,7 +3,7 @@
 PATH=/usr/bin:/bin:/usr/sbin:/sbin
 export PATH
 umask 077
-echo "NABU-SESSION-PROBE started pid=$$ version=6"
+echo "NABU-SESSION-PROBE started pid=$$ version=7"
 trap 'echo "NABU-SESSION-PROBE shell exit=$?"' 0
 
 # Diagnostics must not block later samples. Keep child output off the console
@@ -49,7 +49,7 @@ snapshot()
     reports="/private/var/tmp/nabu-session-probe"
     shim="/System/Library/Filesystems/apfs.fs/Contents/Resources/apfs_boot_util"
     process_list="$reports/nabu-probe-processes-$$.txt"
-    # One in-process discovery loop captures all three targets before slow
+    # One in-process discovery loop captures all required and optional targets before slow
     # symbol processing. Every actual raw record uses fd2 single-line writes.
     "$shim" --nabu-raw-stacks --watch >"$reports/nabu-raw-stacks.txt" 2>&1 &
     raw_watcher=$!

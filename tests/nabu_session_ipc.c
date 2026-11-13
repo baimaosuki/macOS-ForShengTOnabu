@@ -6,6 +6,11 @@
 #include <stdbool.h>
 #include <stdlib.h>
 
+#ifndef NABU_SESSION_EVI_ENTRY_SEQ
+#define NABU_SESSION_EVI_ENTRY_SEQ 465U
+#define NABU_SESSION_EVI_TIME_NS 403087435052ULL
+#define NABU_SESSION_EVI_MSGID 30176U
+#endif
 #define NABU_SESSION_TRACE_HOST_TEST 1
 #define MACH64_SEND_MSG 1U
 #define MACH64_RCV_MSG 2U
@@ -21,7 +26,7 @@ static const char *self_name = "WindowServer";
 static int space_locked, port_locked, space_busy, port_busy;
 static int space_active = 1, port_active = 1, entry_present = 1;
 static unsigned lookups, pid_reads, peer_names, writes;
-static char journal[2000000];
+static char journal[8000000];
 static size_t used;
 struct ipc_port { int unused; } port;
 typedef struct ipc_port *ipc_port_t;
@@ -90,6 +95,8 @@ static void reset(void) {
     memset(nabu_session_events, 0, sizeof(nabu_session_events));
     memset(nabu_session_sample_second, 0, sizeof(nabu_session_sample_second));
     now_ns = 900;
+    memset(nabu_session_login, 0, sizeof(nabu_session_login));
+    nabu_session_login_slots_drop_reported = 0;
     memset(nabu_session_calls, 0, sizeof(nabu_session_calls));
     used = writes = lookups = pid_reads = peer_names = 0; journal[0] = 0;
     enabled = space_active = port_active = entry_present = 1;
@@ -192,7 +199,7 @@ static void collision_and_isolation(void) {
     assert(writes == 519 && strstr(journal, "name=WindowServer") && strstr(journal, "msgid=333"));
     self_name = "loginwindow"; self_pid = 105;
     c = nabu_session_ipc_begin(3, 444, 0x123, 2, 3); nabu_session_ipc_end(&c, 0x10004003);
-    assert(writes == 521 && strstr(journal, "name=loginwindow"));
+    assert(writes == 522 && strstr(journal, "name=loginwindow"));
 }
 static void error_and_truncation(void) {
     reset();
@@ -210,8 +217,158 @@ static void error_and_truncation(void) {
     assert(used == 511 && !strcmp(journal + used - 13, " truncated=1\n"));
     assert(journal[used - 1] == '\n');
 }
+static unsigned occurrences(const char *haystack, const char *needle) {
+    unsigned count = 0;
+    for (const char *p = haystack; (p = strstr(p, needle)); p += strlen(needle)) count++;
+    return count;
+}
+static void loginwindow_call_admission(void) {
+    reset(); self_name = "loginwindow"; self_pid = 168; tid = 620;
+    /* Reproduce the real old channel state rather than rely on test clock
+     * mirroring: entry seq465 at403s and success/error channels exhausted. */
+    nabu_session_events[5] = NABU_SESSION_EVI_ENTRY_SEQ; nabu_session_events[6] = 380;
+    nabu_session_events[10] = 300;
+    nabu_session_sample_second[5] = nabu_session_sample_second[6] = 403;
+    nabu_session_sample_second[10] = 403;
+    now_ns = NABU_SESSION_EVI_TIME_NS;
+    unsigned legacy_writes = writes;
+    nabu_session_emit(5, "event=legacy-dropped-call\n");
+    nabu_session_emit(6, "event=legacy-dropped-completion\n");
+    assert(writes == legacy_writes); /* demonstrate the prior silent loss */
+    struct nabu_session_call c = nabu_session_ipc_begin(3, NABU_SESSION_EVI_MSGID, 0x123, 0x1f0b, 0x1f0b);
+    assert(c.selected && c.login_slot);
+    char id[64]; snprintf(id, sizeof(id), "call=%llu ", (unsigned long long)c.call);
+    /* Internal receives during send cannot close the admitted outer call. */
+    unsigned before = writes;
+    nabu_session_ipc_receive_result(2, 0x10004003); assert(writes == before);
+    nabu_session_ipc_wait(&c); assert(writes == before); /* wait timestamp only */
+    /* Another thread exhausts its complete epoch without spending our credit. */
+    tid = 650;
+    for (unsigned i = 0; i < 300; ++i) {
+        struct nabu_session_call other = nabu_session_ipc_begin(1, 11, 0x123, 0, 0);
+        nabu_session_ipc_end(&other, 0);
+    }
+    tid = 620;
+    struct nabu_session_login_record *slot = nabu_session_login_find(tid, 0);
+    assert(slot && slot->reserved_bytes == NABU_SESSION_LOGIN_CALL_BYTES);
+    /* Simulate continuation after both400s phase and next-minute boundary. */
+    now_ns = 465000000000ULL;
+    nabu_session_ipc_receive_result(3, 0);
+    assert(occurrences(journal, id) == 2);
+    assert(strstr(journal, "msgid=30176 msgid_known=1 remote=123 local=1f0b receive=1f0b"));
+    assert(strstr(journal, "result=0 result_known=1 stage=receive wait_ns=403087435052"));
+    before = writes; nabu_session_ipc_end(&c, 0); assert(writes == before);
+    assert(slot->reserved_bytes == NABU_SESSION_LOGIN_CALL_BYTES);
+    /* Same-second success and error completions never compete for one sample. */
+    for (unsigned i = 0; i < 6; ++i) {
+        c = nabu_session_ipc_begin(3, 30176 + i, 0x123, 2, 3);
+        nabu_session_ipc_wait(&c);
+        before = writes;
+        uint32_t result = i & 1 ? 0x10004003 : 0;
+        nabu_session_ipc_receive_result(3, result);
+        assert(writes == before + 1);
+        nabu_session_ipc_end(&c, result);
+        assert(writes == before + 1);
+    }
+    assert(strstr(journal, "stage=receive wait_ns=465000000000"));
+    c = nabu_session_ipc_begin(3, 30176, 0x123, 2, 3);
+    nabu_session_ipc_wait(&c); nabu_session_ipc_receive_result(3, 0);
+    before = writes;
+    nabu_session_ipc_end(&c, 0x10004008);
+    assert(writes == before + 1 && strstr(journal, "stage=final-correction receive_result=0"));
+    assert(strstr(journal, "result=10004008 result_known=1"));
+    /* Worst-width identifiers fit completion capacity, preserving final errno. */
+    struct nabu_session_login_record *width = nabu_session_login_find(tid, 0);
+    self_pid = 2147483647; tid = UINT64_MAX; now_ns = UINT64_MAX;
+    c.tid = tid; c.call = UINT64_MAX; width->call = c;
+    width->wait_ns = UINT64_MAX; width->result_logged = 1; width->receive_result = UINT32_MAX;
+    size_t width_start = used;
+    nabu_session_ipc_end(&c, 0xfffffffe);
+    assert(used - width_start < 256 && !strstr(journal + width_start, "truncated=1"));
+    self_pid = 168; tid = 620; now_ns = 465000000000ULL;
+    /* An entry with no observed callback is explicitly closed as unknown at
+     * the next trap, never silently overwritten or given a fake result. */
+    c = nabu_session_ipc_begin(3, 99, 0x123, 2, 3); nabu_session_ipc_wait(&c);
+    struct nabu_session_call next = nabu_session_ipc_begin(1, 100, 0x123, 0, 0);
+    assert(strstr(journal, "result=0 result_known=0 stage=next-trap"));
+    nabu_session_ipc_end(&next, 0x10000003);
+}
+static void loginwindow_continuation_final_error(void) {
+    reset(); self_name = "loginwindow"; self_pid = 108; tid = 1243;
+    /* This stack-local c is deliberately not passed to continuation_end. */
+    struct nabu_session_call c = nabu_session_ipc_begin(3, 30176, 0x123, 2, 3);
+    unsigned before = writes;
+    nabu_session_ipc_continuation_end(0x10004008);
+    assert(writes == before); /* entry alone is not a receive continuation */
+    nabu_session_ipc_wait(&c);
+    nabu_session_ipc_continuation_end(0x10004008);
+    assert(writes == before); /* no native receive state yet */
+    nabu_session_ipc_receive_result(3, 0);
+    struct nabu_session_login_record *slot = nabu_session_login_find(tid, 0);
+    assert(slot && slot->result_logged && slot->call.selected);
+    before = writes;
+    /* copyout can invoke internal kernel IPC receive results. They must not
+     * replace the recorded outer result0 or consume its correction budget. */
+    nabu_session_ipc_receive_result(2, 0x10004003);
+    assert(writes == before && slot->receive_result == 0);
+    nabu_session_ipc_continuation_end(0x10004008); /* MACH_RCV_INVALID_DATA */
+    assert(writes == before + 1 && !slot->call.selected && !slot->waiting);
+    assert(strstr(journal, "result=10004008 result_known=1 stage=final-correction receive_result=0"));
+    before = writes;
+    nabu_session_ipc_continuation_end(0x10004008); assert(writes == before);
+    nabu_session_ipc_end(&c, 0x10004008); assert(writes == before);
+    /* Equal final result is deduplicated but still retires the admitted call. */
+    c = nabu_session_ipc_begin(3, 10019, 0x123, 2, 3); nabu_session_ipc_wait(&c);
+    nabu_session_ipc_receive_result(3, 0x10004004); before = writes;
+    nabu_session_ipc_continuation_end(0x10004004);
+    assert(writes == before && !slot->call.selected && !slot->waiting);
+    /* No current record, a different tid, and WS/OD cannot create fake calls. */
+    tid = 9999; nabu_session_ipc_continuation_end(0x10004008); assert(writes == before);
+    self_name = "WindowServer"; self_pid = 166; tid = 646;
+    c = nabu_session_ipc_begin(3, 12, 0x123, 2, 3); nabu_session_ipc_wait(&c);
+    nabu_session_ipc_receive_result(3, 0); before = writes;
+    nabu_session_ipc_continuation_end(0x10004008); assert(writes == before);
+}
+static void loginwindow_epoch_bounds(void) {
+    reset(); self_name = "loginwindow"; self_pid = 168; tid = 620;
+    now_ns = 397540000000ULL;
+    unsigned admitted = NABU_SESSION_LOGIN_TID_BYTES / NABU_SESSION_LOGIN_CALL_BYTES;
+    for (unsigned i = 0; i < admitted; ++i) {
+        struct nabu_session_call c = nabu_session_ipc_begin(1, i, 0x123, 0, 0);
+        assert(c.selected); nabu_session_ipc_end(&c, 0);
+    }
+    size_t old_used = used;
+    for (unsigned i = 0; i < 50; ++i) {
+        struct nabu_session_call c = nabu_session_ipc_begin(3, i, 0x123, 2, 3);
+        assert(!c.selected); nabu_session_ipc_wait(&c);
+        nabu_session_ipc_receive_result(3, 0); nabu_session_ipc_end(&c, 0);
+    }
+    assert(occurrences(journal, "reason=epoch-byte-bound") == 1);
+    assert(used - old_used < 192 && used <= NABU_SESSION_LOGIN_TID_BYTES + 384);
+    /* Explicit development phase400 refresh admits403s30176 even if397s
+     * exhausted. The completion is reserved, independent of next epoch. */
+    now_ns = 403087435052ULL;
+    struct nabu_session_call c = nabu_session_ipc_begin(3, 30176, 0x123, 2, 3);
+    assert(c.selected); nabu_session_ipc_wait(&c);
+    assert(strstr(journal, "epoch=7 limit=131072 previous_dropped=50"));
+    now_ns = 464000000000ULL;
+    nabu_session_ipc_receive_result(3, 0x10004004);
+    assert(strstr(journal, "result=10004004 result_known=1 stage=receive"));
+    /* Capacity exhaustion is explicit, no hashing collision steals another
+     * loginwindow thread's association. Slot RAM remains fixed forever. */
+    for (unsigned i = 1; i < NABU_SESSION_LOGIN_SLOTS; ++i) {
+        tid = 1000 + i;
+        c = nabu_session_ipc_begin(1, i, 0x123, 0, 0);
+        assert(c.selected); nabu_session_ipc_end(&c, 0);
+    }
+    tid = 9999; c = nabu_session_ipc_begin(3, 9, 0x123, 2, 3);
+    assert(!c.selected && strstr(journal, "reason=tid-slots-full slots=16"));
+    unsigned before = writes;
+    c = nabu_session_ipc_begin(3, 9, 0x123, 2, 3); assert(!c.selected && writes == before);
+}
 int main(void) {
     snapshot_paths(); selection_and_continuation(); collision_and_isolation(); error_and_truncation();
+    loginwindow_call_admission(); loginwindow_epoch_bounds(); loginwindow_continuation_final_error();
     puts("session IPC lock, failure, continuation and per-process budget checks passed");
     return 0;
 }

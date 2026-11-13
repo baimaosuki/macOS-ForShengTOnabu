@@ -1,0 +1,20 @@
+Prevent union bulk enumeration from restarting the same mount through a lower symlink.
+Apply after integrated.patch and session-filesystem.patch.
+--- a/bsd/vfs/vfs_attrlist.c
++++ b/bsd/vfs/vfs_attrlist.c
+@@ -4477,7 +4477,14 @@
+ 		vnode_t uvp;
+ 		int union_error = lookup_traverse_union(dvp, &uvp, ctx);
+ 		if (!union_error) {
+-			if (uvp->v_type != VDIR) {
++			/* As in lookup(), a covered path may follow a symlink back
++			 * into this union mount.  Resetting the offset there repeats
++			 * entries, or retries forever when the directory is empty.
++			 * Treat that non-progressing fallback as ordinary EOF before
++			 * changing the descriptor or acquiring another usecount. */
++			if (uvp->v_mount == dvp->v_mount) {
++				union_error = ENOENT;
++			} else if (uvp->v_type != VDIR) {
+ 				union_error = ENOTDIR;
+ 			}
+ #if CONFIG_MACF

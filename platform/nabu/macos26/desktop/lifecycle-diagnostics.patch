@@ -1,0 +1,68 @@
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -952,7 +952,8 @@
+ #include <sys/wait.h>
+ void nabu_lifecycle_exit(proc_t);
+ #define NABU_LIFE_SLOTS 64
+-#define NABU_LIFE_KINDS 23
++#define NABU_LIFE_KINDS 31
++extern void nabu_capture_append(const char *, unsigned);
+ struct nabu_life_record {
+ 	uint64_t uniqueid, sequence;
+ 	pid_t pid, ppid, gpid;
+@@ -978,6 +979,10 @@
+ static unsigned int
+ nabu_life_kind(const char *name)
+ {
++	if (!strcmp(name, "SecurityAgent")) return 24;
++	if (!strcmp(name, "authd")) return 25;
++	if (!strcmp(name, "lsd")) return 26;
++	if (!strcmp(name, "launchservicesd")) return 27;
+ 	static const char *const names[] = { "mount", "mount_apfs", "fskitd", "WindowServer",
+ 		"diskarbitrationd", "cryptexd", "cfprefsd", "digest-service", "eligibilityd", "endpointsecurity",
+ 		"opendirectoryd", "loginwindow" };
+@@ -989,6 +994,11 @@
+ static unsigned int
+ nabu_life_proxy_kind(const char *label)
+ {
++	/* Labels read from the paired 25F71 launchd property lists. */
++	if (!strcmp(label, "com.apple.security.agent")) return 28;
++	if (!strcmp(label, "com.apple.security.agent.login")) return 29;
++	if (!strcmp(label, "com.apple.lsd")) return 30;
++	if (!strcmp(label, "com.apple.coreservices.launchservicesd")) return 31;
+ 	if (!strcmp(label, "com.apple.filesystems.fskitd")) return 13;
+ 	if (!strcmp(label, "com.apple.WindowServer")) return 14;
+ 	if (!strcmp(label, "com.apple.diskarbitrationd")) return 15;
+@@ -1077,18 +1087,21 @@
+ 	lck_mtx_unlock(&nabu_life_lock);
+ 	if (!emit) return;
+ 	os_atomic_inc(&nabu_lifecycle_trace_events, relaxed);
+-	printf("NABU-PROC t_ns=%llu event=%s pid=%d uid=%llu exec=%llu real_uid=%u effective_uid=%u ppid=%d parent=%s gpid=%d grandparent=%s suppressed=%llu evicted=%llu\n",
++	/* One bounded RAM record survives console release. Preserve the copied
++	 * vnode path and bounded argv; no proc lock or trace mutex is held here. */
++	char text[MAXPATHLEN + 1280];
++	int length = snprintf(text, sizeof(text),
++	    "NABU-PROC t_ns=%llu event=%s pid=%d uid=%llu exec=%llu real_uid=%u effective_uid=%u ppid=%d parent=%s gpid=%d grandparent=%s suppressed=%llu evicted=%llu path=%s path_error=%d argc=%d argv_truncated=%d argv=%s wait=0x%x exit=%d signal=%d core=%d reason_ns=%u reason_code=0x%llx reason_flags=0x%llx\n",
+ 	    ns, exiting ? "exit" : "exec", r->pid, r->uniqueid, r->sequence,
+-	    r->real_uid, r->effective_uid, r->ppid, r->parent, r->gpid, r->grandparent, skipped, evicted);
+-	printf("NABU-PROC uid=%llu exec=%llu path=%s path_error=%d argc=%d argv_truncated=%d argv=%s\n",
+-	    r->uniqueid, r->sequence, r->path, r->path_error, r->argc, r->argv_truncated, r->args);
+-	if (exiting) {
+-		printf("NABU-PROC uid=%llu exec=%llu wait=0x%x exit=%d signal=%d core=%d reason_ns=%u reason_code=0x%llx reason_flags=0x%llx\n",
+-		    r->uniqueid, r->sequence, status, WIFEXITED(status) ? WEXITSTATUS(status) : -1,
+-		    WIFSIGNALED(status) ? WTERMSIG(status) : 0, !!WCOREDUMP(status),
+-		    reason ? reason->osr_namespace : 0, reason ? reason->osr_code : 0,
+-		    reason ? reason->osr_flags : 0);
+-	}
++	    r->real_uid, r->effective_uid, r->ppid, r->parent, r->gpid, r->grandparent, skipped, evicted,
++	    r->path, r->path_error, r->argc, r->argv_truncated, r->args,
++	    exiting ? status : 0, exiting && WIFEXITED(status) ? WEXITSTATUS(status) : -1,
++	    exiting && WIFSIGNALED(status) ? WTERMSIG(status) : 0,
++	    exiting ? !!WCOREDUMP(status) : 0,
++	    reason ? reason->osr_namespace : 0, reason ? reason->osr_code : 0,
++	    reason ? reason->osr_flags : 0);
++	if (length > 0 && (unsigned)length < sizeof(text))
++		nabu_capture_append(text, (unsigned)length);
+ }
+ 
+ static void

@@ -44,9 +44,10 @@ def test_shipping_builder_records_exact_script_and_probe_sources(tmp_path, monke
         signed=True, ok=True, code_slots=1, cdhash=cdhash))
     result = builder.build(tmp_path / 'build')
     assert result['probe_policy'] == builder.probe_policy()
-    assert result['probe_policy']['version'] == 6
+    assert result['probe_policy']['version'] == 7
     assert result['probe_policy']['default'] == 'raw-only'
-    assert result['probe_policy']['optional_targets'] == ['lsd']
+    assert result['probe_policy']['general_registers'] == 'x0-x28-raw'
+    assert result['probe_policy']['optional_targets'] == ['lsd', 'coreservicesd', 'launchservicesd']
     assert result['build_script_sha256'] == hashlib.sha256(Path(builder.__file__).read_bytes()).hexdigest()
     assert result['raw_stacks_header_sha256'] == hashlib.sha256((SOURCE.parent / 'raw_stacks.h').read_bytes()).hexdigest()
     assert result['session_probe_script_sha256'] == hashlib.sha256((SOURCE.parent / 'session_probe.sh').read_bytes()).hexdigest()

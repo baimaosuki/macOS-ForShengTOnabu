@@ -96,7 +96,7 @@ int main(void) {
     assert (tmp_path / 'nabu-session-probe.sh').read_text() == script
     assert (tmp_path / 'nabu-session-probe.sh').stat().st_mode & 0o777 == 0o600
     console = (tmp_path / 'console.txt').read_text()
-    assert 'NABU-SESSION-PROBE started pid=' in console and 'version=6' in console
+    assert 'NABU-SESSION-PROBE started pid=' in console and 'version=7' in console
     assert 'NABU-SESSION-PROBE shell exit=0' in console
     for args, enabled in (
         ('nabu-session-probe=1 nabu-session-symbols=1', True),

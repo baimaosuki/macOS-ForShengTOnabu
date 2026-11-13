@@ -1,0 +1,31 @@
+# NABU LaunchServices 与 FileCache 核查及修复候选
+
+## 当前实机证据
+
+EVI的lsd216/tid1017高CPU总量90.997552s(user34.509751/system56.487801)，没有该线程栈或系统调用分布。system还包含NABU的EL0 PAC/ARMv8.2指令仿真异常成本，不能全部算成某个syscall。v6的lsd137首轮214.646s快照主线程位于Foundation __NSNewStringByAppendingStrings+0x344，当前指令与有限string-count循环有进展，FP后续失效；未捕获bulk循环，不能把静态缺陷冒充该次高CPU唯一根因。
+
+v6 loginwindow108在308.576s有如下匹配UUID的栈：主线程558在___ulock_wait2→__os_unfair_lock_lock_slow→_FileCacheLockTransitionToPreparer(FileCache+0x28 recursive unfair lock)；调用者是NSApplication init里的NSSafeAperture URL资源属性查询。不是pthread_mutex、HIToolbox或CarbonCore。worker1243通过Foundation NSXPC和LaunchServices同步等待，且位于同一FSURL准备函数分支；该分支持有其自身FileCache preparer锁跨RPC，但两线程FileCache对象地址/锁owner未捕获，不能宣布形成死锁环。worker现有最后IPC早于raw41.39s，266s给coreservicesd的10019已成功、267s给notifyd的1012也已成功；不能把其中任意对端移植成308s同步请求对端。
+
+EVI的403s msg30176已精确定位为SLSGetAppearanceThemeLegacy；v6的AppKit FileCache栈是新的更晚初始化位置，不是该旧RPC的同一现场。原生命周期选择名单未含SecurityAgent/lsd/authd/launchservicesd，且输出依赖console；不存在SecurityAgent exec记录不证明其未启动。ViewBridge是框架名也不是通用必启动进程断言。
+
+## 真实功能缺陷与最小修复
+
+匹配已交付EVI内核的getattrlistbulk在lower union lookup成功后无进展检查就fg_offset=0并重试。若覆盖路径解析回相同mount，则空目录可在syscall内循环，非空目录可重复首批目录项。普通lookup已有SHENG同mount guard。新增desktop/bulk-progress.patch将相同mount回退当作无lower目录的普通EOF，放在MAC检查/引用和fd替换之前，沿用原vnode_put清理。保留正常lower遍历、MAC/授权失败、ref失败、snapshot和ERANGE语义。
+
+测试从固定XNU Git对象ac9718f及原build patch顺序重建生产vfs_attrlist，抽取真正zero-offset及union控制体，对修前/修后各跑12情形：修前复现empty循环/nonempty重读，修后单次EOF返回。实际root镜像Cryptex symlink已核，但当前bindfs路径可能终止于另一mount，因此该bug的可复现不等同证明EVI目录实际命中。
+
+csops所在kern_proc.c及mac_syscall所在mac_base.c与固定原版源码字节一致，原机器码仍分派原检查及错误码。未找到本地返回假成功引起这两调用无限重试的shim。APFS私有函数的cookie和EOF行为未获实机证明，不擅自替换。
+
+## 已修复的观测漏洞
+
+loginwindow入口/完成原本分别共享256记录后1/sec预算，其他tid可吃掉主tid返回，导致403s之后无记录无法解释。现在按tid和call预留entry/receive/final-correction容量，已准入完成不再采样；每60s明确epoch，开发late phase400s更新额度，额度不足有drop，下epoch报告完整丢弃计数。没有把1/sec放开成无限洪水；WS/OD采样保持。
+
+新增lifecycle-diagnostics.patch选入SecurityAgent/authd/lsd/launchservicesd，xpcproxy label仅取自原25F71plist，所有生命周期记录统一单行directRAM，console释放后仍可见。没有假设ViewBridge label。
+
+bootshim v7保留默认raw-only，加入coreservicesd/launchservicesd可选三轮及x0..x28真实原始寄存器；不读取未经验证的私有锁对象，不暂停目标，不伪造owner。
+
+## 集成和交付
+
+两个新desktop patch都位于integrated.patch和session-filesystem.patch之后，不更改历史固定patch和manifest。完整ordinary ARM64 source prepare为out/nabu-ls-filecache-repair/source-prepare；17定向tests及17subtests通过。需Intel完整ARM64内核CI并重新打包ESP，不能只把v6启动工具包换名字。真机尚未验证高CPU或登录桌面已修复。
+
+参考：SHENG27.3 UniXNU dff276535db3ac394f628cec58a718cd46c20ac2 docs/porting/{display,macos,gpu-diagnostics}.md；已导入regularlookup same-mount修复；用户NABUiOS16 a7148554052f42159207245e2070b96492a046da/HakiOS96ffbc532e970f3540885755d457e401e04d4707的原始栈/原生显示完整生命周期思路，地址和ABI仍按25F71匹配。

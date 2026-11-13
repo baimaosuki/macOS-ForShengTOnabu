@@ -23,7 +23,17 @@ Observe selected session IPC peers without retaining or modifying IPC objects.
  	mach_msg_recv_bufs_t recv_bufs = self->ith_recv_bufs;
  	mach_msg_recv_result_t msgr = {
  		.msgr_seqno     = self->ith_seqno,
-@@ -955,8 +961,11 @@
+@@ -401,6 +407,9 @@
+ 	ipc_port_thread_group_unblocked();
+ 
+ 	mr = mach_msg_receive_results(NULL);
++#if defined(NABU) && NABU
++	nabu_session_ipc_continuation_end(mr);
++#endif
+ 	thread_syscall_return(mr);
+ }
+ 
+@@ -955,8 +964,11 @@
  
  	KDBG(MACHDBG_CODE(DBG_MACH_IPC, MACH_IPC_KMSG_INFO) | DBG_FUNC_START);
  
@@ -37,7 +47,7 @@ Observe selected session IPC peers without retaining or modifying IPC objects.
  	mr = ipc_preflight_msg_option64(option64);
  	if (mr != MACH_MSG_SUCCESS) {
  		goto send_fail;
-@@ -1053,13 +1062,17 @@
+@@ -1053,13 +1065,17 @@
  			sync_send = (mach_port_name_t)mr_lp;
  		}
  

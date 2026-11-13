@@ -24,22 +24,24 @@ def probe_policy():
     script = (SOURCE.parent / 'session_probe.sh').read_text()
     header = (SOURCE.parent / 'raw_stacks.h').read_text()
     installer = (SOURCE.parent / 'session_probe.h').read_text()
-    for marker in ('version=6', 'NABU_SESSION_SYMBOLS:-0', 'sample-skipped reason=online-symbols-disabled',
+    for marker in ('version=7', 'NABU_SESSION_SYMBOLS:-0', 'sample-skipped reason=online-symbols-disabled',
                    'run_bounded 120 "$diagnostic" /usr/bin/sample'):
         if marker not in script:
             raise RuntimeError('session probe policy script mismatch: ' + marker)
     for marker in ('CLOCK_UPTIME_RAW', 'clock=mach-uptime', 'rounds=3 after_discovery=0,150,300',
-                   '"WindowServer", "lsd"', 'alarm(515)', 'alarm(10)'):
+                   '"WindowServer", "lsd", "coreservicesd", "launchservicesd"',
+                   'NABU-RAWSTACK gpr tid=', 'basex=28 x28=', 'alarm(515)', 'alarm(10)'):
         if marker not in header:
             raise RuntimeError('session probe policy header mismatch: ' + marker)
     if 'nabu_probe_bootarg_enabled("nabu-session-symbols=1")' not in installer:
         raise RuntimeError('session symbol policy must come from exact bootarg parsing')
-    return dict(version=6, default='raw-only', symbols_bootarg='nabu-session-symbols=1',
+    return dict(version=7, default='raw-only', symbols_bootarg='nabu-session-symbols=1',
                 sample_timeout_seconds=120, raw_clock='CLOCK_UPTIME_RAW',
                 raw_clock_label='mach-uptime', rounds=3,
+                general_registers='x0-x28-raw',
                 after_discovery_seconds=[0, 150, 300],
                 required_targets=['opendirectoryd', 'loginwindow', 'WindowServer'],
-                optional_targets=['lsd'], discovery_timeout_seconds=480,
+                optional_targets=['lsd', 'coreservicesd', 'launchservicesd'], discovery_timeout_seconds=480,
                 watchdog_timeout_seconds=515, per_target_timeout_seconds=10,
                 frames_per_thread=32, threads='enumerate-all-within-time-bound',
                 report_policy='preserve-full-files-relay-bounded-16KiB')
