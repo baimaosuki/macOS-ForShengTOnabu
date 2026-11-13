@@ -56,6 +56,17 @@ int main(void) {
         struct image_params allow=image(args,10+strlen(args+9),2);
         assert(!nabu_minimal_boot_apply(&proxy,&allow,&task) && !holds);
     }
+    /* Regression: actual 25F71 job labels observed parked on the device.
+       These expectations are independent of iterating the production list. */
+    const char *session_dependencies[]={"com.apple.bsd.dirhelper","com.apple.logind",
+        "com.apple.mobile.usermanagerd","com.apple.UserEventAgent-System",
+        "com.apple.UserEventAgent-LoginWindow","com.apple.UserEventAgent-Aqua",
+        "com.apple.xpc.smd","com.apple.loginwindow"};
+    for(unsigned i=0;i<sizeof(session_dependencies)/sizeof(*session_dependencies);i++) {
+        char args[256];memcpy(args,"xpcproxy",9);strcpy(args+9,session_dependencies[i]);
+        struct image_params allow=image(args,10+strlen(args+9),2);
+        assert(!nabu_minimal_boot_apply(&proxy,&allow,&task) && !holds && !logs);
+    }
     const char *blocked[]={"com.apple.cloudd","com.apple.apsd","com.apple.metadata.mds",
         "com.apple.mds_stores","com.apple.trustd","com.apple.syspolicyd",
         "com.apple.endpointsecurityd","com.apple.Kerberos.digest-service",

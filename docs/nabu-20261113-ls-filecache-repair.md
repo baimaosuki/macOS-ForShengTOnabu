@@ -46,3 +46,11 @@ LS旧round2 347.035772343s：PC18031e0a8=__malloc_zone_malloc+70，LR18031eee8=r
 createAndSeedLocalDatabase在180b88a50发布真实server database，读取seeded/complete标志；未播种时先同步处理插件，然后180b88e40通过dispatch_channel_async调度block180b88f6c中的后续目录注册。不能把全部异步扫描耗时直接等同为bootstrap同步锁持有时间。当前packed Data seed persistent=false且无csstore，默认root store路径为/private/var/folders/zz/zyxvpxvq6csfxvn_n0000000000000/0/com.apple.LaunchServices.dv/com.apple.LaunchServices-20971544-v2.csstore。
 
 用户授权的Minimal GUI Boot是独立、默认关闭的服务隔离试验：boot-arg nabu-minimal-boot=1仅放行minimal_boot.h所列27个精确job label（25个指定label和两个原版SecurityAgent别名）；其余xpcproxy在原生exec成功加载后、用户态运行前施加独立内核task hold。父spawn继续完成，代理不正常退出，避免用ENOENT/exit触发KeepAlive重拉；原生user resume不能消耗该kernel hold。此策略不改变Mach RPC成功值、LS数据库内容或原生显示完成语义。明确可能使白名单服务对被屏蔽服务的请求等待；需要实机验证依赖是否足够，不宣称已解决FileCache/LS根因或5秒进桌面。直接执行且不经xpcproxy的服务不由此门控拦截。
+
+首次minimal实机seq9548已证实初版27项依赖不完整：WS在303/453秒均停于
+confstr→dirhelper用户目录创建的同步Mach RPC（msgid47213），而原
+com.apple.bsd.dirhelper被挂起；com.apple.logind、mobile.usermanagerd和
+UserEventAgent-System也被挂起。原loginwindow标签仍是com.apple.loginwindow且原已允许。
+现按原25F71 job定义补7项，共34个精确标签；详细地址、端口及原始日志hash见
+docs/nabu-20261113-minimal-gui-boot.md的实机回归节。
+本次先修复隔离试验引入的前置依赖阻断，不把它冒充为原LS建库等待已修复。

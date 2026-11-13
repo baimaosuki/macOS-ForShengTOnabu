@@ -16,6 +16,16 @@ static const char *const nabu_minimal_boot_allowlist[] = {
     "com.apple.powerd",
     "com.apple.xpc.roleaccountd",
     "com.apple.smd",
+    /* Paired 25F71 job labels required before GUI/session initialization.
+     * WS confstr waits synchronously for bsd.dirhelper (device call 204).
+     * logind owns login-session startup; UserEventAgent dispatches events. */
+    "com.apple.xpc.smd",
+    "com.apple.bsd.dirhelper",
+    "com.apple.logind",
+    "com.apple.mobile.usermanagerd",
+    "com.apple.UserEventAgent-System",
+    "com.apple.UserEventAgent-LoginWindow",
+    "com.apple.UserEventAgent-Aqua",
     "com.apple.WindowServer",
     "com.apple.hidd",
     "com.apple.iohideventsystem",
