@@ -292,6 +292,39 @@ NABU-DISPLAY 报告实际 VBL/队列/提交/显示计数；WS 退出观察也覆
 设备树 /defaults/sleep-disabled=1：沿用 SHENG board.toml 的禁整机睡眠策略，
 避免进入尚未完成的 CPU 睡眠路径。此项无需重编内核，不等于已经修复登录会话。
 '''
+    if (build.get('session_repair') or {}).get('bulk_progress_patch_sha256'):
+        repairs = build['session_repair']
+        for name, key in [('bulk-progress.patch', 'bulk_progress_patch_sha256'),
+                          ('lifecycle-diagnostics.patch', 'lifecycle_diagnostics_patch_sha256')]:
+            if repairs[key] != sha(ROOT / 'platform/nabu/macos26/desktop' / name):
+                raise ValueError('functional repair differs from the compiled kernel: ' + name)
+        probe_build = json.loads((artifact / 'boot-shim/build.json').read_text())
+        delivery['probe_policy'] = probe_build['probe_policy']
+        delivery['implemented'] += [
+            'prevent same-mount union bulk fallback from resetting directory enumeration',
+            'reserve matching loginwindow IPC completion and final continuation result',
+            'direct RAM lifecycle events for SecurityAgent/authd/lsd/launchservicesd']
+        delivery['unresolved'] = [
+            'device validation of union bulk progress guard',
+            'actual LaunchServices mapdb reply and FileCache preparer lock ownership',
+            'interactive login desktop and input validation']
+        delivery['packaging_script_sha256'] = sha(Path(__file__))
+        readme = f"""NABU 25F71 — union directory progress repair candidate
+
+内核 CI {metadata['id']} / {metadata['head_sha']}，cpus={cpu_count}。
+已修复：union getattrlistbulk 回到同一 mount 时清零偏移、循环或重复枚举。
+修前/修后实际控制体覆盖12条路径。此缺陷尚未证明就是实机 lsd 高 CPU 的原因。
+同时修复 loginwindow IPC 独立限流丢失返回；同步和 continuation 均保留最终结果。
+SecurityAgent/authd/lsd/launchservicesd 生命周期改为 direct RAM，console 交接后继续记录。
+
+默认 probe v7 只采原始栈，不运行符号 sample。coreservicesd/launchservicesd/lsd
+为可选取栈目标，三轮在发现后0/150/300秒；真实x0–x28与PC/LR/FP/SP用于离线核查。
+nabu-session-symbols=1 才启用120秒符号sample，已确认会干扰启动，正常验证不添加它。
+
+尚未实机验证已进入桌面；不绕过FileCache锁，不伪造LaunchServices回复或显示完成。
+TWRP 挂载现有 ESP 后，先保存旧文件，再替换本包 EFI 下五个对应文件并 sync/reboot。
+不需要重刷 Data、root、引导器或分区，不覆盖 XNU2LOG.BIN；日志token沿用现有分配。
+"""
     (output / 'README.txt').write_text(readme)
     (output / 'delivery.json').write_text(json.dumps(delivery, indent=2) + '\n')
     archive = output.with_suffix('.zip')
