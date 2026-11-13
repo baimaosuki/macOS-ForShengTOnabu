@@ -35,6 +35,15 @@ constexpr int kIODirectionInOut=1, kIOMapAnywhere=2, kIOMapWriteCombineCache=4;
 static bool baseSuccess=true, familyReady=false, timerMissing=false;
 static int armResult=0, stopCalls=0, armCalls=0, timerEntries=0, swaps=0;
 static bool armed=false;
+static unsigned refreshCalls=0;
+static bool refreshWanted=true;
+static bool nabuVsync25TickGated(void *,unsigned period) {
+    assert(period==16000000);refreshCalls++;return refreshWanted;
+}
+namespace nabu_vsync25 {
+constexpr unsigned kCount=0x100,kLastMach=0x108,kInterval=0x110;
+template<class T> T load(void *,unsigned) { return 1; }
+}
 static std::vector<std::string> logLines;
 template<class... T> void nabuDisplayLog(const char *format,T...) {
     logLines.emplace_back(format);
@@ -89,6 +98,8 @@ struct NativeGOPDisplay : IOMobileFramebufferLegacy {
     NabuGopSourceReaper *fSourceReaper=nullptr;
     IOTimerEventSource *fVBL=timerMissing ? nullptr : &timer;
     uint64_t fTicks=0;
+    bool fDisplayOn=false;
+    uint64_t fVsyncSent=0;
     Platform *getPlatform() { return &platform; }
     unsigned display_width() { return 1600; }
     unsigned display_height() { return 2560; }
@@ -108,6 +119,13 @@ int main() {
     NativeGOPDisplay::vblFired(&display,&timer);
     NativeGOPDisplay::vblFired(&display,&timer);
     assert(swaps==2 && timerEntries==1);
+    assert(refreshCalls==0 && display.fVsyncSent==0);
+    display.fDisplayOn=true;
+    NativeGOPDisplay::vblFired(&display,&timer);
+    assert(refreshCalls==1 && display.fVsyncSent==1 && swaps==3);
+    refreshWanted=false;
+    NativeGOPDisplay::vblFired(&display,&timer);
+    assert(refreshCalls==2 && display.fVsyncSent==1 && swaps==4);
     familyReady=false; baseSuccess=false;
     NativeGOPDisplay failedBase;
     assert(!failedBase.start(&provider));
