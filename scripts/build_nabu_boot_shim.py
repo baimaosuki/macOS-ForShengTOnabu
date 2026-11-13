@@ -30,7 +30,7 @@ def probe_policy():
             raise RuntimeError('session probe policy script mismatch: ' + marker)
     for marker in ('CLOCK_UPTIME_RAW', 'clock=mach-uptime', 'rounds=3 after_discovery=0,150,300',
                    '"WindowServer", "lsd", "coreservicesd", "launchservicesd"',
-                   'NABU-RAWSTACK gpr tid=', 'basex=28 x28=', 'alarm(515)', 'alarm(10)'):
+                   'powerd_after_discovery=0,60,120', 'NABU-RAWSTACK gpr tid=', 'basex=28 x28=', 'alarm(515)', 'alarm(10)'):
         if marker not in header:
             raise RuntimeError('session probe policy header mismatch: ' + marker)
     if 'nabu_probe_bootarg_enabled("nabu-session-symbols=1")' not in installer:
@@ -41,7 +41,8 @@ def probe_policy():
                 general_registers='x0-x28-raw',
                 after_discovery_seconds=[0, 150, 300],
                 required_targets=['opendirectoryd', 'loginwindow', 'WindowServer'],
-                optional_targets=['lsd', 'coreservicesd', 'launchservicesd'], discovery_timeout_seconds=480,
+                optional_targets=['lsd', 'coreservicesd', 'launchservicesd', 'powerd'],
+                powerd_after_discovery_seconds=[0, 60, 120], discovery_timeout_seconds=480,
                 watchdog_timeout_seconds=515, per_target_timeout_seconds=10,
                 frames_per_thread=32, threads='enumerate-all-within-time-bound',
                 report_policy='preserve-full-files-relay-bounded-16KiB')

@@ -342,11 +342,11 @@ nabu_probe_relay(const char *name)
 static int
 nabu_raw_watch(void)
 {
-    const char *names[] = {"opendirectoryd", "loginwindow", "WindowServer", "lsd", "coreservicesd", "launchservicesd"};
-    unsigned rounds[6] = {0}, done = 0, observed = 0;
-    uint64_t first[6] = {0}, started = nabu_raw_clock_ns();
-    printf("NABU-RAWSTACK watch begin timeout=480 polling_ms=500 rounds=3 after_discovery=0,150,300\n");
-    while ((done & (7u | (observed & 56u))) != (7u | (observed & 56u)) &&
+    const char *names[] = {"opendirectoryd", "loginwindow", "WindowServer", "lsd", "coreservicesd", "launchservicesd", "powerd"};
+    unsigned rounds[7] = {0}, done = 0, observed = 0;
+    uint64_t first[7] = {0}, started = nabu_raw_clock_ns();
+    printf("NABU-RAWSTACK watch begin timeout=480 polling_ms=500 rounds=3 after_discovery=0,150,300 powerd_after_discovery=0,60,120\n");
+    while ((done & (7u | (observed & 120u))) != (7u | (observed & 120u)) &&
         nabu_raw_clock_ns() - started < UINT64_C(480000000000)) {
         int mib[] = {CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0};
         size_t bytes = 0;
@@ -357,10 +357,10 @@ nabu_raw_watch(void)
                 bytes = capacity;
                 if (!sysctl(mib, 4, list, &bytes, NULL, 0) && bytes <= capacity && !(bytes % sizeof(*list))) {
                     for (size_t i = 0; i < bytes / sizeof(*list); ++i) {
-                        for (unsigned n = 0; n < 6; ++n) {
+                        for (unsigned n = 0; n < 7; ++n) {
                             uint64_t now = nabu_raw_clock_ns();
                             if (!now || (done & (1u << n)) ||
-                                (rounds[n] && now - first[n] < (uint64_t)rounds[n] * UINT64_C(150000000000)) ||
+                                (rounds[n] && now - first[n] < (uint64_t)rounds[n] * (n == 6 ? UINT64_C(60000000000) : UINT64_C(150000000000))) ||
                                 list[i].kp_proc.p_pid <= 1 ||
                                 strncmp(list[i].kp_proc.p_comm, names[n], sizeof(list[i].kp_proc.p_comm)))
                                 continue;
@@ -398,13 +398,13 @@ nabu_raw_watch(void)
         } else {
             printf("NABU-RAWSTACK watch sysctl-size errno=%d bytes=%zu\n", errno, bytes);
         }
-        if ((done & (7u | (observed & 56u))) != (7u | (observed & 56u)))
+        if ((done & (7u | (observed & 120u))) != (7u | (observed & 120u)))
             usleep(500000);
     }
-    for (unsigned n = 3; n < 6; ++n)
+    for (unsigned n = 3; n < 7; ++n)
         if (!(observed & (1u << n)))
             printf("NABU-RAWSTACK watch optional-not-observed target=%s\n", names[n]);
-    printf("NABU-RAWSTACK watch end observed_mask=%u completed_mask=%u required_mask=7 optional_mask=56\n", observed, done);
+    printf("NABU-RAWSTACK watch end observed_mask=%u completed_mask=%u required_mask=7 optional_mask=120\n", observed, done);
     return (done & 7u) == 7u ? 0 : 1;
 }
 #endif

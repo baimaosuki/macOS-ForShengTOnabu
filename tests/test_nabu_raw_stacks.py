@@ -75,7 +75,7 @@ static int fixture_clock(int clock,struct timespec *now){assert(clock==CLOCK_UPT
 static int fixture_usleep(unsigned micros){assert(micros==500000);clock_seconds+=75;return 0;}
 static pid_t fixture_fork(void){forks++;return 777;}
 static pid_t fixture_wait(pid_t pid,int *status,int flags){assert(pid==777&&!flags);*status=0;waits++;return pid;}
-static int sysctl(int *mib,unsigned n,void *out,size_t *bytes,void *in,size_t inbytes){assert(mib[0]==1&&n==4&&!in&&!inbytes);if(!out){*bytes=watch_count*sizeof(struct kinfo_proc);return 0;}assert(*bytes>=watch_count*sizeof(struct kinfo_proc));struct kinfo_proc *p=out;const char *names[]={"opendirectoryd","loginwindow","WindowServer","lsd","coreservicesd","launchservicesd"};for(unsigned i=0;i<watch_count;i++){p[i].kp_proc.p_pid=(clock_seconds>=151?400:300)+(int)i;strcpy(p[i].kp_proc.p_comm,names[i]);}*bytes=watch_count*sizeof(*p);return 0;}
+static int sysctl(int *mib,unsigned n,void *out,size_t *bytes,void *in,size_t inbytes){assert(mib[0]==1&&n==4&&!in&&!inbytes);if(!out){*bytes=watch_count*sizeof(struct kinfo_proc);return 0;}assert(*bytes>=watch_count*sizeof(struct kinfo_proc));struct kinfo_proc *p=out;const char *names[]={"opendirectoryd","loginwindow","WindowServer","lsd","coreservicesd","launchservicesd","powerd"};for(unsigned i=0;i<watch_count;i++){p[i].kp_proc.p_pid=(clock_seconds>=151?400:300)+(int)i;strcpy(p[i].kp_proc.p_comm,names[i]);}*bytes=watch_count*sizeof(*p);return 0;}
 #define clock_gettime fixture_clock
 #define usleep fixture_usleep
 #define fork fixture_fork
@@ -108,8 +108,8 @@ int main(void){
  struct mach_header_64 *mh=(void*)image_commands;*mh=(struct mach_header_64){.magic=MH_MAGIC_64,.cputype=CPU_TYPE_ARM64,.ncmds=1,.sizeofcmds=24};struct uuid_command *uc=(void*)(image_commands+sizeof(*mh));*uc=(struct uuid_command){.cmd=LC_UUID,.cmdsize=24};uc->uuid[0]=0xcd;
  args[1]="321";assert(!nabu_raw_stacks_command(2,args));assert(strstr(output,"cache slide=0x123000")&&strstr(output,"uuid=ab0000")&&strstr(output,"uuid=cd0000")&&strstr(output,"images-consistent=1"));
  assert(nabu_probe_relay("../escape")==2);
- reset(0);assert(!nabu_raw_watch());assert(forks==9&&waits==9);assert(strstr(output,"target_pid=300 round=1")&&strstr(output,"target_pid=400 round=2")&&strstr(output,"target_pid=400 round=3")&&strstr(output,"clock=mach-uptime")&&strstr(output,"completed_mask=7")&&strstr(output,"optional-not-observed target=lsd")&&strstr(output,"optional-not-observed target=coreservicesd")&&strstr(output,"optional-not-observed target=launchservicesd"));assert(clock_seconds==301);
- reset(0);watch_count=6;clock_seconds=1;forks=waits=0;assert(!nabu_raw_watch());assert(forks==18&&waits==18);assert(strstr(output,"target_pid=303 round=1")&&strstr(output,"target_pid=405 round=3")&&strstr(output,"completed_mask=63")&&!strstr(output,"optional-not-observed"));
+ reset(0);assert(!nabu_raw_watch());assert(forks==9&&waits==9);assert(strstr(output,"target_pid=300 round=1")&&strstr(output,"target_pid=400 round=2")&&strstr(output,"target_pid=400 round=3")&&strstr(output,"clock=mach-uptime")&&strstr(output,"completed_mask=7")&&strstr(output,"optional-not-observed target=lsd")&&strstr(output,"optional-not-observed target=coreservicesd")&&strstr(output,"optional-not-observed target=launchservicesd"));assert(clock_seconds==301);assert(strstr(output,"optional-not-observed target=powerd"));
+ reset(0);watch_count=7;clock_seconds=1;forks=waits=0;assert(!nabu_raw_watch());assert(forks==21&&waits==21);assert(strstr(output,"target_pid=303 round=1")&&strstr(output,"target_pid=405 round=3")&&strstr(output,"completed_mask=127")&&!strstr(output,"optional-not-observed"));assert(strstr(output,"target_pid=306 round=2")&&strstr(output,"target_pid=406 round=3"));
  const char *invalid[]={"0","1","-3","321x","2147483648","999999999999999999999",""};
  for(unsigned i=0;i<sizeof(invalid)/sizeof(*invalid);i++){args[1]=(char*)invalid[i];assert(nabu_raw_stacks_command(2,args)==2);}
  return 0;
