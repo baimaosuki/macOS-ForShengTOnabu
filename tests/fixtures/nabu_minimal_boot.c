@@ -82,13 +82,26 @@ int main(void) {
         struct image_params allow=image(args,10+strlen(args+9),2);
         assert(!nabu_minimal_boot_apply(&proxy,&allow,&task) && !holds && !logs);
     }
+    /* Fully admit system/user service jobs, aliases and dynamic proxy labels. */
+    const char *xpc_services[]={"com.apple.tccd", "com.apple.tccd.system",
+        "com.apple.tccd.agent.session", "com.apple.iconservicesd",
+        "com.apple.iconservicesd.session", "com.apple.iconservicesagent",
+        "com.apple.iconservicesagent.session", "com.apple.lsd",
+        "com.apple.lsd.agent", "com.apple.lsd.extra",
+        "com.apple.lsd.49A8D542-60C9-45F4-B0A0-7FECD5AD98D4",
+        "com.apple.coreservices.launchservicesd.session"};
+    for(unsigned i=0;i<sizeof(xpc_services)/sizeof(*xpc_services);i++) {
+        char args[256];memcpy(args,"xpcproxy",9);strcpy(args+9,xpc_services[i]);
+        struct image_params allow=image(args,10+strlen(args+9),2);
+        assert(!nabu_minimal_boot_apply(&proxy,&allow,&task) && !holds && !logs);
+    }
     const char *blocked[]={"com.apple.cloudd","com.apple.apsd","com.apple.metadata.mds",
         "com.apple.mds_stores","com.apple.trustd","com.apple.syspolicyd",
         "com.apple.endpointsecurityd","com.apple.Kerberos.digest-service",
         "com.apple.softwareupdated","com.apple.mobileassetd","com.apple.biomed",
         "com.apple.duetexpertd","com.apple.contextstored","com.apple.locationd",
         "com.apple.airportd","com.apple.audio.coreaudiod","com.apple.appleh13camerad",
-        "com.apple.symptomsd","com.apple.watchdogd","com.apple.lsd.extra",
+        "com.apple.symptomsd","com.apple.watchdogd",
         "com.apple.unknown", "com.apple.mobile.keybagd", "com.apple.keybagd",
         "com.apple.bluetoothd", "com.apple.endpointsecurity.endpointsecurityd",
         "com.apple.mobile.softwareupdated", "com.apple.loginwindowFake.session",

@@ -354,6 +354,7 @@ LS 实机第二轮栈已落在 CFIterateDirectory/opendir；尚未捕获具体�
 本包启用 nabu-minimal-boot=1。放行 minimal_boot.h 中的指定 xpcproxy 服务标签及前缀，
 包括 loginwindow.UUID、SecurityAgent 的实例和用户指定的核心服务命名空间。
 补回 sandboxd、iconservices 及 CoreServices 实际等待的 diskarbitrationd；
+完整放行 tccd、lsd、iconservicesd/iconservicesagent 的系统/用户任务与动态代理标签。
 cloudd、apsd、mds、trustd、syspolicyd、endpointsecurityd、keybagd 等继续拦截。
 其他 xpcproxy 在进入用户态前施加内核 task hold：保持 PID 存活，避免普通退出触发
 KeepAlive 重拉；正常 task resume / SIGCONT 不释放该独立内核 hold。记录前64次挂起。

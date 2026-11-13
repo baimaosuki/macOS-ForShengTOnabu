@@ -43,6 +43,8 @@ static const char *const nabu_minimal_boot_allowlist[] = {
     "com.apple.sandboxd",
     "com.apple.iconservices.iconservicesd",
     "com.apple.iconservices.iconservicesagent",
+    "com.apple.iconservicesd",
+    "com.apple.iconservicesagent",
     /* Native CoreServices FS initialization waits for Disk Arbitration. */
     "com.apple.diskarbitrationd",
     /* Paired 25F71 SecurityAgent job labels, not executable/service guesses. */
@@ -61,6 +63,9 @@ static const char *const nabu_minimal_boot_allow_prefixes[] = {
     "com.apple.cfprefsd.",
     "com.apple.distnoted.",
     "com.apple.iconservices.",
+    "com.apple.iconservicesd",
+    "com.apple.iconservicesagent",
+    "com.apple.lsd",
     "com.apple.tccd",
 };
 

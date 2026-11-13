@@ -636,6 +636,8 @@ def prepare() -> dict:
                           header_sha256=sha(PLATFORM / 'desktop/minimal_boot.h'),
                           matching='exact job labels and explicitly requested namespace prefixes',
                           instance_namespaces=['com.apple.loginwindow.', 'com.apple.security.agent'],
+                          gui_xpc_namespaces=['com.apple.tccd', 'com.apple.iconservices.',
+                              'com.apple.iconservicesd', 'com.apple.iconservicesagent', 'com.apple.lsd'],
                           patch_sha256=sha(PLATFORM / 'desktop/minimal-boot.patch'),
                           blocked_policy='kernel task hold before xpcproxy userspace entry; proxy stays alive',
                           log_limit=64, device_verified=False),

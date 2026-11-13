@@ -1,8 +1,8 @@
 # NABU Minimal GUI Boot test ESP
 
-用户要求以可回退的白名单隔离并发服务负载。boot-arg `nabu-minimal-boot=1`精确开启；缺省、0或其他值不启用。初版25个指定标签加两个原版SecurityAgent标签，共27个；实机暴露会话依赖缺失后，按下面证据补7个精确job标签，上一版共34个；最新MS实机回归证明动态实例仍被误拦，本版为38个精确标签加9个显式前缀，见末节。
+用户要求以可回退的白名单隔离并发服务负载。boot-arg `nabu-minimal-boot=1`精确开启；缺省、0或其他值不启用。初版25个指定标签加两个原版SecurityAgent标签，共27个；实机暴露会话依赖缺失后，按下面证据补7个精确job标签，上一版共34个；最新MS实机回归证明动态实例仍被误拦，该版为38个精确标签加9个显式前缀；MI之后按用户要求扩大为40个精确标签加12个前缀，见末节。
 
-实现位于`platform/nabu/macos26/desktop/minimal_boot.h`与`minimal-boot.patch`。构建只追加补丁，不修改既有integrated/upstream固定hash。门控位于kern_exec.c原生POSIX_SPAWN_START_SUSPENDED处理前，使用成功复制的kernel argv[1]，不重复读取父任务可变的userspace argv。只处理实际p_comm=xpcproxy的新映像，标签先精确比较，再对9个指定命名空间使用strncmp前缀比较；未知、缺失、过长或截断标签保持代理挂起。
+实现位于`platform/nabu/macos26/desktop/minimal_boot.h`与`minimal-boot.patch`。构建只追加补丁，不修改既有integrated/upstream固定hash。门控位于kern_exec.c原生POSIX_SPAWN_START_SUSPENDED处理前，使用成功复制的kernel argv[1]，不重复读取父任务可变的userspace argv。只处理实际p_comm=xpcproxy的新映像，标签先精确比较，再对12个指定命名空间使用strncmp前缀比较；未知、缺失、过长或截断标签保持代理挂起。
 
 被阻止的任务调用原生`task_hold_and_wait(task,false)`，对新的子任务增加kernel suspend_count；不会增加user_stop_count。因此launchd原有START_SUSPENDED的resume或SIGCONT不能释放这份独立内核hold。父spawn任务不被hold，继续原生属性、签名、端口绑定和返回。任务停在进入dyld/xpcproxy用户态前，不执行服务主体；PID存活，避免正常退出引发KeepAlive循环。代理仍可被原生终止/系统重启清除；若launchd另有显式kill/超时策略，仍需实机确认，未伪造check-in或服务就绪。
 
@@ -97,3 +97,28 @@ MS中WS已走过旧dirhelper阻塞，现停在RBSConnection握手/HID会话初�
 syspolicyd、endpointsecurityd、keybagd、contextstored、bluetoothd、locationd、coreaudiod、softwareupdated拒绝，
 并覆盖相似但不属于带点命名空间的loginwindowFake/coreservicesFake/cfprefsdFake等标签。
 这是修复门控引入的确定回归及已证实缺失的DA依赖；不声明已解决原LS等待或真机桌面已显示。
+
+## MI 回归验证及用户指定的 GUI XPC 完整放行
+
+XNU2LOG-mi.BIN SHA256=e9e9f81dd28b8e29771fa7ac88843b2bdf1302cd00121ca30b1ccd4a1a507f8d；
+双slot有效，seq10093，boot_id=f671cc3c000000002b26000000000000，overwritten0/lock_lost14。
+正文621172字节/3382行，SHA256=eae3d696c21a28baf25e85d8dede279bf0ca857fd549496fd4ad5c721af8ed33；
+用户TXT621423字节/3388行，以原正文完整结尾，差异仅为提取器头。最大t_ns=279000315312。
+新内核编译时间17:26:26 UTC对应CI43470309600；loginwindow109在151.170065364秒exec成功，未再被parked。
+199.442479218秒display on；239.729090572秒firstswap；240.035533281和240.403141770秒原生完成1/2。
+两帧4096000像素均RGB全黑、alpha非零；layer1/2明确state=clear，不是有内容却没合成。
+last_displayed_id=2、queue_head=0，不能以current_request=0或非阻塞Busy推断遗漏退休通知。
+
+本轮loginwindow109/tid476最后一条IPC是209.392484166秒call2259，msgid73023，
+remote3a23/receive903；端口快照明确对端powerd46、接收端c03，正文结束前未记录对应返回。
+这提示下一步要定位该原生PM RPC；尚无该时点powerd栈，不能把它确定成唯一死锁根因。
+raw首轮快照在139~153秒，均是早期dyld/sandbox初始化；日志279秒结束，未到300/450秒后续快照。
+不能拿首轮dyld栈冒充209秒之后的阻塞栈，也不能凭too-large推断服务被白名单拦截。
+
+用户明确要求继续完整放行tccd、iconservicesd、lsd及代理。现有com.apple.tccd和
+com.apple.iconservices.前缀已覆盖原25F71 system/agent job，仍保留；新增无中间命名空间的
+com.apple.iconservicesd、com.apple.iconservicesagent精确别名和前缀，另加入com.apple.lsd前缀。
+lsd原版daemon和agent使用同一个Label=com.apple.lsd，分别以runAsRoot参数区分；
+本版接受其所有动态后缀。现40个精确标签+12个前缀。测试包括system/agent、UUID后缀、
+原有动态loginwindow和SecurityAgent、launchservicesd，以及所有原指定云/非核心服务继续deny。
+不改Mach消息大小、接收缓冲、返回码、RPC超时和显示完成语义，不宣称此次放行即证实黑屏根因。

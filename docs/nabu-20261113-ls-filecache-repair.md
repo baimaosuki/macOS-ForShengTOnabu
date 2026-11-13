@@ -66,3 +66,10 @@ coreservicesd的两个线程分别在DAServerSessionCreate→DASessionCreate→_
 _FSGetDiskArbSession→FSScheduleFileVolumeOperations等待，而diskarbitrationd已parked，故同批恢复此依赖。
 MS中WS已不在dirhelper，现是RBSConnection握手/HID初始化；没有实机证据表明原FileCache/LS根因已修。
 完整hash、实例标签和前缀清单见nabu-20261113-minimal-gui-boot.md最新节。
+
+
+MI seq10093已实机确认动态loginwindow误拦解除：151.17秒exec，199.44秒display on，
+240秒两帧scanout/nativecomplete结束，但仍纯黑。loginwindow主线程209.392秒发送powerd73023后未见返回；
+现有raw栈早于该时点，缺少后续PM栈，不能将too-large或旧LS等待直接判定为本轮根因。
+按用户后续明确要求再扩展lsd及iconservicesd/agent命名空间，tccd保留完整前缀放行；
+40个精确标签+12前缀，其他云服务继续deny。完整证据与限制见minimal-gui-boot文档末节。
