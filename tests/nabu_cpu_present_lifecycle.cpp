@@ -8,9 +8,22 @@
 #include <condition_variable>
 #include <thread>
 #include <chrono>
+#include <cstdarg>
+#include <cstdio>
+#include <string>
 #include "../platform/nabu/macos26/display/nabu_cpu_present.h"
 #include "../platform/sheng/macos26/log/framebuffer_owner.h"
 sheng_framebuffer_owner sheng_framebuffer{};
+extern "C" { int disableConsoleOutput=0; }
+static std::mutex traceMutex;
+static std::vector<std::string> traceLines;
+static uint64_t mach_absolute_time() { return 1000000; }
+static void absolutetime_to_nanoseconds(uint64_t ticks,uint64_t *ns) { *ns=ticks; }
+extern "C" void nabu_capture_append(const char *data,unsigned bytes) {
+    std::lock_guard<std::mutex> guard(traceMutex);traceLines.emplace_back(data,bytes);
+}
+#define NABU_DISPLAY_TRACE_HOST_TEST
+#include "../platform/nabu/macos26/display/nabu_display_trace.h"
 volatile uint64_t sheng_panel_ready = 1, sheng_status_pixels = 1;
 static constexpr int kIOReturnSuccess=0,kIOMapAnywhere=0,kIOMapReadOnly=0,kPEDisableScreen=0,kPEEnableScreen=1;
 static constexpr uint32_t kFormatBGRA=0x42475241,kFormatRGhA=0x52476841;
@@ -21,16 +34,16 @@ static std::atomic<bool> blockRelease{false},releaseEntered{false};
 static std::atomic<unsigned> activeMaps{0},mapCalls{0},mapReleases{0},prepareCalls{0},completeCalls{0},workers{0};
 static void *IOMalloc(uint64_t n) {return malloc(n);}
 static void IOFree(void *p,uint64_t) {free(p);}
-static void IOLog(const char *,...) {}
 static int handoffFailure=0;static unsigned screenEnabled=0;
 static uint32_t *firstScanout=nullptr;
 static void PE_initialize_console(void *,int op) {
     if (op==kPEDisableScreen) {
         if(firstScanout)assert(firstScanout[0]==0xdeadbeef);
         screenDisabled++;
+        disableConsoleOutput=1;
         if(handoffFailure==1)sheng_framebuffer.writer=1;
         if(handoffFailure==2)sheng_framebuffer.owner=SHENG_FB_PANIC;
-    } else {screenEnabled++;sheng_framebuffer.writer=0;}
+    } else {screenEnabled++;sheng_framebuffer.writer=0;disableConsoleOutput=0;}
 }
 static void sheng_boot_checkpoint(int) {}
 static uint8_t halfToByte(uint16_t half) {return half==0x3c00?255:0;}
@@ -157,6 +170,17 @@ int main() {
     at<uint32_t>(cursor.memory.bytes.data(),0)=0;at<uint32_t>(cursor.memory.bytes.data(),4)=0xff00ff00;
     IOMFBSwapIORequest first;layer(first,0,&root,{0,0,4,2},{0,0,4,2});layer(first,1,&cursor,{0,0,2,1},{0,0,2,1});
     firstScanout=scanout;present(d,first);firstScanout=nullptr;assert(d.fFrames==1&&d.nativeComplete==1&&screenDisabled==1);
+    // Execute the real trace helper with console disabled: native copy and
+    // completion diagnostics must remain in RAM after first-frame takeover.
+    for(const char *marker:{"console-disable-done", "scanout-copy-done", "complete=1"}) {
+        bool found=false;
+        for(const auto &line:traceLines) if(line.find(marker)!=std::string::npos &&
+            line.find("console_disabled=1")!=std::string::npos &&
+            line.find("t_ns=1000000")!=std::string::npos)found=true;
+        assert(found);
+    }
+    nabuDisplayLog("NABU-DISPLAY: long=%s\n",std::string(2048,'x').c_str());
+    assert(traceLines.back().size()<640 && traceLines.back().back()=='\n');
     assert(scanout[0]==0xffff0000&&scanout[1]==0xff00ff00&&scanout[4]==0xdeadbeef&&scanout[5]==0xdeadbeef);
     assert(d.fLastLit==8&&!root.memory.prepared&&!cursor.memory.prepared);
     // Cursor-only swap inherits root, restores old cursor pixels, and maps the retained native backing directly.

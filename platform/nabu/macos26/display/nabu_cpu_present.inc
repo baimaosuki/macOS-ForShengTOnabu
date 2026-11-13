@@ -34,7 +34,7 @@ void NativeGOPDisplay::program_hardware_gated()
             // The family's validity check ignores disabled (zero-area) planes.
             if (!src.width || !src.height || !dst.width || !dst.height) continue;
             if (fFrames < 4 && fCopyFailures < 4)
-                IOLog("NABU-DISPLAY: swap=%u mask=%#x layer=%u updated=%u surface=%p src=%d,%d,%d,%d dst=%d,%d,%d,%d rotation=%u\n",
+                nabuDisplayLog("NABU-DISPLAY: swap=%u mask=%#x layer=%u updated=%u surface=%p src=%d,%d,%d,%d dst=%d,%d,%d,%d rotation=%u\n",
                       swapID, mask, i, updated, surface, src.x, src.y, src.width, src.height,
                       dst.x, dst.y, dst.width, dst.height, rotation);
             if (rotation || !copyLayer(surface, src, dst, i == 1 &&
@@ -43,7 +43,7 @@ void NativeGOPDisplay::program_hardware_gated()
         }
     }
     if (fFrames < 4 && fCopyFailures < 4)
-        IOLog("NABU-DISPLAY: planes-done swap=%u active=%#x success=%u\n", swapID, active, success);
+        nabuDisplayLog("NABU-DISPLAY: planes-done swap=%u active=%#x success=%u\n", swapID, active, success);
     // Do not replace the diagnostics with an empty first scene. A later
     // explicit plane clear is a valid black presentation.
     if (!active && !fFrames) success = false;
@@ -51,17 +51,17 @@ void NativeGOPDisplay::program_hardware_gated()
         const bool first = fFrames == 0;
         bool claimed = !first || sheng_fb_claim_gui();
         if (fFrames < 4 && fCopyFailures < 4)
-            IOLog("NABU-DISPLAY: claim swap=%u claimed=%u first=%u\n", swapID, claimed, first);
+            nabuDisplayLog("NABU-DISPLAY: claim swap=%u claimed=%u first=%u\n", swapID, claimed, first);
         if (claimed) {
             // Native vcputc does not consult the shared diagnostic owner.
             // All source pixels are staged; drain/disable that console before
             // the first GOP store so it cannot overwrite the new GUI image.
             if (first) {
-                IOLog("NABU-DISPLAY: console-disable-begin swap=%u\n", swapID);
+                nabuDisplayLog("NABU-DISPLAY: console-disable-begin swap=%u\n", swapID);
                 PE_initialize_console(nullptr, kPEDisableScreen);
-                IOLog("NABU-DISPLAY: console-disable-done swap=%u\n", swapID);
+                nabuDisplayLog("NABU-DISPLAY: console-disable-done swap=%u\n", swapID);
             }
-            if (fFrames < 4 && fCopyFailures < 4) IOLog("NABU-DISPLAY: scanout-copy-begin swap=%u\n", swapID);
+            if (fFrames < 4 && fCopyFailures < 4) nabuDisplayLog("NABU-DISPLAY: scanout-copy-begin swap=%u\n", swapID);
             uint64_t lit = 0, center = 0;
             for (uint64_t y = 0; y < fVideo.v_height; y++) {
                 uint32_t *row = fComposition + y * fVideo.v_width;
@@ -75,7 +75,7 @@ void NativeGOPDisplay::program_hardware_gated()
 #if defined(__aarch64__)
             __asm__ volatile("dsb sy" ::: "memory");
 #endif
-            if (fFrames < 4 && fCopyFailures < 4) IOLog("NABU-DISPLAY: scanout-copy-done swap=%u rows=%lu success=%u\n", swapID, fVideo.v_height, success);
+            if (fFrames < 4 && fCopyFailures < 4) nabuDisplayLog("NABU-DISPLAY: scanout-copy-done swap=%u rows=%lu success=%u\n", swapID, fVideo.v_height, success);
             success = success && __atomic_load_n(&sheng_framebuffer.owner, __ATOMIC_ACQUIRE) == SHENG_FB_GUI;
             if (success) {
                 fFrames++;
@@ -85,8 +85,10 @@ void NativeGOPDisplay::program_hardware_gated()
                     sheng_boot_checkpoint(9);
                 }
                 if (fFrames <= 8 || fFrames % 50 == 0)
-                    IOLog("NABU-DISPLAY: frame=%llu swap=%u update=%#x active=%#x pixels=%llu lit=%llu centre=%#llx copied=1\n",
-                          fFrames, swapID, mask, active, uint64_t(fVideo.v_width) * fVideo.v_height, lit, center);
+                    nabuDisplayLog("NABU-DISPLAY: frame=%llu swap=%u update=%#x active=%#x pixels=%llu lit=%llu centre=%#llx copied=1\n",
+                          (unsigned long long)fFrames, swapID, mask, active,
+                          (unsigned long long)(uint64_t(fVideo.v_width) * fVideo.v_height),
+                          (unsigned long long)lit, (unsigned long long)center);
             } else if (first && __atomic_load_n(&sheng_framebuffer.owner, __ATOMIC_ACQUIRE) == SHENG_FB_GUI) {
                 sheng_fb_abort_gui();
                 if (__atomic_load_n(&sheng_framebuffer.owner, __ATOMIC_ACQUIRE) == SHENG_FB_BOOT)
@@ -97,20 +99,21 @@ void NativeGOPDisplay::program_hardware_gated()
     if (!success) {
         fCopyFailures++;
         if (fCopyFailures <= 8 || fCopyFailures % 50 == 0)
-            IOLog("NABU-DISPLAY: swap=%u update=%#x copy_failed=%llu shown=%llu active=%#x\n",
-                  swapID, mask, fCopyFailures, fFrames, active);
+            nabuDisplayLog("NABU-DISPLAY: swap=%u update=%#x copy_failed=%llu shown=%llu active=%#x\n",
+                  swapID, mask, (unsigned long long)fCopyFailures, (unsigned long long)fFrames, active);
         // Error retirement releases this request and signals its real native
         // completion state; it must not be reported as a displayed swap.
         failCurrentSwap(swap);
         fDropped++;
         return;
     }
-    if (fFrames <= 4) IOLog("NABU-DISPLAY: native-complete-begin swap=%u\n", swapID);
+    if (fFrames <= 4) nabuDisplayLog("NABU-DISPLAY: native-complete-begin swap=%u\n", swapID);
     swap_complete_gated();
     fCompleted++;
     if (fCompleted <= 8 || fCompleted % 50 == 0)
-        IOLog("NABU-DISPLAY: swap=%u complete=%llu shown=%llu current=%p\n",
-              swapID, fCompleted, fFrames, at<IOMFBSwapIORequest *>(this, kCurrentSwap));
+        nabuDisplayLog("NABU-DISPLAY: swap=%u complete=%llu shown=%llu current=%p\n",
+              swapID, (unsigned long long)fCompleted, (unsigned long long)fFrames,
+              at<IOMFBSwapIORequest *>(this, kCurrentSwap));
 }
 
 void NativeGOPDisplay::failCurrentSwap(IOMFBSwapIORequest *swap)
@@ -164,8 +167,10 @@ bool NativeGOPDisplay::copyLayer(IOSurface *surface, const NabuGopRect &src,
     }
     if (!slot.mapping) {
         if (fFrames < 4 && fCopyFailures < 4)
-            IOLog("NABU-DISPLAY: source-map-begin frame=%llu memory=%p format=%#x size=%llux%llu row=%llu base=%llu span=%llu\n",
-                  fFrames + 1, memory, format, width, height, rowBytes, base, span);
+            nabuDisplayLog("NABU-DISPLAY: source-map-begin frame=%llu memory=%p format=%#x size=%llux%llu row=%llu base=%llu span=%llu\n",
+                  (unsigned long long)(fFrames + 1), memory, format,
+                  (unsigned long long)width, (unsigned long long)height,
+                  (unsigned long long)rowBytes, (unsigned long long)base, (unsigned long long)span);
         if (span > (512ULL << 20)) return false;
         IOMemoryMap *mapping = memory->createMappingInTask(kernel_task, 0,
             kIOMapAnywhere | kIOMapReadOnly, base, span);
@@ -178,7 +183,7 @@ bool NativeGOPDisplay::copyLayer(IOSurface *surface, const NabuGopRect &src,
         ? reinterpret_cast<const uint8_t *>(slot.mapping->getVirtualAddress()) : nullptr;
     if (!source) return false;
     if (fFrames < 4 && fCopyFailures < 4)
-        IOLog("NABU-DISPLAY: source-map-ready frame=%llu bytes=%llu cached=1\n", fFrames + 1, span);
+        nabuDisplayLog("NABU-DISPLAY: source-map-ready frame=%llu bytes=%llu cached=1\n", (unsigned long long)(fFrames + 1), (unsigned long long)span);
     uint64_t previousY = UINT64_MAX;
     for (int64_t y = clip.y0; y < clip.y1; y++) {
         const uint64_t sy = src.y + uint64_t(y - dst.y) * uint64_t(src.height) / uint64_t(dst.height);
@@ -189,8 +194,8 @@ bool NativeGOPDisplay::copyLayer(IOSurface *surface, const NabuGopRect &src,
         nabuGopLayerRow(fComposition + y * fVideo.v_width, fRow, src, dst, clip,
                        format == kFormatRGhA ? fHalfToByte : nullptr, cursor);
     }
-    if (fFrames < 4 && fCopyFailures < 4) IOLog("NABU-DISPLAY: source-copy-done frame=%llu rows=%llu\n", fFrames + 1, uint64_t(clip.y1 - clip.y0));
+    if (fFrames < 4 && fCopyFailures < 4) nabuDisplayLog("NABU-DISPLAY: source-copy-done frame=%llu rows=%llu\n", (unsigned long long)(fFrames + 1), (unsigned long long)(clip.y1 - clip.y0));
     // The slot keeps the map+IOMD alive. No map destructor/unmap runs here.
-    if (fFrames < 4 && fCopyFailures < 4) IOLog("NABU-DISPLAY: source-copy-return frame=%llu plane=%u retained=1\n", fFrames + 1, plane);
+    if (fFrames < 4 && fCopyFailures < 4) nabuDisplayLog("NABU-DISPLAY: source-copy-return frame=%llu plane=%u retained=1\n", (unsigned long long)(fFrames + 1), plane);
     return true;
 }

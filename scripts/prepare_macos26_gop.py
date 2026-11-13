@@ -66,7 +66,7 @@ def prepare(root: Path, destination: Path, *, board: str = "sheng") -> dict:
         text = text.replace(marker, '    if (!nabuDisplayConsoleValid(fVideo.v_baseAddr, fVideo.v_width, fVideo.v_height, fVideo.v_rowBytes)) return false;\n' + marker)
         text = text.replace('"5348454E-472D-474F-5000-000000000001"', 'NABU_DISPLAY_UUID')
         text = text.replace('Sheng Boot Framebuffer', 'Xiaomi Pad 5 Boot Framebuffer')
-        text = text.replace('#include "nabu_display_policy.h"', '#include "nabu_display_policy.h"\n#include "nabu_cpu_present.h"\n#include "nabu_source_maps.h"')
+        text = text.replace('#include "nabu_display_policy.h"', '#include "nabu_display_policy.h"\n#include "nabu_cpu_present.h"\n#include "nabu_display_trace.h"\n#include "nabu_source_maps.h"')
         text = text.replace('    void copySurface(IOSurface *);',
                             '    bool copyLayer(IOSurface *, const NabuGopRect &, const NabuGopRect &, bool, unsigned);\n    void failCurrentSwap(IOMFBSwapIORequest *);')
         text = text.replace('    uint32_t fSurfaceFormat = 0;\n    uint64_t fSourceWidth = 0, fSourceHeight = 0;\n', '')
@@ -99,7 +99,7 @@ def prepare(root: Path, destination: Path, *, board: str = "sheng") -> dict:
         notified = '    powerstate_notify(true, on);'
         if text.count(notified) != 1:
             raise ValueError('paired framebuffer power notification changed')
-        text = text.replace(notified, '''    if (!fFrames) IOLog("NABU-DISPLAY: power-notify-begin on=%u\\n", on);
+        text = text.replace(notified, '''    if (!fFrames) IOLog("NABU-DISPLAY: power-notify-begin on=%u clients=%u\\n", on, at<void *>(this, 0x17c8) != nullptr);
     powerstate_notify(true, on);
     if (!fFrames) IOLog("NABU-DISPLAY: power-notify-done on=%u\\n", on);''')
         text = text.replace('            dropSwap_gated(swap, false);', '            failCurrentSwap(swap);')
@@ -115,15 +115,19 @@ def prepare(root: Path, destination: Path, *, board: str = "sheng") -> dict:
         if text.count(heartbeat) != 1:
             raise ValueError('paired framebuffer heartbeat entry changed')
         text = text.replace(heartbeat, '''    unsigned sessionLog = 0;
-    if ((fTicks == 0 || fTicks % 625 == 624) && fTicks < 7500 &&
+    if (((fTicks < 7500 && (fTicks == 0 || fTicks % 625 == 624)) ||
+         (fTicks >= 7500 && fTicks < 75000 && fTicks % 3750 == 3749)) &&
         PE_parse_boot_argn("nabu-session-log", &sessionLog, sizeof(sessionLog)) && sessionLog == 1)
-        IOLog("NABU-DISPLAY: vbl=%llu on=%u power=%u/%u submitted=%llu shown=%llu wait_failures=%llu queue=%p current=%p\\n",
+        IOLog("NABU-DISPLAY: vbl=%llu on=%u power=%u/%u submitted=%llu shown=%llu wait_failures=%llu queue=%p current=%p vsync_clients=%u\\n",
               fTicks, fDisplayOn, at<uint32_t>(this, kSystemPowerState), at<uint32_t>(this, kAPIPowerState),
               fSubmitted, fFrames, fWaitFailures, at<IOMFBSwapIORequest *>(this, kSwapQueueFirst),
-              at<IOMFBSwapIORequest *>(this, kCurrentSwap));
+              at<IOMFBSwapIORequest *>(this, kCurrentSwap), at<void *>(this, 0x1808) != nullptr);
 ''' + heartbeat)
+        # All board diagnostics bypass the console, including its first power
+        # notification and the successful copy/completion after console disable.
+        text = text.replace('IOLog(', 'nabuDisplayLog(')
         source.write_text(text)
-        for name in ('nabu_display_policy.h', 'nabu_gop_scanout.h', 'nabu_cpu_present.h', 'nabu_cpu_present.inc', 'nabu_source_maps.h'):
+        for name in ('nabu_display_policy.h', 'nabu_gop_scanout.h', 'nabu_cpu_present.h', 'nabu_cpu_present.inc', 'nabu_source_maps.h', 'nabu_display_trace.h'):
             path = root / 'platform/nabu/macos26/display' / name
             shutil.copyfile(path, destination / name)
             board_inputs[name] = digest(path.read_bytes())
@@ -157,6 +161,7 @@ def prepare(root: Path, destination: Path, *, board: str = "sheng") -> dict:
         evidence['compositor_qualified'] = False
         evidence['session_heartbeat'] = 'nabu-session-log=1; software callback, queue, actual copy and completion counters'
         evidence['refresh_bootstrap'] = 'arm 16ms after successful native family start; callback entry precedes queue work; power changes preserve cadence'
+        evidence['diagnostic_channel'] = 'bounded direct RAM append, timestamp/console_disabled/owner; no console sink or IOLog'
         evidence['cpu_presentation'] = '25F71 persistent planes; source/destination rectangles; opaque scene planes; plane-1 premultiplied cursor; source-backed staging before completion'
         evidence['scanout_geometry'] = dict(base=0x9c000000, width=1600,
                                             height=2560, stride=6400, rotation=0)

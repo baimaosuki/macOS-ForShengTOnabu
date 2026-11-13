@@ -36,7 +36,7 @@ static bool baseSuccess=true, familyReady=false, timerMissing=false;
 static int armResult=0, stopCalls=0, armCalls=0, timerEntries=0, swaps=0;
 static bool armed=false;
 static std::vector<std::string> logLines;
-template<class... T> void IOLog(const char *format,T...) {
+template<class... T> void nabuDisplayLog(const char *format,T...) {
     logLines.emplace_back(format);
     if (strstr(format,"first-timer-fired")) timerEntries++;
 }

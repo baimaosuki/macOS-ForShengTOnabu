@@ -28,9 +28,9 @@ struct NabuGopSourceReaper {
             self->head = (self->head + 1) % capacity;
             --self->count;
             IOLockUnlock(self->lock);
-            if (self->released < 4) IOLog("NABU-DISPLAY: source-unmap-begin mapping=%p\n", mapping);
+            if (self->released < 4) nabuDisplayLog("NABU-DISPLAY: source-unmap-begin mapping=%p\n", mapping);
             mapping->release();
-            if (self->released++ < 4) IOLog("NABU-DISPLAY: source-unmap-done count=%u\n", self->released);
+            if (self->released++ < 4) nabuDisplayLog("NABU-DISPLAY: source-unmap-done count=%u\n", self->released);
             IOLockLock(self->lock);
         }
         IOLockUnlock(self->lock);
