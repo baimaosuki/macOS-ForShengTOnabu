@@ -29,8 +29,10 @@ Minimal integration, performed separately from this candidate:
 3. Do not put this call inside `swap_begin_gated`: submissions and notification
    registration call that function too and would create extra refresh events.
    Do not add a second timer, call it from start/PM transitions, or force power.
-4. The helper checks the native type-5 queue head at `this+0x1808` and does
-   nothing when no subscriber exists. Registration already calls swap-begin,
+4. The helper updates native timing when either completion type-3 at `+0x17e8`
+   or VSync type-5 at `+0x1808` has subscribers. Only type-5 authorizes sending
+   a VSync message. With both lists empty it does nothing. Completion reports
+   consume the same `+0x108` clock even without type-5 registration. Registration already calls swap-begin,
    which preserves the existing timer activity. Stop cancels the same timer.
 
 The direct native imports use these exact exported symbols:
@@ -87,3 +89,10 @@ Device qualification must still establish real type-5 registration and received
 notifications, and whether those notifications help the current WindowServer
 startup. No subscriber means this feature correctly emits nothing; a successful
 timer callback alone is not proof of desktop presentation.
+
+The native-VSync device snapshot seq7808 does show three real full black frames
+copied and natively completed, without type-5 sends. Its completion-only clock
+gap and follow-up correction are documented in
+`docs/nabu-20261113-vsync-device-completion-clock.md`. Actual type-3 clock values
+remain unverified on the device. The new bounded completion reports distinguish
+clock progress from async-send result and visible nonblack content.

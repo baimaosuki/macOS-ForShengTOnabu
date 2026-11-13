@@ -143,12 +143,16 @@ def inspect(path):
     if read(address, len(expected)) != expected:
         raise ValueError('VSync original Count/time/interval call-site loads differ')
     branch(address + 20, REVIEWED['dispatch'][1], link=True)
+    # Native completion reports have a distinct type-3 list. Its consumers use
+    # the same +0x108 clock as type-5, even without a VSync subscription.
+    if read(0xfffffe000a89bf70, 4) != bytes.fromhex('15f44bf9'):
+        raise ValueError('VSync native completion subscriber load differs')
     return dict(kernelcache_sha256=hashlib.sha256(data).hexdigest(), family=FAMILY,
                 family_uuid=family['uuid'], instruction_profile=profile,
                 functions=functions, virtual_slots=slots,
                 clock='_mach_continuous_time', first_period_units='nanoseconds',
                 native_state={'count': '0x100', 'last_native_time': '0x108',
-                              'interval': '0x110', 'type5_head': '0x1808'},
+                              'interval': '0x110', 'type3_head': '0x17e8', 'type5_head': '0x1808'},
                 sender_words=['count', 'last_native_time', 'interval'],
                 sender_owns_encoding=True, timer_reuses_existing_workloop=True,
                 native_callsite=dict(address=hex(address), bytes=expected.hex()),

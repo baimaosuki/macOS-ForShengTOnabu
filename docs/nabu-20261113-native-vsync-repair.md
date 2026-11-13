@@ -1,5 +1,10 @@
 # NABU 25F71 native client refresh repair
 
+The subsequent device test copied and completed three full black frames.
+The type-3-only timing correction and evidence limits are recorded in
+`docs/nabu-20261113-vsync-device-completion-clock.md`; it supersedes the
+type-5-only timing condition described below for the initial revision.
+
 The initial timer-deadline fix is device-confirmed in
 `out/nabu-logs-20261113/verified-8core.txt`: bootstrap result zero, first timer
 and software callbacks through 7499. That callback still invoked only swap

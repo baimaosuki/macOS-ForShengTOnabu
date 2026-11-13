@@ -15,6 +15,7 @@ namespace nabu_vsync25 {
 constexpr size_t kCount = 0x100;
 constexpr size_t kLastMach = 0x108;
 constexpr size_t kInterval = 0x110;
+constexpr size_t kType3Head = 0x17e8; // completion reports also consume +0x108
 constexpr size_t kType5Head = 0x1808; // +0x17b8 + 5 * 16
 
 template<class T> inline T load(const void *display, size_t offset)
@@ -26,6 +27,10 @@ template<class T> inline T load(const void *display, size_t offset)
 inline bool wantedGated(const void *display)
 {
     return display && load<uintptr_t>(display, kType5Head) != 0;
+}
+inline bool clockWantedGated(const void *display)
+{
+    return display && (load<uintptr_t>(display, kType3Head) != 0 || wantedGated(display));
 }
 } // namespace nabu_vsync25
 
@@ -57,8 +62,12 @@ extern "C" void nabuVsync25NativeNotify(void *, uint64_t, uint64_t, uint64_t)
 static inline bool nabuVsync25TickGated(void *display, unsigned refreshPeriodNanoseconds)
 {
     using namespace nabu_vsync25;
-    if (!wantedGated(display) || !refreshPeriodNanoseconds) return false;
+    if (!clockWantedGated(display) || !refreshPeriodNanoseconds) return false;
     nabuVsync25NativeNote(display, refreshPeriodNanoseconds);
+    // Completion-only clients consume the same native clock in SwapInfo.word0.
+    // They require timing updates, but must not receive type-5 notifications.
+    // The return value counts notification attempts, not clock updates.
+    if (!wantedGated(display)) return false;
     // Exact clear_up_swap_queue_gated loads at unslid 0xfffffe000a8947a4:
     // x1=Count, x2=last native continuous-clock reading, x3=interval. SHENG 27.3 and iOS16 timer paths
     // establish the architecture, but their payload semantics MUST NOT be used.

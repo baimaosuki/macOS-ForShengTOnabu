@@ -18,7 +18,7 @@ template<class T> static void fixtureStore(void *display, size_t offset, T value
 extern "C" void nabuVsync25NativeNote(void *display, unsigned nanoseconds)
 {
     using namespace nabu_vsync25;
-    assert(display == expectedDisplay && wantedGated(display));
+    assert(display == expectedDisplay && clockWantedGated(display));
     ++notes;
     period = nanoseconds;
     order.push_back(1);
@@ -44,6 +44,7 @@ int main()
     state.fill(0x5a);
     void *display = state.data();
     expectedDisplay = display;
+    fixtureStore<uintptr_t>(display, kType3Head, 0);
     fixtureStore<uintptr_t>(display, kType5Head, 0);
     const auto empty = state;
     assert(!nabuVsync25TickGated(display, 16000000));
@@ -71,17 +72,28 @@ int main()
     assert(nabuVsync25TickGated(display, 16000000));
     assert(received == nativeResult && notes == 2 && sends == 2);
     assert((order == std::vector<unsigned>{1, 2, 1, 2}));
-    // Removal under the same gate stops both timing work and notifications.
+    // A completion-only subscriber still needs a nonzero native completion
+    // timestamp after reset. It does not authorize a type-5 send.
     fixtureStore<uintptr_t>(display, kType5Head, 0);
+    fixtureStore<uintptr_t>(display, kType3Head, 0x3456);
+    fixtureStore<uint64_t>(display, kLastMach, 0);
+    fixtureStore<uint64_t>(display, kInterval, 0);
+    nativeResult = {0x10000000cULL, 0x4000000a0ULL, 307200};
+    assert(!nabuVsync25TickGated(display, 16000000));
+    assert(load<uint64_t>(display, kLastMach) == nativeResult[1]);
+    assert(load<uint64_t>(display, kInterval) == nativeResult[2]);
+    assert(notes == 3 && sends == 2 && order.back() == 1);
+    // With both lists empty, removal stops timing work as well as delivery.
+    fixtureStore<uintptr_t>(display, kType3Head, 0);
     const auto removed = state;
     assert(!nabuVsync25TickGated(display, 16000000));
-    assert(state == removed && notes == 2 && sends == 2);
+    assert(state == removed && notes == 3 && sends == 2);
     // Native reset clears lastMach/interval, preserving Count. The adapter
     // has no cached state and simply forwards the next native result.
     fixtureStore<uintptr_t>(display, kType5Head, 0x5678);
     fixtureStore<uint64_t>(display, kLastMach, 0);
     fixtureStore<uint64_t>(display, kInterval, 0);
-    nativeResult = {0x10000000cULL, 0x4000000a0ULL, 307200};
+    nativeResult = {0x10000000dULL, 0x5000000a0ULL, 307200};
     assert(nabuVsync25TickGated(display, 16000000));
-    assert(received == nativeResult && notes == 3 && sends == 3);
+    assert(received == nativeResult && notes == 4 && sends == 3);
 }
