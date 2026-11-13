@@ -527,6 +527,7 @@ def prepare() -> dict:
         stage_file(PLATFORM / 'log/od_wait_trace.h', source / 'osfmk/kern/nabu_od_wait_trace.h')
         for directory in ('bsd/kern', 'osfmk/ipc'):
             stage_file(PLATFORM / 'log/session_trace.h', source / directory / 'nabu_session_trace.h')
+        stage_file(PLATFORM / 'log/session_ipc.h', source / 'osfmk/ipc/nabu_session_ipc.h')
         build_epoch = int(os.environ.get('SOURCE_DATE_EPOCH', str(int(time.time()))))
         if not 1704067200 <= build_epoch < 4102444800:
             raise ValueError('NABU calendar floor requires a UTC build timestamp in 2024..2099')
@@ -612,6 +613,7 @@ def prepare() -> dict:
                         'osfmk/kern/nabu_od_wait_trace.h',
                         'bsd/kern/nabu_windowserver_trace.h',
                         'bsd/kern/nabu_session_trace.h', 'osfmk/ipc/nabu_session_trace.h',
+                        'osfmk/ipc/nabu_session_ipc.h',
                         'bsd/kern/nabu_boot_epoch.h',
                         'osfmk/vm/nabu_cpu_compositor_policy.h',
                         'osfmk/vm/nabu_cpu_compositor_kernel.h',
@@ -623,6 +625,7 @@ def prepare() -> dict:
                   session_repair=(dict(microtime_frequency_hz=19200000,
                       calendar_floor_utc=build_epoch, session_trace_arg='nabu-session-log=1',
                       session_trace_sha256=sha(PLATFORM / 'log/session_trace.h'),
+                      session_ipc_sha256=sha(PLATFORM / 'log/session_ipc.h'),
                       filesystem_patch_sha256=sha(PLATFORM / 'desktop/session-filesystem.patch'),
                       od_wait_trace_sha256=sha(PLATFORM / 'log/od_wait_trace.h'),
                       device_verified=False) if BOARD == 'nabu' else None),

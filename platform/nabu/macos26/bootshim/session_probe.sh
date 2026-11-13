@@ -3,7 +3,7 @@
 PATH=/usr/bin:/bin:/usr/sbin:/sbin
 export PATH
 umask 077
-echo "NABU-SESSION-PROBE started pid=$$ version=4"
+echo "NABU-SESSION-PROBE started pid=$$ version=5"
 trap 'echo "NABU-SESSION-PROBE shell exit=$?"' 0
 
 # Diagnostics must not block later samples. Keep child output off the console
@@ -46,7 +46,13 @@ snapshot()
 {
     echo "NABU-SESSION-PROBE begin round=$1"
     /bin/date -u
-    process_list="/private/var/tmp/nabu-probe-processes-$$.txt"
+    reports="/private/var/tmp/nabu-session-probe"
+    shim="/System/Library/Filesystems/apfs.fs/Contents/Resources/apfs_boot_util"
+    process_list="$reports/nabu-probe-processes-$$.txt"
+    # One in-process discovery loop captures all three targets before slow
+    # symbol processing. Every actual raw record uses fd2 single-line writes.
+    "$shim" --nabu-raw-stacks --watch >"$reports/nabu-raw-stacks.txt" 2>&1 &
+    raw_watcher=$!
     sampled=" "
     # Mount phase 2 precedes Early boot complete. A fixed 15-second delay is
     # not evidence that loginwindow or WindowServer exists. Sample each real
@@ -65,20 +71,20 @@ snapshot()
             for process in opendirectoryd loginwindow lsd WindowServer launchservicesd; do
                 case "$sampled" in *" $process "*) continue ;; esac
                 target=$(find_pid "$process") || continue
-                report="/private/var/tmp/nabu-sample-$process.txt"
-                diagnostic="/private/var/tmp/nabu-sample-$process.stderr"
-                /bin/rm -f "$report"
+                report="$reports/nabu-sample-$process.txt"
+                diagnostic="$reports/nabu-sample-$process.stderr"
                 echo "NABU-SESSION-PROBE sample process=$process pid=$target round=$1"
                 # Duration zero selects the tool's single-snapshot mode.
                 # -mayDie preloads symbols before sampling; boot daemons are
                 # stable targets and do not need that costly preload.
-                run_bounded 15 "$diagnostic" /usr/bin/sample "$target" 0 100 -file "$report"
+                run_bounded 120 "$diagnostic" /usr/bin/sample "$target" 0 100 -file "$report"
                 result=$?
                 echo "NABU-SESSION-PROBE sample-result process=$process pid=$target status=$result"
-                /usr/bin/head -c 16384 "$diagnostic"
+                /bin/cat "$diagnostic"
+                "$shim" --nabu-probe-relay "nabu-sample-$process.stderr"
                 if [ -f "$report" ]; then
-                    /usr/bin/head -c 262144 "$report"
-                    /bin/rm -f "$report"
+                    echo "NABU-SESSION-PROBE report-retained path=$report"
+                    "$shim" --nabu-probe-relay "nabu-sample-$process.txt"
                 fi
                 sampled="$sampled$process "
             done
@@ -100,7 +106,7 @@ snapshot()
     done
     # These supporting commands previously blocked round 2 before sampling.
     for job in com.apple.opendirectoryd com.apple.loginwindow com.apple.WindowServer; do
-        diagnostic="/private/var/tmp/nabu-launchctl-$$.txt"
+        diagnostic="$reports/nabu-launchctl-$$.txt"
         echo "NABU-SESSION-PROBE launchd job=$job"
         run_bounded 15 "$diagnostic" /bin/launchctl print "system/$job"
         result=$?
@@ -108,7 +114,8 @@ snapshot()
         /usr/bin/head -c 16384 "$diagnostic"
         /bin/rm -f "$diagnostic"
     done
-    /bin/rm -f "$process_list"
+    wait "$raw_watcher"
+    echo "NABU-SESSION-PROBE raw-watcher status=$? report=$reports/nabu-raw-stacks.txt"
     echo "NABU-SESSION-PROBE end round=$1"
 }
 

@@ -13,6 +13,8 @@ void NativeGOPDisplay::program_hardware_gated()
     if (!fComposition) fComposition = static_cast<uint32_t *>(IOMalloc(bytes));
     bool success = fComposition && fScanout;
     unsigned active = 0;
+    NabuGopPlaneStats planes[4]{};
+    const bool inspectPlanes = fFrames < 8 || fFrames % 50 == 49;
     if (success) {
         // A complete scene is rebuilt so clears and moved cursors restore the
         // underlying pixels instead of leaving old plane contents in scanout.
@@ -25,20 +27,31 @@ void NativeGOPDisplay::program_hardware_gated()
             IOSurface *surface = updated
                 ? at<IOSurface *>(swap, 0xac0 + i * 8)
                 : at<IOSurface *>(this, 0x1510 + i * 8);
-            if (!surface) continue; // mask set + null is a real plane clear
+            if (!surface) {
+                planes[i].state = updated ? "clear" : "absent";
+                continue; // mask set + null is a real plane clear
+            }
+            planes[i].surfaceID = ioSurfaceID(surface);
+            planes[i].format = ioSurfacePixelFormat(surface);
             NabuGopRect src{}, dst{};
             const uint8_t *srcAddress = static_cast<const uint8_t *>(updated ? static_cast<void *>(swap) : static_cast<void *>(this));
             memcpy(&src, srcAddress + (updated ? 0x11 : 0x11e9) + i * 16, sizeof(src));
             memcpy(&dst, srcAddress + (updated ? 0x51 : 0x1229) + i * 16, sizeof(dst));
             const uint32_t rotation = updated ? at<uint32_t>(swap, 0x268 + i * 4) : at<uint32_t>(this, 0x13dc + i * 4);
             // The family's validity check ignores disabled (zero-area) planes.
-            if (!src.width || !src.height || !dst.width || !dst.height) continue;
+            if (!src.width || !src.height || !dst.width || !dst.height) {
+                planes[i].state = "zero-area";
+                continue;
+            }
             if (fFrames < 4 && fCopyFailures < 4)
                 nabuDisplayLog("NABU-DISPLAY: swap=%u mask=%#x layer=%u updated=%u surface=%p src=%d,%d,%d,%d dst=%d,%d,%d,%d rotation=%u\n",
                       swapID, mask, i, updated, surface, src.x, src.y, src.width, src.height,
                       dst.x, dst.y, dst.width, dst.height, rotation);
+            planes[i].state = rotation ? "unsupported-rotation" : "copy-failed";
             if (rotation || !copyLayer(surface, src, dst, i == 1 &&
-                ioSurfaceWidth(surface) <= 256 && ioSurfaceHeight(surface) <= 256, i)) { success = false; break; }
+                ioSurfaceWidth(surface) <= 256 && ioSurfaceHeight(surface) <= 256, i,
+                inspectPlanes ? &planes[i] : nullptr)) { success = false; break; }
+            planes[i].state = "copied";
             active |= 1u << i;
         }
     }
@@ -89,6 +102,19 @@ void NativeGOPDisplay::program_hardware_gated()
                           (unsigned long long)fFrames, swapID, mask, active,
                           (unsigned long long)(uint64_t(fVideo.v_width) * fVideo.v_height),
                           (unsigned long long)lit, (unsigned long long)center);
+                // Include clear/zero-area planes so an update mask cannot be
+                // mistaken for a set of nonempty visible layers. Counts are
+                // measured before forcing opaque scene alpha, not inferred
+                // from the final 0xff000000 scanout pixel.
+                if (inspectPlanes && (fFrames == 1 || (swapID > 3 && !lit)))
+                    for (unsigned i = 0; i < 4; ++i)
+                        nabuDisplayLog("NABU-DISPLAY: plane-content swap=%u layer=%u updated=%u state=%s surface_id=%u format=%#x samples=%llu rgb_nonzero=%llu rgba_nonzero=%llu alpha_nonzero=%llu\n",
+                            swapID, i, (mask >> i) & 1, planes[i].state,
+                            planes[i].surfaceID, planes[i].format,
+                            (unsigned long long)planes[i].samples,
+                            (unsigned long long)planes[i].rgbNonzero,
+                            (unsigned long long)planes[i].rgbaNonzero,
+                            (unsigned long long)planes[i].alphaNonzero);
             } else if (first && __atomic_load_n(&sheng_framebuffer.owner, __ATOMIC_ACQUIRE) == SHENG_FB_GUI) {
                 sheng_fb_abort_gui();
                 if (__atomic_load_n(&sheng_framebuffer.owner, __ATOMIC_ACQUIRE) == SHENG_FB_BOOT)
@@ -98,6 +124,12 @@ void NativeGOPDisplay::program_hardware_gated()
     }
     if (!success) {
         fCopyFailures++;
+        if (inspectPlanes && (fCopyFailures <= 8 || fCopyFailures % 50 == 0))
+            for (unsigned i = 0; i < 4; ++i)
+                nabuDisplayLog("NABU-DISPLAY: plane-failure swap=%u layer=%u updated=%u state=%s surface_id=%u format=%#x samples=%llu rgb_nonzero=%llu rgba_nonzero=%llu alpha_nonzero=%llu\n",
+                    swapID, i, (mask >> i) & 1, planes[i].state, planes[i].surfaceID, planes[i].format,
+                    (unsigned long long)planes[i].samples, (unsigned long long)planes[i].rgbNonzero,
+                    (unsigned long long)planes[i].rgbaNonzero, (unsigned long long)planes[i].alphaNonzero);
         if (fCopyFailures <= 8 || fCopyFailures % 50 == 0)
             nabuDisplayLog("NABU-DISPLAY: swap=%u update=%#x copy_failed=%llu shown=%llu active=%#x\n",
                   swapID, mask, (unsigned long long)fCopyFailures, (unsigned long long)fFrames, active);
@@ -111,9 +143,10 @@ void NativeGOPDisplay::program_hardware_gated()
     swap_complete_gated();
     fCompleted++;
     if (fCompleted <= 8 || fCompleted % 50 == 0)
-        nabuDisplayLog("NABU-DISPLAY: swap=%u complete=%llu shown=%llu current=%p\n",
+        nabuDisplayLog("NABU-DISPLAY: swap=%u complete=%llu shown=%llu current_request=%p last_displayed_id=%u queue_head=%p\n",
               swapID, (unsigned long long)fCompleted, (unsigned long long)fFrames,
-              at<IOMFBSwapIORequest *>(this, kCurrentSwap));
+              at<IOMFBSwapIORequest *>(this, kCurrentSwap), at<uint32_t>(this, 0x190c),
+              at<IOMFBSwapIORequest *>(this, kSwapQueueFirst));
 }
 
 void NativeGOPDisplay::failCurrentSwap(IOMFBSwapIORequest *swap)
@@ -130,7 +163,7 @@ void NativeGOPDisplay::failCurrentSwap(IOMFBSwapIORequest *swap)
 }
 
 bool NativeGOPDisplay::copyLayer(IOSurface *surface, const NabuGopRect &src,
-                                const NabuGopRect &dst, bool cursor, unsigned plane)
+                                const NabuGopRect &dst, bool cursor, unsigned plane, NabuGopPlaneStats *stats)
 {
     uint64_t width = ioSurfaceWidth(surface), height = ioSurfaceHeight(surface);
     uint64_t rowBytes = ioSurfaceBytesPerRow(surface), base = ioSurfaceBaseOffset(surface);
@@ -192,7 +225,7 @@ bool NativeGOPDisplay::copyLayer(IOSurface *surface, const NabuGopRect &src,
             previousY = sy;
         }
         nabuGopLayerRow(fComposition + y * fVideo.v_width, fRow, src, dst, clip,
-                       format == kFormatRGhA ? fHalfToByte : nullptr, cursor);
+                       format == kFormatRGhA ? fHalfToByte : nullptr, cursor, stats);
     }
     if (fFrames < 4 && fCopyFailures < 4) nabuDisplayLog("NABU-DISPLAY: source-copy-done frame=%llu rows=%llu\n", (unsigned long long)(fFrames + 1), (unsigned long long)(clip.y1 - clip.y0));
     // The slot keeps the map+IOMD alive. No map destructor/unmap runs here.

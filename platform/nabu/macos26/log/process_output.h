@@ -7,6 +7,44 @@
 
 /* This selector is intentionally inert without the NABU lifecycle opt-in. */
 static TUNABLE(unsigned, nabu_boot_filesystem_output, "nabu-boot-proc", 0);
+static TUNABLE(unsigned, nabu_probe_output, "nabu-session-probe", 0);
+extern void nabu_capture_append(const char *, unsigned);
+static unsigned nabu_probe_output_bytes, nabu_probe_output_dropped;
+
+/* Preserve real boot-shim diagnostic records independently of /dev/console.
+ * Observe attempted fd2 writes without changing write validation or results.
+ * Single-line writes only; no arbitrary shell/cat stream or outputv bypass. */
+static void
+nabu_probe_output_capture(struct proc *process, int fd, user_addr_t address,
+    user_size_t bytes)
+{
+    static const char prefix[] = "NABU-RAWSTACK ";
+    if (nabu_probe_output != 1 || fd != 2 ||
+        strcmp(process->p_comm, "apfs_boot_util") || !kauth_cred_issuser(kauth_cred_get()) ||
+        bytes < sizeof(prefix) || bytes > 512)
+        return;
+    char text[512];
+    if (copyin(address, text, (size_t)bytes) ||
+        memcmp(text, prefix, sizeof(prefix) - 1) || text[bytes - 1] != '\n')
+        return;
+    for (size_t i = 0; i + 1 < bytes; ++i)
+        if ((unsigned char)text[i] < 32 || text[i] == 127)
+            return;
+    unsigned old = __atomic_load_n(&nabu_probe_output_bytes, __ATOMIC_RELAXED);
+    for (;;) {
+        if (bytes > 1048576u - old) {
+            if (!__atomic_exchange_n(&nabu_probe_output_dropped, 1, __ATOMIC_RELAXED)) {
+                static const char drop[] = "NABU-RAWSTACK dropped reason=global-1MiB-budget\n";
+                nabu_capture_append(drop, sizeof(drop) - 1);
+            }
+            return;
+        }
+        if (__atomic_compare_exchange_n(&nabu_probe_output_bytes, &old,
+            old + (unsigned)bytes, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED))
+            break;
+    }
+    nabu_capture_append(text, (unsigned)bytes);
+}
 static LCK_GRP_DECLARE(nabu_output_group, "nabu boot stderr");
 static LCK_MTX_DECLARE(nabu_output_lock, &nabu_output_group);
 static struct {
@@ -87,6 +125,7 @@ static void
 sheng_process_output(struct proc *process, int fd, user_addr_t address,
     user_size_t bytes, unsigned mode, const char *name)
 {
+    nabu_probe_output_capture(process, fd, address, bytes);
     if (!bytes || !sheng_process_output_enabled(process, fd, mode, name)) return;
     char text[160];
     size_t count = bytes < sizeof(text) - 1 ? (size_t)bytes : sizeof(text) - 1;

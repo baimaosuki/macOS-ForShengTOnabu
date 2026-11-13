@@ -42,6 +42,14 @@ nabu_install_session_probe(void)
 {
     const char *script = "/System/Volumes/Data/private/var/db/nabu-session-probe.sh";
     if (!nabu_session_probe_enabled()) return;
+    const char *reports = "/System/Volumes/Data/private/var/tmp/nabu-session-probe";
+    struct stat directory;
+    if ((mkdir(reports, 0700) != 0 && errno != EEXIST) ||
+        lstat(reports, &directory) != 0 || !S_ISDIR(directory.st_mode) ||
+        directory.st_uid != 0 || (directory.st_mode & 077) != 0) {
+        fprintf(stderr, "apfs_boot_util (owner): session probe private report directory invalid errno=%d\n", errno);
+        return;
+    }
     int error = nabu_probe_write(script, nabu_session_probe_script, 0600);
     fprintf(stderr, "apfs_boot_util (owner): session probe script status=%d\n", error);
     if (error) return;

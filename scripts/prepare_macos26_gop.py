@@ -68,10 +68,42 @@ def prepare(root: Path, destination: Path, *, board: str = "sheng") -> dict:
         text = text.replace('Sheng Boot Framebuffer', 'Xiaomi Pad 5 Boot Framebuffer')
         text = text.replace('#include "nabu_display_policy.h"', '#include "nabu_display_policy.h"\n#include "nabu_cpu_present.h"\n#include "nabu_display_trace.h"\n#include "nabu_source_maps.h"\n#include "nabu_vsync25.h"')
         text = text.replace('    void copySurface(IOSurface *);',
-                            '    bool copyLayer(IOSurface *, const NabuGopRect &, const NabuGopRect &, bool, unsigned);\n    void failCurrentSwap(IOMFBSwapIORequest *);')
+                            '    bool copyLayer(IOSurface *, const NabuGopRect &, const NabuGopRect &, bool, unsigned, NabuGopPlaneStats *);\n    void failCurrentSwap(IOMFBSwapIORequest *);')
+        surface_getter = 'uint32_t ioSurfacePixelFormat(const IOSurface *) __asm("__ZNK9IOSurface14getPixelFormatEv");'
+        if text.count(surface_getter) != 1:
+            raise ValueError('paired IOSurface getter declaration changed')
+        text = text.replace(surface_getter, surface_getter + '\nuint32_t ioSurfaceID(const IOSurface *) __asm("__ZNK9IOSurface12getSurfaceIDEv");')
+        text = text.replace('// (IOMFBDisplay::can_update_); after three swaps WindowServer found the display unready for good.',
+                            '// (IOMFBDisplay::can_update_). Native mode 0 can return Busy for the last displayed buffer; preserve that ownership contract.')
+        text = text.replace('(%llu failures): +6412 %u power', '(%llu nonzero returns): last_displayed_id %u power')
+        text = text.replace('+140 0x%x current %p queue %p', '+140 0x%x current_request %p queue_head %p')
         text = text.replace('    uint32_t fSurfaceFormat = 0;\n    uint64_t fSourceWidth = 0, fSourceHeight = 0;\n', '')
         text = text.replace('    uint64_t fLayerShape = 0;',
-                            '    uint32_t *fComposition = nullptr;\n    NabuGopSourceMap fSourceMaps[4]{};\n    NabuGopSourceReaper *fSourceReaper = nullptr;\n    uint64_t fCompleted = 0, fCopyFailures = 0, fVsyncSent = 0, fSwapInfoSendReports = 0;')
+                            '    uint32_t *fComposition = nullptr;\n    NabuGopSourceMap fSourceMaps[4]{};\n    NabuGopSourceReaper *fSourceReaper = nullptr;\n    uint64_t fCompleted = 0, fCopyFailures = 0, fVsyncSent = 0, fSwapInfoSendReports = 0, fQueueAudit = 0;')
+        clean_begin = '    if (dropObsoleteSwaps_gated())\n        return false;'
+        if text.count(clean_begin) != 1:
+            raise ValueError('paired queue cleanup entry changed')
+        text = text.replace(clean_begin, '''    const bool audit = fQueueAudit++ < 16;
+    IOMFBSwapIORequest *before = at<IOMFBSwapIORequest *>(this, kSwapQueueFirst);
+    const uint32_t beforeID = at<uint32_t>(before, 0x334);
+    if (audit)
+        IOLog("NABU-DISPLAY: queue-before id=%u mask=%#x flags=%#x reasons=%#x current_request=%p\\n",
+              beforeID, at<uint32_t>(before, kSwapLayers), at<uint32_t>(before, 0x330),
+              at<uint32_t>(before, kSwapDropReasons), at<IOMFBSwapIORequest *>(this, kCurrentSwap));
+    if (dropObsoleteSwaps_gated()) {
+        if (audit) IOLog("NABU-DISPLAY: queue-after-obsolete id=%u current_request=%p queue_head=%p last_displayed_id=%u\\n",
+                        beforeID, at<IOMFBSwapIORequest *>(this, kCurrentSwap),
+                        at<IOMFBSwapIORequest *>(this, kSwapQueueFirst), at<uint32_t>(this, 0x190c));
+        return false;
+    }''')
+        for method in ('dropNoOpSwaps_gated()', 'dropAbortedSwaps_gated(false)', 'dropDummySwaps_gated()'):
+            statement = '    ' + method + ';'
+            if text.count(statement) != 1:
+                raise ValueError('paired cleanup stage changed: ' + method)
+            text = text.replace(statement, statement + '''
+    if (audit) IOLog("NABU-DISPLAY: queue-after-''' + method.split('(')[0] + ''' id=%u current_request=%p queue_head=%p last_displayed_id=%u\\n",
+                    beforeID, at<IOMFBSwapIORequest *>(this, kCurrentSwap),
+                    at<IOMFBSwapIORequest *>(this, kSwapQueueFirst), at<uint32_t>(this, 0x190c));''')
         text = text.replace('    fScanout = reinterpret_cast<uint8_t *>(fScanoutMap->getVirtualAddress());', '    fScanout = reinterpret_cast<uint8_t *>(fScanoutMap->getVirtualAddress());\n    fSourceReaper = NabuGopSourceReaper::create();\n    if (!fSourceReaper) { OSSafeReleaseNULL(fScanoutMap); return false; }')
         text = text.replace('        IOLog("NativeGOPDisplay: IOMobileFramebufferLegacy::start failed\\n");', '        IOLog("NativeGOPDisplay: IOMobileFramebufferLegacy::start failed\\n");\n        IOMemoryMap *empty[4]{}; fSourceReaper->finish(empty); fSourceReaper = nullptr;')
         text = text.replace('    IOMobileFramebufferLegacy::stop(provider);', '    IOMobileFramebufferLegacy::stop(provider);\n    if (fSourceReaper) {\n        IOMemoryMap *maps[4]{};\n        for (unsigned i = 0; i < 4; i++) { maps[i] = fSourceMaps[i].mapping; fSourceMaps[i] = {}; }\n        fSourceReaper->finish(maps); fSourceReaper = nullptr;\n    }')
@@ -197,6 +229,7 @@ def prepare(root: Path, destination: Path, *, board: str = "sheng") -> dict:
         evidence['diagnostic_channel'] = 'bounded direct RAM append, timestamp/console_disabled/owner; no console sink or IOLog'
         evidence['native_vsync'] = '25F71 original note_vbl_ISR for type3 or type5 subscribers; swap_notify_gated for type5 only; gated actual timer firing, display on; 16000000ns seed; native continuous clock'
         evidence['cpu_presentation'] = '25F71 persistent planes; source/destination rectangles; opaque scene planes; plane-1 premultiplied cursor; source-backed staging before completion'
+        evidence['plane_diagnostics'] = 'first frame and black frames after swap3: first8/every50; all4 planes clear/absent/zero-area/copied; original IOSurface getSurfaceID; sampled source RGB/RGBA/alpha before opaque conversion'
         evidence['scanout_geometry'] = dict(base=0x9c000000, width=1600,
                                             height=2560, stride=6400, rotation=0)
     (destination / 'source.json').write_text(json.dumps(evidence, indent=2) + '\n')

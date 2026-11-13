@@ -38,6 +38,14 @@ static int fixture_open(const char *path, int flags, mode_t mode) {
     assert(!strcmp(path,"/System/Volumes/Data/private/var/db/nabu-session-probe.sh"));
     return open("nabu-session-probe.sh",flags,mode);
 }
+static int fixture_mkdir(const char *path, mode_t mode) {
+    assert(!strcmp(path,"/System/Volumes/Data/private/var/tmp/nabu-session-probe"));
+    return mkdir("reports",mode);
+}
+static int fixture_lstat(const char *path, struct stat *st) {
+    assert(!strcmp(path,"/System/Volumes/Data/private/var/tmp/nabu-session-probe"));
+    int result=lstat("reports",st);st->st_uid=0;return result;
+}
 static int fixture_addopen(posix_spawn_file_actions_t *a, int fd, const char *path, int flags, mode_t mode) {
     assert(fd>=0 && fd<=2);
     assert(!strcmp(path,fd?"/dev/console":"/dev/null"));
@@ -60,6 +68,8 @@ static int fixture_spawn(pid_t *pid,const char *path,const posix_spawn_file_acti
 }
 #define sysctlbyname fixture_sysctl
 #define open fixture_open
+#define mkdir fixture_mkdir
+#define lstat fixture_lstat
 #define posix_spawn_file_actions_addopen fixture_addopen
 #define posix_spawn fixture_spawn
 #include "session_probe.h"
@@ -83,7 +93,7 @@ int main(void) {
     assert (tmp_path / 'nabu-session-probe.sh').read_text() == script
     assert (tmp_path / 'nabu-session-probe.sh').stat().st_mode & 0o777 == 0o600
     console = (tmp_path / 'console.txt').read_text()
-    assert 'NABU-SESSION-PROBE started pid=' in console and 'version=4' in console
+    assert 'NABU-SESSION-PROBE started pid=' in console and 'version=5' in console
     assert 'NABU-SESSION-PROBE shell exit=0' in console
     assert not (tmp_path / 'org.nabu.session-probe.plist').exists()
     result = subprocess.run([executable], cwd=tmp_path,
@@ -98,6 +108,7 @@ def test_probe_waits_for_real_pids_and_samples_before_blocked_launchctl(tmp_path
     # launchctl ignores TERM, so only the hard guard lets round 1 finish.
     tools = tmp_path / 'tools'
     tools.mkdir()
+    (tmp_path / 'nabu-session-probe').mkdir()
     counter = tmp_path / 'ps-count'
     invocations = tmp_path / 'samples'
     def tool(name, body):
@@ -127,11 +138,19 @@ echo "Call graph for real target" > "$1"
 echo "sample diagnostic preserved"
 """)
     launchctl = tool('launchctl', "trap '' TERM\nwhile :; do /bin/sleep 0.1; done\n")
-    sleep = tool('sleep', 'case "$1" in 15|5|1) /bin/sleep 0.1 ;; *) : ;; esac\n')
+    # A real symbol-processing phase takes 25 logical seconds: longer than
+    # the original 15-second guard, shorter than the requested 120 seconds.
+    sample_source = Path(sample)
+    sample_source.write_text(sample_source.read_text().replace(
+        'echo "Call graph for real target"',
+        'echo "Sampling completed, processing symbols..."\n/bin/sleep 0.25\necho "Call graph for real target"'))
+    shim = tool('shim', 'case "$1" in --nabu-raw-stacks) echo "NABU-RAWSTACK fixture" >&2 ;; --nabu-probe-relay) echo "relay file=$2" ;; *) exit 91 ;; esac\n')
+    sleep = tool('sleep', 'case "$1" in 120) /bin/sleep 1.2 ;; 15|5|1) /bin/sleep 0.15 ;; *) : ;; esac\n')
     script = (SHIM / 'session_probe.sh').read_text()
     script = script[:script.rindex('\nsleep 15')]
     script = script.replace('/bin/ps', ps).replace('/usr/bin/sample', sample)
     script = script.replace('/bin/launchctl', launchctl).replace('/bin/sleep', sleep)
+    script = script.replace('/System/Library/Filesystems/apfs.fs/Contents/Resources/apfs_boot_util', shim)
     script = script.replace('/private/var/tmp', str(tmp_path))
     script += '\nsnapshot 1\n'
     path = tmp_path / 'run.sh'
@@ -142,8 +161,11 @@ echo "sample diagnostic preserved"
     assert invocations.read_text().splitlines() == ['88', '123', '151', '120']
     assert result.stdout.count('sample-result process=') == 4
     assert result.stdout.count('status=0') >= 4
-    assert result.stdout.count('Call graph for real target') == 4
+    for process in ('opendirectoryd', 'loginwindow', 'lsd', 'WindowServer'):
+        assert (tmp_path / 'nabu-session-probe' / f'nabu-sample-{process}.txt').read_text() == 'Call graph for real target\n'
+    assert result.stdout.count('report-retained path=') == 4
     assert 'sample diagnostic preserved' in result.stdout
     assert 'command-timeout' in result.stderr
     assert result.stdout.index('sample-result process=WindowServer') < result.stdout.index('launchd job=')
     assert 'end round=1' in result.stdout
+    assert 'raw-watcher status=0' in result.stdout

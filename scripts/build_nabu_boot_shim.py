@@ -69,6 +69,7 @@ def build(output):
                     source_sha256=hashlib.sha256(SOURCE.read_bytes()).hexdigest(),
                     session_probe_script_sha256=hashlib.sha256(probe.read_bytes()).hexdigest(),
                     session_probe_header_sha256=hashlib.sha256((SOURCE.parent / 'session_probe.h').read_bytes()).hexdigest(),
+                    raw_stacks_header_sha256=hashlib.sha256((SOURCE.parent / 'raw_stacks.h').read_bytes()).hexdigest(),
                     entitlements_sha256=hashlib.sha256(ENTITLEMENTS.read_bytes()).hexdigest(),
                     bindfs_entitlement_verified=True,
                     page_hashes=pages)

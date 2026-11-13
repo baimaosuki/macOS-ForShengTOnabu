@@ -1,0 +1,59 @@
+Observe selected session IPC peers without retaining or modifying IPC objects.
+--- a/osfmk/ipc/mach_msg.c
++++ b/osfmk/ipc/mach_msg.c
+@@ -121,6 +121,10 @@
+ 
+ #include <sys/kdebug.h>
+ #include <sys/proc_ro.h>
++
++#if defined(NABU) && NABU
++#include "nabu_session_ipc.h"
++#endif
+ 
+ #ifndef offsetof
+ #define offsetof(type, member)  ((size_t)(&((type *)0)->member))
+@@ -301,7 +305,9 @@
+ 	mach_msg_option64_t     options = self->ith_option;
+ 	ipc_kmsg_t              kmsg    = self->ith_kmsg;
+ 
+-	nabu_session_ipc("ipc-receive-result", options, 0, 0, 0, mr);
++#if defined(NABU) && NABU
++	nabu_session_ipc_receive_result(options, mr);
++#endif
+ 	mach_msg_recv_bufs_t recv_bufs = self->ith_recv_bufs;
+ 	mach_msg_recv_result_t msgr = {
+ 		.msgr_seqno     = self->ith_seqno,
+@@ -955,8 +961,11 @@
+ 
+ 	KDBG(MACHDBG_CODE(DBG_MACH_IPC, MACH_IPC_KMSG_INFO) | DBG_FUNC_START);
+ 
+-	nabu_session_ipc("ipc-enter", option64, (uint32_t)(mv_id >> 32),
+-	    (uint32_t)mr_lp, (uint32_t)(dc_rn >> 32), 0);
++#if defined(NABU) && NABU
++	struct nabu_session_call nabu_call = nabu_session_ipc_begin(option64,
++	    (uint32_t)(mv_id >> 32), (uint32_t)mr_lp,
++	    (uint32_t)(mr_lp >> 32), (uint32_t)(dc_rn >> 32));
++#endif
+ 	mr = ipc_preflight_msg_option64(option64);
+ 	if (mr != MACH_MSG_SUCCESS) {
+ 		goto send_fail;
+@@ -1053,13 +1062,17 @@
+ 			sync_send = (mach_port_name_t)mr_lp;
+ 		}
+ 
++#if defined(NABU) && NABU
++		nabu_session_ipc_wait(&nabu_call);
++#endif
+ 		mr = mach_msg_trap_receive(msg_addr, aux_addr, option64,
+ 		    msg_timeout, sync_send, msg_size, aux_size, rcv_name);
+ 	}
+ 
+ end:
+-	nabu_session_ipc("ipc-return", option64, (uint32_t)(mv_id >> 32),
+-	    (uint32_t)mr_lp, (uint32_t)(dc_rn >> 32), mr);
++#if defined(NABU) && NABU
++	nabu_session_ipc_end(&nabu_call, mr);
++#endif
+ 	/* unblock call is idempotent */
+ 	ipc_port_thread_group_unblocked();
+ 	return mr;

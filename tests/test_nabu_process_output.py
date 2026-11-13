@@ -35,6 +35,11 @@ struct uio {struct vector *vectors;int count;};
 typedef struct uio *uio_t;
 static uint64_t now;
 static unsigned lines, reads;
+static unsigned captured, capture_calls, root=1;
+static char ram[1100000];
+static int kauth_cred_get(void){return 1;}
+static int kauth_cred_issuser(int c){(void)c;return root;}
+static void nabu_capture_append(const char *s,unsigned n){memcpy(ram+captured,s,n);captured+=n;capture_calls++;}
 static char output[8192];
 static uint64_t mach_absolute_time(void){return now;}
 static void absolutetime_to_nanoseconds(uint64_t t,uint64_t *n){*n=t;}
@@ -77,6 +82,30 @@ int main(void){
  }
  assert(nabu_output_kind("endpointsecurityd")==nabu_output_kind("endpointsecurity"));
  assert(nabu_output_kind("endpointsecurity.extra")<0);
+
+ /* The dedicated owner diagnostic stream survives console-off and ignores
+  * the old stderr selector, while rejecting other processes/fds/records. */
+ strcpy(p.p_comm,"apfs_boot_util");
+ const char raw[]="NABU-RAWSTACK registers tid=3 pc=0x1234 lr=0x9999\n";
+ unsigned printed=lines;
+ sheng_process_output(&p,2,(user_addr_t)raw,sizeof(raw)-1,0,"");assert(!captured);
+ nabu_probe_output=1;
+ root=0;sheng_process_output(&p,2,(user_addr_t)raw,sizeof(raw)-1,0,"");assert(!captured);root=1;
+ sheng_process_output(&p,1,(user_addr_t)raw,sizeof(raw)-1,0,"");assert(!captured);
+ sheng_process_output(&p,2,(user_addr_t)"NABU-RAWSTACK bad\nsecond\n",25,0,"");assert(!captured);
+ sheng_process_output(&p,2,(user_addr_t)"other output\n",13,0,"");assert(!captured);
+ char over[513];memset(over,'x',sizeof(over));
+ sheng_process_output(&p,2,(user_addr_t)over,sizeof(over),0,"");assert(!captured);
+ strcpy(p.p_comm,"bash");sheng_process_output(&p,2,(user_addr_t)raw,sizeof(raw)-1,0,"");assert(!captured);
+ strcpy(p.p_comm,"apfs_boot_util");
+ sheng_process_output(&p,2,0,sizeof(raw)-1,0,"");assert(!captured);
+ sheng_process_output(&p,2,(user_addr_t)raw,sizeof(raw)-1,0,"");
+ assert(captured==sizeof(raw)-1&&capture_calls==1&&!memcmp(ram,raw,sizeof(raw)-1)&&lines==printed);
+ nabu_probe_output_bytes=1048576-(sizeof(raw)-1);
+ sheng_process_output(&p,2,(user_addr_t)raw,sizeof(raw)-1,0,"");assert(nabu_probe_output_bytes==1048576&&capture_calls==2);
+ nabu_probe_output_bytes=1048576-1;
+ sheng_process_output(&p,2,(user_addr_t)raw,sizeof(raw)-1,0,"");assert(capture_calls==3&&strstr(ram,"global-1MiB-budget"));
+ sheng_process_output(&p,2,(user_addr_t)raw,sizeof(raw)-1,0,"");assert(capture_calls==3);
 
  return 0;
 }

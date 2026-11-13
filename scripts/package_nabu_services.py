@@ -64,6 +64,8 @@ def package(artifact, metadata, output, installed_toml, identity_file, *, cpu_co
             raise ValueError('session repair package requires CPU compositor and session exit observers')
         if repair.get('session_trace_sha256') != sha(ROOT / 'platform/nabu/macos26/log/session_trace.h'):
             raise ValueError('session observer differs from the compiled kernel')
+        if repair.get('session_ipc_sha256') != sha(ROOT / 'platform/nabu/macos26/log/session_ipc.h'):
+            raise ValueError('session IPC peer observer differs from the compiled kernel')
         if repair.get('filesystem_patch_sha256') != sha(ROOT / 'platform/nabu/macos26/desktop/session-filesystem.patch'):
             raise ValueError('session filesystem fixes differ from the compiled kernel')
         if '_native_union_visflags' not in symbols(native):

@@ -13,6 +13,7 @@
 #ifdef __APPLE__
 #include <sys/mount.h>
 #include "session_probe.h"
+#include "raw_stacks.h"
 #else
 #include <sys/statvfs.h>
 #include <sys/vfs.h>
@@ -230,6 +231,12 @@ prepare_od_overlay(void)
 int
 main(int argc, char **argv)
 {
+#ifdef __APPLE__
+    if (argc > 1 && strcmp(argv[1], "--nabu-raw-stacks") == 0)
+        return nabu_raw_stacks_command(argc - 1, argv + 1);
+    if (argc == 3 && strcmp(argv[1], "--nabu-probe-relay") == 0)
+        return nabu_probe_relay(argv[2]);
+#endif
     const char *data = "/System/Volumes/Data";
     const char *vm = "/System/Volumes/VM";
     struct stat data_status, vm_status;

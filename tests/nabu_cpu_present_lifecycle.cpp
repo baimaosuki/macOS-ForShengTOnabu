@@ -100,12 +100,14 @@ static void waitForReapers() {
 struct IOSurface {
     uint64_t width,height,rowBytes,base=0; uint32_t format=kFormatBGRA;
     IOMemoryDescriptor memory;
+    uint32_t surfaceID=42;
 };
 static uint64_t ioSurfaceWidth(IOSurface *s) {return s->width;}
 static uint64_t ioSurfaceHeight(IOSurface *s) {return s->height;}
 static uint64_t ioSurfaceBytesPerRow(IOSurface *s) {return s->rowBytes;}
 static uint64_t ioSurfaceBaseOffset(IOSurface *s) {return s->base;}
 static uint32_t ioSurfacePixelFormat(IOSurface *s) {return s->format;}
+static uint32_t ioSurfaceID(IOSurface *s) {return s->surfaceID;}
 static IOMemoryDescriptor *ioSurfaceMemory(IOSurface *s) {return &s->memory;}
 struct IOMFBSwapIORequest {alignas(8) uint8_t bytes[3300]{};};
 struct NativeGOPDisplay {
@@ -127,7 +129,7 @@ struct NativeGOPDisplay {
     ~NativeGOPDisplay() {stopSourceMaps();free(fComposition);free(fHalfToByte);free(fRow);}
     void program_hardware_gated();
     void failCurrentSwap(IOMFBSwapIORequest *);
-    bool copyLayer(IOSurface *,const NabuGopRect &,const NabuGopRect &,bool,unsigned);
+    bool copyLayer(IOSurface *,const NabuGopRect &,const NabuGopRect &,bool,unsigned,NabuGopPlaneStats *);
     void swap_complete_gated() {
         assert(prepareCalls==0 && completeCalls==0);
         auto *swap=at<IOMFBSwapIORequest *>(this,kCurrentSwap);assert(swap);
@@ -228,6 +230,59 @@ int main() {
     handoffFailure=0;
     fresh.stopSourceMaps();d.stopSourceMaps();waitForReapers();
     assert(mapCalls>0 && activeMaps==0 && mapCalls==mapReleases && prepareCalls==0 && completeCalls==0);
+    // Real generated presenter: a three-bit update carries root, cursor and
+    // plane 2. All nonempty layers must be drawn, then null/zero-area updates
+    // must be reported distinctly from silently dropping a live layer.
+    {
+        sheng_framebuffer.owner=SHENG_FB_BOOT;sheng_framebuffer.writer=0;
+        NativeGOPDisplay multi;multi.fScanout=reinterpret_cast<uint8_t *>(scanout);
+        IOSurface overlay{1,1,4};overlay.surfaceID=77;overlay.memory.bytes.resize(4);
+        at<uint32_t>(overlay.memory.bytes.data(),0)=0x000000ff;
+        IOMFBSwapIORequest all;
+        layer(all,0,&root,{0,0,4,2},{0,0,4,2});
+        layer(all,1,&cursor,{0,0,2,1},{0,0,2,1});
+        layer(all,2,&overlay,{0,0,1,1},{3,1,1,1});
+        at<uint32_t>(&all,kSwapLayers)|=0x80000000u;
+        at<uint32_t>(&all,0x334)=1;
+        present(multi,all);
+        assert(scanout[0]==0xffff0000 && scanout[1]==0xff00ff00 && scanout[9]==0xff0000ff);
+        bool plane2=false;
+        for(const auto &line:traceLines)
+            if(line.find("plane-content swap=1 layer=2 updated=1 state=copied surface_id=77")!=std::string::npos &&
+               line.find("samples=1 rgb_nonzero=1 rgba_nonzero=1 alpha_nonzero=0")!=std::string::npos)plane2=true;
+        assert(plane2); // alpha was measured before the opaque copy, not invented from scanout
+        for(uint32_t id=2;id<=5;++id) {
+            IOMFBSwapIORequest blank;
+            layer(blank,0,nullptr,{},{});layer(blank,1,nullptr,{},{});
+            layer(blank,2,&overlay,{0,0,0,1},{0,0,0,1});
+            at<uint32_t>(&blank,0x334)=id;
+            present(multi,blank);
+            assert(multi.fLastLit==0 && multi.nativeComplete==id);
+        }
+        bool clearSeen=false,disabledSeen=false;
+        for(const auto &line:traceLines) {
+            clearSeen|=line.find("plane-content swap=4 layer=0 updated=1 state=clear")!=std::string::npos;
+            disabledSeen|=line.find("plane-content swap=4 layer=2 updated=1 state=zero-area surface_id=77")!=std::string::npos;
+        }
+        assert(clearSeen && disabledSeen);
+    }
+    waitForReapers();assert(activeMaps==0);
+    for (unsigned scenario=0;scenario<3;++scenario) {
+        NativeGOPDisplay empty;empty.fScanout=reinterpret_cast<uint8_t *>(scanout);
+        IOMFBSwapIORequest request;
+        at<uint32_t>(&request,0x334)=100+scenario;
+        if(scenario==1)layer(request,0,nullptr,{},{});
+        if(scenario==2)layer(request,0,&root,{0,0,0,2},{0,0,0,2});
+        present(empty,request);
+        assert(!empty.fFrames && empty.nativeDrop==1);
+        const char *state=scenario==0?"absent":scenario==1?"clear":"zero-area";
+        const std::string expected="plane-failure swap="+std::to_string(100+scenario)+
+            " layer=0 updated="+(scenario==0?"0":"1")+" state="+state;
+        bool seen=false;
+        for(const auto &line:traceLines)seen|=line.find(expected)!=std::string::npos;
+        assert(seen);
+    }
+    waitForReapers();assert(activeMaps==0);
     // A blocked VM unmap cannot grow references indefinitely or force stop
     // to wait for the reaper. Four shutdown slots remain reserved.
     blockRelease=true;releaseEntered=false;

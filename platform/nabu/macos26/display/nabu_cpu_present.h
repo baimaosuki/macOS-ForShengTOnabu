@@ -6,6 +6,23 @@
 struct NabuGopRect { int32_t x, y, width, height; };
 struct NabuGopClip { int64_t x0, y0, x1, y1; };
 
+// Counts describe converted source pixels before opaque-plane alpha is applied.
+// Scaling can sample a source pixel more than once; this is not an allocation scan.
+// RGhA values are quantized to 8-bit before counting; BGRA is counted unchanged.
+struct NabuGopPlaneStats {
+    uint32_t surfaceID = 0, format = 0;
+    uint64_t samples = 0, rgbNonzero = 0, rgbaNonzero = 0, alphaNonzero = 0;
+    const char *state = "not-visited";
+};
+static inline void nabuGopObservePixel(NabuGopPlaneStats *stats, uint32_t pixel)
+{
+    if (!stats) return;
+    ++stats->samples;
+    stats->rgbNonzero += (pixel & 0xffffff) != 0;
+    stats->rgbaNonzero += pixel != 0;
+    stats->alphaNonzero += (pixel >> 24) != 0;
+}
+
 static inline bool nabuGopClip(const NabuGopRect &src, const NabuGopRect &dst,
                               uint64_t width, uint64_t height,
                               uint64_t screenWidth, uint64_t screenHeight, NabuGopClip &clip)
@@ -39,11 +56,16 @@ static inline uint32_t nabuGopCursorOver(uint32_t src, uint32_t dst)
 
 static inline void nabuGopLayerRow(uint32_t *destination, const void *row,
                                    const NabuGopRect &src, const NabuGopRect &dst,
-                                   const NabuGopClip &clip, const uint8_t *halfToByte, bool cursor)
+                                   const NabuGopClip &clip, const uint8_t *halfToByte, bool cursor,
+                                   NabuGopPlaneStats *stats = nullptr)
 {
     if (!halfToByte && !cursor && src.width == dst.width) {
         const uint32_t *pixels = static_cast<const uint32_t *>(row) + src.x;
-        for (int64_t x = clip.x0; x < clip.x1; x++) destination[x] = pixels[x - dst.x] | 0xff000000;
+        for (int64_t x = clip.x0; x < clip.x1; x++) {
+            const uint32_t pixel = pixels[x - dst.x];
+            nabuGopObservePixel(stats, pixel);
+            destination[x] = pixel | 0xff000000;
+        }
         return;
     }
     for (int64_t x = clip.x0; x < clip.x1; x++) {
@@ -54,6 +76,7 @@ static inline void nabuGopLayerRow(uint32_t *destination, const void *row,
             pixel = uint32_t(halfToByte[rgba[3]]) << 24 | uint32_t(halfToByte[rgba[0]]) << 16 |
                     uint32_t(halfToByte[rgba[1]]) << 8 | halfToByte[rgba[2]];
         } else pixel = static_cast<const uint32_t *>(row)[sx];
+        nabuGopObservePixel(stats, pixel);
         destination[x] = cursor ? nabuGopCursorOver(pixel, destination[x]) : (pixel | 0xff000000);
     }
 }
