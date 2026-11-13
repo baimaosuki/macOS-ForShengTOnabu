@@ -528,6 +528,7 @@ def prepare() -> dict:
         for directory in ('bsd/kern', 'osfmk/ipc'):
             stage_file(PLATFORM / 'log/session_trace.h', source / directory / 'nabu_session_trace.h')
         stage_file(PLATFORM / 'log/session_ipc.h', source / 'osfmk/ipc/nabu_session_ipc.h')
+        stage_file(PLATFORM / 'desktop/minimal_boot.h', source / 'bsd/kern/nabu_minimal_boot.h')
         build_epoch = int(os.environ.get('SOURCE_DATE_EPOCH', str(int(time.time()))))
         if not 1704067200 <= build_epoch < 4102444800:
             raise ValueError('NABU calendar floor requires a UTC build timestamp in 2024..2099')
@@ -614,6 +615,7 @@ def prepare() -> dict:
                         'bsd/kern/nabu_windowserver_trace.h',
                         'bsd/kern/nabu_session_trace.h', 'osfmk/ipc/nabu_session_trace.h',
                         'osfmk/ipc/nabu_session_ipc.h',
+                        'bsd/kern/nabu_minimal_boot.h',
                         'bsd/kern/nabu_boot_epoch.h',
                         'osfmk/vm/nabu_cpu_compositor_policy.h',
                         'osfmk/vm/nabu_cpu_compositor_kernel.h',
@@ -630,6 +632,11 @@ def prepare() -> dict:
                       bulk_progress_patch_sha256=sha(PLATFORM / 'desktop/bulk-progress.patch'),
                       directory_progress_patch_sha256=sha(PLATFORM / 'desktop/directory-progress.patch'),
                       lifecycle_diagnostics_patch_sha256=sha(PLATFORM / 'desktop/lifecycle-diagnostics.patch'),
+                      minimal_boot=dict(default_off=True, boot_argument='nabu-minimal-boot=1',
+                          header_sha256=sha(PLATFORM / 'desktop/minimal_boot.h'),
+                          patch_sha256=sha(PLATFORM / 'desktop/minimal-boot.patch'),
+                          blocked_policy='kernel task hold before xpcproxy userspace entry; proxy stays alive',
+                          log_limit=64, device_verified=False),
                       login_ipc_policy='call-paired per-tid 60-second epochs, explicit late phase at 400s',
                       od_wait_trace_sha256=sha(PLATFORM / 'log/od_wait_trace.h'),
                       device_verified=False) if BOARD == 'nabu' else None),
@@ -1216,6 +1223,7 @@ def main() -> None:
         PATCHES.append(desktop / 'bulk-progress.patch')
         PATCHES.append(desktop / 'directory-progress.patch')
         PATCHES.append(desktop / 'lifecycle-diagnostics.patch')
+        PATCHES.append(desktop / 'minimal-boot.patch')
         DESKTOP_CFLAGS = (' -DXNU_OWNER_ROOT_AUDIT=1 -DXNU_OWNER_ROOT_TRUST=1 '
             '-DXNU_OWNER_CACHE_MOUNT=1 -DXNU_OWNER_CACHE_STARTUP=1 -DXNU_OWNER_BOOT_MANIFEST=1 '
             '-DXNU_OWNER_UNION_SYSTEMOS=1 -DXNU_OWNER_DATA_MOUNT=1 -DXNU_NATIVE_RAM_BLOCK=1 '

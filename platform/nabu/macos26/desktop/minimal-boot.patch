@@ -1,0 +1,35 @@
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -1184,6 +1184,10 @@
+ 	}
+ 	kfree_type(struct nabu_life_record, r);
+ }
++#endif
++
++#if defined(NABU) && NABU && defined(XNU_OWNER_DATA_MOUNT) && XNU_OWNER_DATA_MOUNT
++#include "nabu_minimal_boot.h"
+ #endif
+ 
+ void
+@@ -3062,6 +3066,11 @@
+ 	}
+ 
+ 
++#if defined(NABU) && NABU && defined(XNU_OWNER_DATA_MOUNT) && XNU_OWNER_DATA_MOUNT
++	error = nabu_minimal_boot_apply(p, imgp, task);
++	if (error) goto badtoolate;
++#endif
++
+ 	/*
+ 	 * If posix_spawned with the START_SUSPENDED flag, stop the
+ 	 * process before it runs.
+@@ -4617,6 +4626,9 @@
+ 		    memcmp(job, label, sizeof(label))) return false;
+ 		via_proxy = true;
+ 	}
++	/* Minimal boot parks this proxy instead of returning ENOENT to KeepAlive.
++	 * The direct watchdogd route retains its existing policy. */
++	if (via_proxy && nabu_minimal_boot_enabled()) return false;
+ 	if (via_proxy) os_atomic_inc(&native_owner_watchdog_proxy_blocked, relaxed);
+ 	unsigned int blocked = os_atomic_inc_orig(&native_owner_watchdog_spawn_blocked, relaxed) + 1;
+ 	if (blocked == 1) {

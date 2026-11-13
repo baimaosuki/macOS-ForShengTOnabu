@@ -28,7 +28,8 @@ def sha(path):
 
 
 def package(artifact, metadata, output, installed_toml, identity_file, *, cpu_compositor=False,
-            windowserver_log=False, session_repair=False, cpu_desktop_repair=False, cpu_count=1):
+            windowserver_log=False, session_repair=False, cpu_desktop_repair=False, cpu_count=1,
+            minimal_boot=False):
     metadata = json.loads(metadata.read_text())
     if metadata['conclusion'] != 'success':
         raise ValueError('requires a successful native CI build')
@@ -36,6 +37,13 @@ def package(artifact, metadata, output, installed_toml, identity_file, *, cpu_co
     native = artifact / 'kernel.development.nabu'
     if cpu_desktop_repair and not (cpu_compositor and session_repair and windowserver_log):
         raise ValueError('CPU desktop repair requires the compositor and session policies')
+    minimal_policy = None
+    if minimal_boot:
+        minimal_policy = (build.get('session_repair') or {}).get('minimal_boot') or {}
+        if minimal_policy.get('header_sha256') != sha(ROOT / 'platform/nabu/macos26/desktop/minimal_boot.h') or minimal_policy.get('patch_sha256') != sha(ROOT / 'platform/nabu/macos26/desktop/minimal-boot.patch'):
+            raise ValueError('minimal boot policy differs from compiled kernel')
+        if '_nabu_minimal_boot_parked' not in symbols(native):
+            raise ValueError('native kernel omitted minimal boot gate')
     timesync_policy = None
     if cpu_desktop_repair:
         from inspect_nabu_timesync_identity import inspect
@@ -158,7 +166,7 @@ def package(artifact, metadata, output, installed_toml, identity_file, *, cpu_co
         args = [a for a in match.group(2).split() if a.split('=', 1)[0] not in changes]
         args += [key + '=' + value for key, value in changes.items()]
         text = text[:match.start(2)] + ' '.join(args) + text[match.end(2):]
-    if cpu_desktop_repair or cpu_count != 1:
+    if cpu_desktop_repair or cpu_count != 1 or minimal_boot:
         matches = list(re.finditer(r'(?m)^(\s*args\s*=\s*")([^"\n]*)("\s*)$', text))
         if len(matches) != 1:
             raise ValueError('expected one installed args line')
@@ -171,6 +179,8 @@ def package(artifact, metadata, output, installed_toml, identity_file, *, cpu_co
             wanted = {'-timesync_bringup', 'nabu-session-probe=1', 'nabu-od-wait-log=1'}
             keys = {a.split('=', 1)[0] for a in wanted}
             arguments = ' '.join([a for a in arguments.split() if a.split('=', 1)[0] not in keys] + sorted(wanted))
+        if minimal_boot:
+            arguments = ' '.join([a for a in arguments.split() if a.split('=', 1)[0] != 'nabu-minimal-boot'] + ['nabu-minimal-boot=1'])
         if len(arguments.encode()) >= 1000:
             raise ValueError('CPU desktop boot arguments exceed the loader command line budget')
         text = text[:match.start(2)] + arguments + text[match.end(2):]
@@ -198,6 +208,7 @@ def package(artifact, metadata, output, installed_toml, identity_file, *, cpu_co
         data_reflash_required=False, esp_logger_allocation_preserved=True,
         system_sleep_disabled=True, cpu_count=cpu_count,
         cpu_desktop_repair=cpu_desktop_repair, timesync_bringup_policy=timesync_policy,
+        minimal_boot=minimal_boot, minimal_boot_policy=minimal_policy,
         payload_sha256={name: sha(payload / name) for name in names},
         toml_sha256=sha(config_path), assembled_boot_args_without_log_token=assembled['boot_args'])
     readme = '''NABU macOS 26.5 / 25F71 — Hardware / AKS / GOP / TimeSync
@@ -337,6 +348,21 @@ TWRP 挂载现有 ESP 后，先保存旧文件，再替换本包 EFI 下五个�
 LS 实机第二轮栈已落在 CFIterateDirectory/opendir；尚未捕获具体目录及同mount回退命中。
 此包修复可复现的重复枚举缺陷，尚未实机验证解决 lsd 等待或黑屏。
 '''
+    if minimal_boot:
+        readme = '''NABU 25F71 / 8-core Minimal GUI Boot test ESP
+
+本包启用 nabu-minimal-boot=1。仅放行 minimal_boot.h 中的精确 xpcproxy 服务标签，
+包括用户要求的最小服务及原版 SecurityAgent 的 com.apple.security.agent / .login。
+其他 xpcproxy 在进入用户态前施加内核 task hold：保持 PID 存活，避免普通退出触发
+KeepAlive 重拉；正常 task resume / SIGCONT 不释放该独立内核 hold。记录前64次挂起。
+这不是按进程名杀服务；直接执行且未经过 xpcproxy 的服务不在该门控范围。
+被屏蔽服务的客户端仍可能等待或超时；本包用于实机验证最小服务集，未验证桌面。
+
+仅替换 ESP 中本ZIP携带的 unixnu.toml 和四个 Payload 文件；先备份对应旧文件。
+不覆盖 Data、root_image.bin、引导器或 XNU2LOG.BIN。保留八核、CPU显示和原日志token。
+恢复旧ESP五文件可回退；或将 boot-arg 改为 nabu-minimal-boot=0 关闭此门控。
+
+''' + readme
     (output / 'README.txt').write_text(readme)
     (output / 'delivery.json').write_text(json.dumps(delivery, indent=2) + '\n')
     archive = output.with_suffix('.zip')
@@ -365,9 +391,10 @@ if __name__ == '__main__':
     parser.add_argument('--windowserver-log', action='store_true')
     parser.add_argument('--session-repair', action='store_true')
     parser.add_argument('--cpu-desktop-repair', action='store_true')
+    parser.add_argument('--minimal-boot', action='store_true')
     parser.add_argument('--cpus', type=int, choices=(1, 2, 4, 8), default=1)
     args = parser.parse_args()
     package(args.artifact, args.metadata, args.output, args.installed_toml, args.identity_file,
             cpu_compositor=args.cpu_compositor, windowserver_log=args.windowserver_log,
             session_repair=args.session_repair, cpu_desktop_repair=args.cpu_desktop_repair,
-            cpu_count=args.cpus)
+            cpu_count=args.cpus, minimal_boot=args.minimal_boot)

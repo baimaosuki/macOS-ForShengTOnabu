@@ -25,6 +25,8 @@ static uint64_t tid = 111, now_ns = 900;
 static const char *self_name = "WindowServer";
 static int space_locked, port_locked, space_busy, port_busy;
 static int space_active = 1, port_active = 1, entry_present = 1;
+enum { PEER_NORMAL, PEER_TRANSIT, PEER_LIMBO, PEER_KERNEL, PEER_REPLY };
+static int receiver_state;
 static unsigned lookups, pid_reads, peer_names, writes;
 static char journal[8000000];
 static size_t used;
@@ -36,6 +38,8 @@ struct ipc_entry { uint32_t ie_bits; ipc_port_t ie_port; } entry = {
 typedef struct ipc_entry *ipc_entry_t;
 struct ipc_space { int is_lock; } space;
 typedef struct ipc_space *ipc_space_t;
+static struct ipc_space kernel_space, reply_space;
+static ipc_space_t ipc_space_kernel = &kernel_space, ipc_space_reply = &reply_space;
 static int ipc_lck_grp;
 static ipc_space_t current_space(void) { return &space; }
 static int lck_ticket_lock_try(int *lock, int *grp) {
@@ -61,12 +65,28 @@ static int ip_mq_lock_try(ipc_port_t p) {
 }
 static void ip_mq_unlock(ipc_port_t p) { assert(p == &port && port_locked); port_locked = 0; }
 static int ip_active(ipc_port_t p) { assert(p == &port && port_locked); return port_active; }
+static int ip_in_transit(ipc_port_t p) {
+    assert(p == &port && port_locked); return receiver_state == PEER_TRANSIT;
+}
+static int ip_in_limbo(ipc_port_t p) {
+    assert(p == &port && port_locked); return receiver_state == PEER_LIMBO;
+}
+static int ip_in_a_space(ipc_port_t p) {
+    assert(p == &port && port_locked);
+    return receiver_state != PEER_TRANSIT && receiver_state != PEER_LIMBO;
+}
+static int ip_in_space(ipc_port_t p, ipc_space_t s) {
+    assert(p == &port && port_locked);
+    return (receiver_state == PEER_KERNEL && s == ipc_space_kernel) ||
+        (receiver_state == PEER_REPLY && s == ipc_space_reply);
+}
 static int ipc_port_get_receiver_task_locked(ipc_port_t p, void *task_out) {
     assert(p == &port && space_locked && port_locked && task_out == NULL);
-    pid_reads++; return receiver_pid;
+    pid_reads++; return receiver_state == PEER_NORMAL ? receiver_pid : -1;
 }
 static uint32_t ip_get_receiver_name(ipc_port_t p) {
-    assert(p == &port && port_locked); return 0x987;
+    assert(p == &port && port_locked);
+    return ip_in_a_space(p) ? 0x987 : 0;
 }
 static int PE_parse_boot_argn(const char *name, void *out, int size) {
     assert(!space_locked && !port_locked);
@@ -102,6 +122,7 @@ static void reset(void) {
     enabled = space_active = port_active = entry_present = 1;
     self_name = "WindowServer"; self_pid = 41; tid = 111; receiver_pid = 17;
     space_busy = port_busy = space_locked = port_locked = 0;
+    receiver_state = PEER_NORMAL;
     entry.ie_bits = MACH_PORT_TYPE_SEND;
 }
 static void snapshot_paths(void) {
@@ -122,7 +143,16 @@ static void snapshot_paths(void) {
     port_busy = 0; port_active = 0; p = nabu_session_peer_snapshot(0x123);
     assert(!strcmp(p.state, "port-inactive") && !pid_reads);
     port_active = 1; receiver_pid = -1; p = nabu_session_peer_snapshot(0x123);
-    assert(!strcmp(p.state, "unknown") && p.pid == -1 && p.receiver_port == 0x987);
+    assert(!strcmp(p.state, "receiver-task-unavailable") && p.pid == -1 && p.receiver_port == 0x987);
+    receiver_state = PEER_TRANSIT; p = nabu_session_peer_snapshot(0x123);
+    assert(!strcmp(p.state, "in-transit") && p.pid == -1 && p.receiver_port == 0);
+    receiver_state = PEER_LIMBO; p = nabu_session_peer_snapshot(0x123);
+    assert(!strcmp(p.state, "in-limbo") && p.pid == -1 && p.receiver_port == 0);
+    receiver_state = PEER_KERNEL; p = nabu_session_peer_snapshot(0x123);
+    assert(!strcmp(p.state, "kernel-space") && p.pid == -1);
+    receiver_state = PEER_REPLY; p = nabu_session_peer_snapshot(0x123);
+    assert(!strcmp(p.state, "reply-space") && p.pid == -1);
+    receiver_state = PEER_NORMAL;
     receiver_pid = 17; p = nabu_session_peer_snapshot(0x123);
     assert(!strcmp(p.state, "pid-snapshot") && p.pid == 17);
     assert(!space_locked && !port_locked && !peer_names);

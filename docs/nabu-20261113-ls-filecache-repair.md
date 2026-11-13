@@ -29,3 +29,20 @@ bootshim v7保留默认raw-only，加入coreservicesd/launchservicesd可选三�
 两个新desktop patch都位于integrated.patch和session-filesystem.patch之后，不更改历史固定patch和manifest。完整ordinary ARM64 source prepare为out/nabu-ls-filecache-repair/source-prepare；17定向tests及17subtests通过。需Intel完整ARM64内核CI并重新打包ESP，不能只把v6启动工具包换名字。真机尚未验证高CPU或登录桌面已修复。
 
 参考：SHENG27.3 UniXNU dff276535db3ac394f628cec58a718cd46c20ac2 docs/porting/{display,macos,gpu-diagnostics}.md；已导入regularlookup same-mount修复；用户NABUiOS16 a7148554052f42159207245e2070b96492a046da/HakiOS96ffbc532e970f3540885755d457e401e04d4707的原始栈/原生显示完整生命周期思路，地址和ABI仍按25F71匹配。
+
+进一步静态定位：worker的同步NSXPC方法是`_LSDReadService / getServerStoreNonBlockingWithCompletionHandler:`，默认服务`com.apple.lsd.mapdb`（`LSD_SERVICE_BASE`可覆盖、root/user domain未捕获）。原agent/daemon均发布此MachService。方法跳过显式seeding-group等待，但在执行前仍进入LSDBExecutionContext syncRead和CoreServicesStore读访问；handler会回实际db、错误或blockingfetch endpoint，没有支持伪造成功或去锁的证据。精确原机码/路由见`.work/nabu-display-init-20261114/v6-lsd-mapdb-route-audit.md`。
+
+
+## Minimal GUI Boot：精确调用链补充与服务隔离
+
+本轮cache UUID46e0097ff38536c884a9a40d315a32d1，所有以下地址均unslid。完整指令和表定义分别见docs/nabu-20261113-exact-lsd-address-audit.md及docs/nabu-20261113-lsd-seeding-path-plan.md。
+
+loginwindow worker：FSURLCopyResourcePropertyForKeyInternal(1847cb010) → prepareValuesForBitmap(1847cc964) → URLPropertyProvider::prepareValues(180a9e200) → prepareIsApplicationValue(180c8aa74) → Database::Context::_get(180aee1d8) → LSContextInitCommon(180b828d8) → LSCopyServerStore(180a9f824) → NSXPCDistantObjectSimpleMessageSend1(181dc0ba8) → NSXPCConnection _sendSelector(181dc0c74) → _sendInvocation(181db9634) → NSXPCCONNECTION_IS_WAITING_FOR_A_SYNCHRONOUS_REPLY(181dbb5fc)。后四帧属于Foundation。默认服务由_LSDReadService.connectionType=0、lightweight=0解析到com.apple.lsd.mapdb，方法getServerStoreNonBlockingWithCompletionHandler:。DIR call5915发送成功，5916在receive5a03等待回复。peer unknown/-1/0未记录最终接收任务PID，不能直接冒充pid137。
+
+lsd早期：LSServerMain(180c72354) → LSDBExecutionContext beginServerDBBootstrap(180c979e8) → seedDatabase block(180c7273c) → LSDatabaseBuilder createAndSeedLocalDatabase(180b88a1c) → LSDatabaseCreateFromPersistentStore(180b7f4a4) → IgnoringRecoveryFile(180b7f7ec) → LSCreateEmptyStore(180b7ffc4/180b80004)。末端分别是CSStringBindingStoreAddTable/CSGetConstStringForCharacters，固定13普通表、15绑定表和8常量字符串，不等于直接扫描整个System。
+
+LS旧round2 347.035772343s：PC18031e0a8=__malloc_zone_malloc+70，LR18031eee8=reallocf+20，x3 unslid18031a11c为typed allocator回调；父FP记录__filldir(1803d10a0) → __opendir_common(18038682c) → __opendir2(1803d0d50) → CFIterateDirectory(180548130) → return7。x20=0/x21=4000与reallocf(NULL,16384)吻合；live-unsuspended父帧存在返回点不一致，未捕获目录路径和fd内容，不能宣称连续150秒同一函数无限扩容。
+
+createAndSeedLocalDatabase在180b88a50发布真实server database，读取seeded/complete标志；未播种时先同步处理插件，然后180b88e40通过dispatch_channel_async调度block180b88f6c中的后续目录注册。不能把全部异步扫描耗时直接等同为bootstrap同步锁持有时间。当前packed Data seed persistent=false且无csstore，默认root store路径为/private/var/folders/zz/zyxvpxvq6csfxvn_n0000000000000/0/com.apple.LaunchServices.dv/com.apple.LaunchServices-20971544-v2.csstore。
+
+用户授权的Minimal GUI Boot是独立、默认关闭的服务隔离试验：boot-arg nabu-minimal-boot=1仅放行minimal_boot.h所列27个精确job label（25个指定label和两个原版SecurityAgent别名）；其余xpcproxy在原生exec成功加载后、用户态运行前施加独立内核task hold。父spawn继续完成，代理不正常退出，避免用ENOENT/exit触发KeepAlive重拉；原生user resume不能消耗该kernel hold。此策略不改变Mach RPC成功值、LS数据库内容或原生显示完成语义。明确可能使白名单服务对被屏蔽服务的请求等待；需要实机验证依赖是否足够，不宣称已解决FileCache/LS根因或5秒进桌面。直接执行且不经xpcproxy的服务不由此门控拦截。

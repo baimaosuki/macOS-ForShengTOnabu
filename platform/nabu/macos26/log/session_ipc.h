@@ -39,13 +39,23 @@ nabu_session_peer_snapshot(uint32_t remote)
         is_read_unlock(space);
         return peer;
     }
-    peer.state = "unknown";
+    peer.state = "receiver-unavailable";
     if (ip_active(port)) {
         /* This native helper owns the receiver/space/task lifetime contract.
          * task_pid() is an atomic token read; no proc lookup or borrowed task. */
         peer.pid = ipc_port_get_receiver_task_locked(port, NULL);
         peer.receiver_port = ip_get_receiver_name(port);
         if (peer.pid >= 0) peer.state = "pid-snapshot";
+        else if (ip_in_transit(port)) peer.state = "in-transit";
+        else if (ip_in_limbo(port)) peer.state = "in-limbo";
+        else if (ip_in_a_space(port)) {
+            if (ip_in_space(port, ipc_space_kernel)) peer.state = "kernel-space";
+            else if (ip_in_space(port, ipc_space_reply)) peer.state = "reply-space";
+            else peer.state = "receiver-task-unavailable";
+        }
+        /* Do not chase ip_destination or borrow its receiver: an in-transit
+         * receive right has no current task owner. A bootstrap service name
+         * cannot be reconstructed from this Mach name snapshot. */
     } else {
         peer.state = "port-inactive";
     }
