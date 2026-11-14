@@ -27,7 +27,7 @@ extern "C" void nabu_capture_append(const char *data,unsigned bytes) {
 volatile uint64_t sheng_panel_ready = 1, sheng_status_pixels = 1;
 static constexpr int kIOReturnSuccess=0,kIOMapAnywhere=0,kIOMapReadOnly=0,kPEDisableScreen=0,kPEEnableScreen=1;
 static constexpr uint32_t kFormatBGRA=0x42475241,kFormatRGhA=0x52476841;
-static constexpr size_t kCurrentSwap=6032,kSwapQueueFirst=6040,kSwapQueueLast=6048,kSwapLayers=824,kSwapNext=3192,kSwapPrev=3200;
+static constexpr size_t kCurrentSwap=6032,kSwapQueueFirst=6040,kSwapQueueLast=6048,kSwapLayers=824,kSwapDropReasons=844,kSwapNext=3192,kSwapPrev=3200;
 static int kernel_task=0;
 static unsigned screenDisabled=0;
 static std::atomic<bool> blockRelease{false},releaseEntered{false};
@@ -49,10 +49,10 @@ static void sheng_boot_checkpoint(int) {}
 static uint8_t halfToByte(uint16_t half) {return half==0x3c00?255:0;}
 template<typename T> static T &at(void *p,size_t n) {return *reinterpret_cast<T *>(static_cast<uint8_t *>(p)+n);}
 struct IOMemoryMap {
-    std::vector<uint8_t> mappedBytes;
-    IOMemoryMap(const uint8_t *data,uint64_t n):mappedBytes(data,data+n) {activeMaps++;mapCalls++;}
-    uint64_t getLength() {return mappedBytes.size();}
-    uintptr_t getVirtualAddress() {return reinterpret_cast<uintptr_t>(mappedBytes.data());}
+    const uint8_t *mappedBytes; uint64_t length;
+    IOMemoryMap(const uint8_t *data,uint64_t n):mappedBytes(data),length(n) {activeMaps++;mapCalls++;}
+    uint64_t getLength() {return length;}
+    uintptr_t getVirtualAddress() {return reinterpret_cast<uintptr_t>(mappedBytes);}
     void release() {
         if(blockRelease) {releaseEntered=true;while(blockRelease)std::this_thread::sleep_for(std::chrono::milliseconds(1));}
         assert(activeMaps);activeMaps--;mapReleases++;delete this;
@@ -127,6 +127,15 @@ struct NativeGOPDisplay {
         fSourceReaper->finish(maps);fSourceReaper=nullptr;
     }
     ~NativeGOPDisplay() {stopSourceMaps();free(fComposition);free(fHalfToByte);free(fRow);}
+#ifdef NABU_CLEAN_QUEUE_TEST
+    uint64_t fQueueAudit=0;
+    unsigned nativeNoops=0, abortedChecks=0, dummyChecks=0;
+    bool clean_queue_gated();
+    bool dropObsoleteSwaps_gated() {return false;}
+    void dropNoOpSwaps_gated() {nativeNoops++;at<IOMFBSwapIORequest *>(this,kSwapQueueFirst)=nullptr;}
+    void dropAbortedSwaps_gated(bool) {abortedChecks++;}
+    void dropDummySwaps_gated() {dummyChecks++;}
+#endif
     void program_hardware_gated();
     void failCurrentSwap(IOMFBSwapIORequest *);
     bool copyLayer(IOSurface *,const NabuGopRect &,const NabuGopRect &,bool,unsigned,NabuGopPlaneStats *);
@@ -153,6 +162,9 @@ struct NativeGOPDisplay {
     }
 };
 #include "../platform/nabu/macos26/display/nabu_cpu_present.inc"
+#ifdef NABU_CLEAN_QUEUE_TEST
+#include "nabu_clean_queue_generated.inc"
+#endif
 static void layer(IOMFBSwapIORequest &r,unsigned i,IOSurface *s,NabuGopRect src,NabuGopRect dst) {
     at<uint32_t>(&r,kSwapLayers)|=1u<<i;at<IOSurface *>(&r,0xac0+i*8)=s;
     memcpy(r.bytes+0x11+i*16,&src,16);memcpy(r.bytes+0x51+i*16,&dst,16);
@@ -283,6 +295,36 @@ int main() {
         assert(seen);
     }
     waitForReapers();assert(activeMaps==0);
+#ifdef NABU_CLEAN_QUEUE_TEST
+    // Same surface ID/address and unchanged geometry, but live mapped pixel
+    // storage changes between submissions. Exercise the GENERATED queue
+    // admission and the real presenter/mapper through all 90 copies.
+    {
+        sheng_framebuffer.owner=SHENG_FB_BOOT;sheng_framebuffer.writer=0;
+        NativeGOPDisplay live;live.fScanout=reinterpret_cast<uint8_t *>(scanout);
+        IOSurface same{4,2,16};same.memory.bytes.resize(32);
+        for(uint32_t id=1;id<=90;++id) {
+            const uint32_t pixel=0xff000000u|id;
+            for(unsigned at=0;at<8;at++)memcpy(same.memory.bytes.data()+at*4,&pixel,4);
+            IOMFBSwapIORequest request;
+            layer(request,0,&same,{0,0,4,2},{0,0,4,2});
+            at<uint32_t>(&request,0x334)=id;at<uint32_t>(&request,0x33c)=1;
+            at<IOMFBSwapIORequest *>(&live,kSwapQueueFirst)=&request;
+            assert(live.clean_queue_gated());
+            assert(!live.nativeNoops && live.abortedChecks==id && live.dummyChecks==id);
+            at<IOMFBSwapIORequest *>(&live,kSwapQueueFirst)=nullptr;
+            present(live,request);
+            assert(live.fFrames==id && live.nativeComplete==id && live.fLastLit==8);
+            assert(scanout[0]==pixel && scanout[9]==pixel);
+        }
+        IOMFBSwapIORequest metadataOnly;
+        at<uint32_t>(&metadataOnly,kSwapLayers)=0x80000000u;
+        at<IOMFBSwapIORequest *>(&live,kSwapQueueFirst)=&metadataOnly;
+        assert(!live.clean_queue_gated() && live.nativeNoops==1);
+        assert(!live.clean_queue_gated() && live.nativeNoops==1);
+    }
+    waitForReapers();assert(activeMaps==0);
+#endif
     // A blocked VM unmap cannot grow references indefinitely or force stop
     // to wait for the reaper. Four shutdown slots remain reserved.
     blockRelease=true;releaseEntered=false;

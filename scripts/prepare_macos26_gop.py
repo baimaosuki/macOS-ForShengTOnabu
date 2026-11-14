@@ -107,6 +107,23 @@ def prepare(root: Path, destination: Path, *, board: str = "sheng") -> dict:
         text = text.replace('    fScanout = reinterpret_cast<uint8_t *>(fScanoutMap->getVirtualAddress());', '    fScanout = reinterpret_cast<uint8_t *>(fScanoutMap->getVirtualAddress());\n    fSourceReaper = NabuGopSourceReaper::create();\n    if (!fSourceReaper) { OSSafeReleaseNULL(fScanoutMap); return false; }')
         text = text.replace('        IOLog("NativeGOPDisplay: IOMobileFramebufferLegacy::start failed\\n");', '        IOLog("NativeGOPDisplay: IOMobileFramebufferLegacy::start failed\\n");\n        IOMemoryMap *empty[4]{}; fSourceReaper->finish(empty); fSourceReaper = nullptr;')
         text = text.replace('    IOMobileFramebufferLegacy::stop(provider);', '    IOMobileFramebufferLegacy::stop(provider);\n    if (fSourceReaper) {\n        IOMemoryMap *maps[4]{};\n        for (unsigned i = 0; i < 4; i++) { maps[i] = fSourceMaps[i].mapping; fSourceMaps[i] = {}; }\n        fSourceReaper->finish(maps); fSourceReaper = nullptr;\n    }')
+        # Native hardware scans a retained IOSurface continuously. A CPU
+        # snapshot does not: an explicit plane update can change its pixels
+        # without changing the pointer, rectangles or other DisplayedData.
+        # Inspect the LIVE head after obsolete cleanup. Preserve native no-op
+        # retirement for requests that update no CPU-supported plane.
+        noop = '    dropNoOpSwaps_gated();'
+        if text.count(noop) != 1:
+            raise ValueError('paired native no-op call changed')
+        text = text.replace(noop, '''    IOMFBSwapIORequest *copyHead = at<IOMFBSwapIORequest *>(this, kSwapQueueFirst);
+    const uint32_t copyMask = copyHead ? at<uint32_t>(copyHead, kSwapLayers) : 0;
+    if (!(copyMask & 0x0fu)) {
+        dropNoOpSwaps_gated();
+    } else if (audit) {
+        IOLog("NABU-DISPLAY: cpu-update-copy id=%u mask=%#x compared_mask=%#x\\n",
+              at<uint32_t>(copyHead, 0x334), copyMask, at<uint32_t>(copyHead, 0x33c));
+    }''')
+
         # enable() alone leaves a new IOTimerEventSource at deadline zero.
         # Start the callback chain only after the family has finished start(),
         # independently of the first userspace swap. The callback and native
@@ -228,6 +245,7 @@ def prepare(root: Path, destination: Path, *, board: str = "sheng") -> dict:
         evidence['refresh_bootstrap'] = 'arm 16ms after successful native family start; callback entry precedes queue work; power changes preserve cadence'
         evidence['diagnostic_channel'] = 'bounded direct RAM append, timestamp/console_disabled/owner; no console sink or IOLog'
         evidence['native_vsync'] = '25F71 original note_vbl_ISR for type3 or type5 subscribers; swap_notify_gated for type5 only; gated actual timer firing, display on; 16000000ns seed; native continuous clock'
+        evidence['cpu_update_policy'] = 'explicit plane mask low4 bypasses metadata-only native no-op; zero-plane updates retain native cleanup; native swap_wait unchanged'
         evidence['cpu_presentation'] = '25F71 persistent planes; source/destination rectangles; opaque scene planes; plane-1 premultiplied cursor; source-backed staging before completion'
         evidence['plane_diagnostics'] = 'first frame and black frames after swap3: first8/every50; all4 planes clear/absent/zero-area/copied; original IOSurface getSurfaceID; sampled source RGB/RGBA/alpha before opaque conversion'
         evidence['scanout_geometry'] = dict(base=0x9c000000, width=1600,
