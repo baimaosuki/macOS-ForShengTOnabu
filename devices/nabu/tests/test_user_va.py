@@ -44,7 +44,9 @@ def probe(xnu, work, name, macos=True):
     source = '#include <stdint.h>\n#include <stdio.h>\n#include <stdbool.h>\n'
     source += ''.join(f'#define {key} {value}\n' for key, value in expressions.items())
     source += '''
+#ifndef __unused
 #define __unused __attribute__((unused))
+#endif
 #define __improbable(x) (x)
 #define panic(...) return false
 typedef uint64_t vm_map_size_t;
