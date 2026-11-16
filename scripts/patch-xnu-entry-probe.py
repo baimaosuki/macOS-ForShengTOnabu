@@ -134,7 +134,24 @@ _start:
 
 
 def kernel_symbols(kernel):
-    """Address -> name for the kernel's symbols, from llvm-nm."""
+    """Address -> name for the native kernel, including inside an MH_FILESET.
+
+    LLVM's Mach-O reader does not enumerate symbols in fileset entries on every
+    host. Read the native entry's own table rather than silently using stale
+    entry-relative offsets when llvm-nm reports no symbols for the container.
+    """
+    data = Path(kernel).read_bytes()
+    if len(data) >= 32 and struct.unpack_from('<I', data, 12)[0] == 12:
+        sys.path.insert(0, str(ROOT / 'kits/XnuPrelink'))
+        from kc_image import Image
+        collection = Image(data)
+        if 'com.apple.kernel' not in collection.entries:
+            raise SystemExit('Fileset has no com.apple.kernel symbol owner')
+        native = Image(data, at=collection.entries['com.apple.kernel'][1])
+        table = native.symbols()
+        if not table:
+            raise SystemExit('Fileset native kernel has no defined symbols')
+        return {address: names[0] for address, names in table.items()}
     nm = tool('llvm-nm')
     table = {}
     for line in subprocess.run([nm, '-n', kernel], capture_output=True, text=True, check=True).stdout.splitlines():
@@ -304,6 +321,12 @@ def rebase(kernel, data):
         PANIC_VA += delta
         VINFO_VA += delta
     names = {name: va for va, name in kernel_symbols(kernel).items()}
+    # The entry is one branch followed by alignment padding. Use that padding
+    # from its first instruction, as --watchdog-wait does, so host compiler
+    # size differences do not unnecessarily exclude the panic renderer.
+    CAVES = {stage: ENTRY_VA + 4 + (stage - 1) * CAVE_SIZE for stage in CAVES}
+    if '_LowExceptionVectorBase' in names:
+        PANIC_CAVE_END = names['_LowExceptionVectorBase'] - 0x10
     if '_start_first_cpu' in names:
         START_FIRST_CPU = names['_start_first_cpu']
         # Native bootstrap table-capacity checks can grow before SCTLR setup.

@@ -29,8 +29,10 @@ for argument in args.kernel_args.split():
 data = bytearray(args.kernel.read_bytes())
 magic, cpu, subtype, kind = struct.unpack_from('<4I', data)
 header = 0
-if (magic, cpu, subtype & 0xff) == (0xfeedfacf, 0x100000c, SUBTYPE) and kind == 12:
+if (magic, cpu, kind) == (0xfeedfacf, 0x100000c, 12):
     # A boot kernel collection: seal its com.apple.kernel entry. Section offsets are collection file offsets.
+    # Its container describes the retained arm64e kexts; the native entry below
+    # must independently match the selected kernel architecture.
     # The emitter moves the native text, so the HMAC is computed here, after emission. The static_if sites
     # were prepatched when the native kernel was sealed before emission.
     offset = 32
