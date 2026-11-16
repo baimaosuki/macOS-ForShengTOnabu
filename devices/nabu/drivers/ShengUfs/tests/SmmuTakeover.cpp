@@ -14,6 +14,7 @@ int main()
   reset(); auto p=plan(); assert(!p.error && !p.reuse && p.slot==127 && p.bank==69);
   r[(0x800+4*110)/4]=0x80000060; r[(0xc00+4*110)/4]=69;
   r[(0x1000+4*69)/4]=0x10000;
+  r[(0x1800+4*69)/4]=1;
   p=plan(); assert(!p.error && p.reuse && p.slot==110);
   r[(0x800+4*111)/4]=0x80000060; r[(0xc00+4*111)/4]=69; assert(plan().error);
   // Another stream still pointing at the top bank (a mapping left by an earlier run): the plan moves to the next free bank down.
@@ -25,6 +26,7 @@ int main()
   reset(); r[0x800/4]=0x80000060; r[0xc00/4]=1; assert(plan().error);
   // Our stream already mapped to the fallback bank by an earlier run (the top bank held by another stream): reused, not refused.
   reset(); r[0x800/4]=0x80000061; r[0xc00/4]=69; r[0x804/4]=0x80000060; r[0xc04/4]=68; r[(0x1000+4*68)/4]=0x10000;
+  r[(0x1800+4*68)/4]=1;
   p=plan(); assert(!p.error && p.reuse && p.bank==68 && p.slot==1);
   reset(); r[0x800/4]=0x80010060; r[0xc00/4]=69; assert(plan().error);
   reset(); r[0x800/4]=0x80008060; r[0xc00/4]=1; assert(!plan().error); // Distinct 16-bit SID.
@@ -60,7 +62,7 @@ int main()
   assert(writes.size()==5);
   p=plan(); writes.clear(); assert(p.reuse && !configure() && writes.empty());
   r[(0x1800+4*p.bank)/4]=0;
-  assert(!configure() && writes.size()==1 && writes[0].first==0x1800+4*p.bank);
+  assert(configure() && writes.empty()); // Firmware bypass is preserved, never repaired in place.
   // A refused context-format write must stop before stream publication.
   for(unsigned offset : {0x1800+4*69, 0x1000+4*69, 0xc00+4*127, 0x800+4*127}) {
     reset(); p=plan(); writes.clear(); drop=offset;
@@ -82,9 +84,49 @@ int main()
   assert(!planUfsSmmu(0x60,0xfffffffffULL,1,read).error);
   r[0x28/4]&=~(1U<<12); assert(plan().error);
   reset(); r[0x20/4]&=~(1U<<30); assert(plan().error);
-  // Reused context with an unexpected VMID/attribute must not be repaired.
+  // A live stage-2 translation must not be mistaken for a bypass context.
   reset(); p=plan(); drop=0xffffffffU; assert(!configure());
-  r[(0x1800+4*p.bank)/4]=0x10001; p=plan(); assert(p.error);
+  r[(0x1000+4*p.bank)/4]=0x30000; p=plan(); assert(p.error);
   writes.clear(); assert(configure() && writes.empty());
-  puts("PASS: SMMU geometry/conflicts, VA64 high-DMA regression, full-range width limits, ordered configuration, reuse/repair and blocked-write refusal");
+
+  // Observed NABU mapping: SMR=80000300, S2CR=1. The photo does not
+  // expose CB1 registers: the following bypass values are explicit fixtures.
+  auto firmware=[&] {
+    reset();
+    r[(0x800+4*2)/4]=0x80000300; r[(0xc00+4*2)/4]=1;
+    r[(0x1000+4)/4]=0x5a010012; r[(0x1800+4)/4]=0x10001;
+    r[(128+1)*4096/4]=0xe0;
+    writes.clear();
+  };
+  auto nabu=[&]{return planUfsSmmu(0x300,0x8cb5e9000ULL,0x22000,read);};
+  auto refuse=[&] {
+    auto q=nabu(); assert(q.error);
+    assert(configureUfsSmmu(q,0x300,read,write) && writes.empty());
+  };
+  firmware(); auto q=nabu(); auto untouched=r;
+  assert(!q.error && q.reuse && q.slot==2 && q.bank==1);
+  assert(!configureUfsSmmu(q,0x300,read,write));
+  assert(writes.empty() && r==untouched);
+  // A different stream at the top bank must not prevent low-bank discovery.
+  firmware(); r[0x800/4]=0x80000400; r[0xc00/4]=69;
+  q=nabu(); untouched=r;
+  assert(!q.error && q.bank==1 && !configureUfsSmmu(q,0x300,read,write));
+  assert(writes.empty() && r==untouched);
+  firmware(); r[(128+1)*4096/4]|=1; refuse();
+  firmware(); r[(0x1000+4)/4]=0x30000; refuse();
+  firmware(); r[(0x1800+4)/4]&=~1U; refuse();
+  firmware(); r[(0x800+4*3)/4]=0x80000301; r[(0xc00+4*3)/4]=1; refuse();
+  firmware(); r[(0x800+4*3)/4]=0x80000300; r[(0xc00+4*3)/4]=1; refuse();
+  firmware(); r[(0x800+4*2)/4]=0x80010300; refuse();
+  firmware(); r[0x20/4]=0x40000081; refuse();
+  // Firmware-owned S2CR attributes are retained alongside context fields.
+  firmware(); r[(0xc00+4*2)/4]=0x01000001;
+  q=nabu(); untouched=r; assert(!q.error && !configureUfsSmmu(q,0x300,read,write));
+  assert(writes.empty() && r==untouched);
+  firmware(); q=nabu(); r[(128+1)*4096/4]^=0x20;
+  assert(configureUfsSmmu(q,0x300,read,write) && writes.empty());
+  firmware(); q=nabu(); r[(0x800+4*3)/4]=0x80000301; r[(0xc00+4*3)/4]=1;
+  assert(configureUfsSmmu(q,0x300,read,write) && writes.empty());
+  firmware(); q=nabu(); assert(configureUfsSmmu(q,0x301,read,write) && writes.empty());
+  puts("PASS: NABU SID300/CB1 zero-write bypass reuse, top-bank independence, translation/shared/wildcard/VA64/drift refusal; bounded allocation and address limits");
 }

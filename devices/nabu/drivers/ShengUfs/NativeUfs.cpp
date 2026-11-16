@@ -405,12 +405,15 @@ static void smmuBypassStream (uint16_t stream, OSSharedPtr<IOMemoryMap> &keep, u
   gRootDiagnostic.smmuId1 = read32 (smmu, 0x24);
   gRootDiagnostic.smmuId2 = read32 (smmu, 0x28);
   gRootDiagnostic.smmuSlot = plan.slot;
+  gRootDiagnostic.cbar = plan.cbar; gRootDiagnostic.sctlr = plan.sctlr;
+  gRootDiagnostic.cba2r = plan.cba2r;
   if (plan.error) {
     gRootDiagnostic.stage = "SMMU planning";
     gRootDiagnostic.result = static_cast<uint32_t> (kIOReturnNotReady);
     gRootDiagnostic.smr = plan.smr; gRootDiagnostic.s2cr = plan.s2cr;
     rootDiagnosticFailure (plan.error);
-    panic ("NATIVE_UFS smmu: %s slot=%u smr=%x s2cr=%x", plan.error, plan.slot, plan.smr, plan.s2cr);
+    panic ("NATIVE_UFS smmu: %s slot=%u smr=%x s2cr=%x bank=%u cbar=%x sctlr=%x cba2r=%x",
+           plan.error, plan.slot, plan.smr, plan.s2cr, plan.bank, plan.cbar, plan.sctlr, plan.cba2r);
   }
   unsigned bank = plan.bank, index = plan.slot;
   uintptr_t cb = smmu + (plan.pages + bank) * 4096;
@@ -436,6 +439,8 @@ static void smmuBypassStream (uint16_t stream, OSSharedPtr<IOMemoryMap> &keep, u
   report[0] = index | (bank << 16);
   report[1] = cbar;
   report[2] = sctlr;
+  IOLog ("NABU-UFS: sid=%x slot=%u bank=%u reuse=%u cbar=%x sctlr=%x cba2r=%x\n",
+         stream, index, bank, plan.reuse ? 1U : 0U, cbar, sctlr, gRootDiagnostic.cba2r);
 }
 
 void NativeUfs::adoptAndRead (unsigned level)
@@ -483,6 +488,11 @@ void NativeUfs::adoptAndRead (unsigned level)
   unsigned stopLoops = 10000;
   while ((read32 (hc, 0x60) & 1) && stopLoops--) IODelay (10);
   if (read32 (hc, 0x60) & 1) panic ("NATIVE_UFS adopt: request list did not stop");
+  write32 (hc, 0x80, 0);            // stop task management before SMMU reuse too
+  __asm__ volatile ("dsb sy" ::: "memory");
+  stopLoops = 10000;
+  while ((read32 (hc, 0x80) & 1) && stopLoops--) IODelay (10);
+  if (read32 (hc, 0x80) & 1) panic ("NATIVE_UFS adopt: task request list did not stop");
   smmuBypassStream (0x300, smmuMap, smmuReport, phys, 16384);
   write32 (hc, 0x50, static_cast<uint32_t> (phys));
   write32 (hc, 0x54, static_cast<uint32_t> (phys >> 32));

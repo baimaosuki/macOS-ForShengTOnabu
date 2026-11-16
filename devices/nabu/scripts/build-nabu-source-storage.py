@@ -287,6 +287,10 @@ OSDefineOperatorMethods(IOBlockStorageDevice)
     if latency:
         for name in ('BootLatencyStore.h','BootLatencyUnwind.h','BootLatencyTrace.h','BootLatencyFiles.h'):
             inputs[str(latency.with_name(name))] = build.sha(latency.with_name(name))
+    # These headers carry the production transport, including the SMMU plan
+    # and queue ownership checks. Record them beside compiled-source hashes.
+    for header in sorted((device / 'drivers/ShengUfs').glob('*.h')):
+        inputs[str(header)] = build.sha(header)
     archive = out / 'libShengSourceStorage.a'
     archive.unlink(missing_ok=True)
     subprocess.run(['xcrun', 'ar', 'rcs', archive, *objects], check=True)

@@ -2,6 +2,16 @@
 
 SM8550 UFS transport and sheng persistent storage.
 
+This board-local NABU adapter uses SM8150 resources and UFS SID `0x300`.
+An exact firmware mapping outside the top-eight allocation window is discovered
+by its S2CR context bank. Reuse requires exclusive ownership, SCTLR.M=0,
+CBAR.TYPE=1 and CBA2R.VA64=1; all firmware context fields stay unchanged.
+Both request lists must be idle and stopped first. Production host tests in
+`tests/SmmuTakeover.cpp` and `tests/RootCommands.cpp` cover low-bank reuse,
+unsafe-context refusal, revalidation and both queue-stop failures. The 27.3
+hardware photo establishes SMR `80000300`/S2CR `1`, not the unseen bypass
+register values; later root mount and desktop startup remain unverified.
+
 Verified userdata windows identify themselves as internal virtual storage. This
 keeps macOS Disk Arbitration from deferring their mounts until login or
 unmounting the App cryptex while the desktop session starts.

@@ -6,7 +6,7 @@
 #include <string>
 #include <vector>
 enum class Fault { None, Empty, Type, Tag, Lun, Query, Residual, Underflow,
-  Oversize, SenseLength, CheckCondition, Timeout, Fatal, Stop, Start, HighBase, Busy, TaskSetFull };
+  Oversize, SenseLength, CheckCondition, Timeout, Fatal, Stop, TaskStop, Start, HighBase, Busy, TaskSetFull };
 static unsigned busyLeft;      // Busy/TaskSetFull: commands answered with that status before the device accepts again
 static unsigned lastSlot;      // the slot of the last command rung
 static std::vector<uint8_t> written;   // the data of the last WRITE(10)
@@ -25,6 +25,7 @@ static uint64_t io(unsigned op,uint64_t address,uint64_t value,void *bytes)
     ++writes;
     if (address==0x20) registers[address/4]&=~uint32_t(value);
     else if (!(address==0x60 && ((fault==Fault::Stop && !value) || (fault==Fault::Start && value))) &&
+             !(address==0x80 && fault==Fault::TaskStop && !value) &&
              !(address==0x54 && fault==Fault::HighBase)) registers.at(address/4)=uint32_t(value);
     if (address==0x58) {
       assert(released); released=false;
@@ -82,7 +83,7 @@ static uint64_t io(unsigned op,uint64_t address,uint64_t value,void *bytes)
 static void reset(Fault f=Fault::None)
 {
   fault=f; device.fill(0); registers.fill(0); now=0; writes=releases=0; released=false; dataAcquired=false;
-  registers[0x34/4]=1; registers[0x30/4]=15; registers[0x60/4]=1;
+  registers[0x34/4]=1; registers[0x30/4]=15; registers[0x60/4]=1; registers[0x80/4]=1;
   ufs_test_reset(io,0x8cb5e9000);
 }
 static void assertQuarantined()
@@ -139,6 +140,10 @@ int main()
   reset(); registers[0x20/4]=0x20000;
   assert(!ufs_test_stop_queue() && writes==0);
   assert(ufs_test_nop()!=0 && writes==0 && releases==0); assertQuarantined();
+  reset(Fault::TaskStop); assert(!ufs_test_stop_queue());
+  assert(registers[0x60/4]==0 && registers[0x80/4]==1);
+  reset(); assert(ufs_test_stop_queue());
+  assert(registers[0x60/4]==0 && registers[0x80/4]==0);
   reset(Fault::Stop); assert(!ufs_test_stop_queue() && now>=100000);
   reset(Fault::Start); assert(ufs_test_stop_queue()); assert(!ufs_test_start_queue());
   reset(Fault::HighBase); assert(ufs_test_stop_queue()); assert(!ufs_test_start_queue());

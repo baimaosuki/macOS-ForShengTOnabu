@@ -37,6 +37,12 @@ static bool hostStopQueue (const char **why)
     *why = "request list stop";
     return false;
   }
+  hostWrite (0x80, 0); // UTMRLRSR: the task-management list shares the UFS SID.
+  if (!hostWaitRegister (0x80, 1, 0)) {
+    recordTransport (kIOReturnTimeout, 15);
+    *why = "task request list stop";
+    return false;
+  }
   return true;
 }
 

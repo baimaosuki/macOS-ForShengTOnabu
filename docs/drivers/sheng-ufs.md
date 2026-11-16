@@ -37,6 +37,13 @@ For the arm64e public-source build path and its current linking/runtime limits, 
 
 ## Command path
 
+The board-local NABU adapter uses SID `0x300`. It discovers an existing exact
+firmware mapping independently of the top-eight bank allocation window. Reuse
+requires a unique stream and bank owner, stage 1 disabled, stage 2 bypass and
+VA64; it preserves all context registers and revalidates before configuration.
+Both transfer and task-management lists are stopped before SMMU access. These
+paths have host fault tests; the NABU 27.3 root handoff still needs device testing.
+
 Up to 32 commands run at once, one per command slot. The request list sits on a
 write-combined page of its own. Completion uses the controller interrupt with
 hybrid polling: a wait polls for 200 microseconds, then sleeps. Page-aligned
