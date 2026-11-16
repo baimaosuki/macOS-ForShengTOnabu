@@ -86,7 +86,7 @@ jobs:
       - name: Require Intel host and prepare runtime tools
         run: |
           test "$(uname -m)" = x86_64
-          brew install blacktop/tap/ipsw
+          python3 devices/nabu/scripts/install-runtime-tools.py
           python3 -m pip install cryptography
       - name: Select the fresh profile and prepare packed seed tools
         run: |
