@@ -1,0 +1,18 @@
+The macOS v5 shared-cache pager splits 16 KiB slide pages into 4 KiB parts on
+NABU. Apply the same no-PAuth representation as the full-page v3/v5 paths.
+Without this store, authenticated slots retain their encoded on-disk chain
+word even though the pager reports success. The chain-only walk stays read-only.
+
+--- a/osfmk/vm/vm_shared_region.c
++++ b/osfmk/vm/vm_shared_region.c
+@@ -3661,6 +3661,10 @@ vm_shared_region_slide_part_v5(
+ 				} else {
+ 					memcpy(rebaseLocation, &value, sizeof(value));
+ 				}
++#elif NABU_ARM64E_COMPAT
++				/* Match the full-page no-PAuth ABI: publish the decoded pointer,
++				 * not its on-disk authenticated chain encoding. */
++				memcpy(rebaseLocation, &value, sizeof(value));
+ #endif /* __has_feature(ptrauth_calls) */
+ 			} else {
+ 				value += high8;
