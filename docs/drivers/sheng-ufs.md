@@ -1,5 +1,13 @@
 # ShengUfs
 
+NABU starts source storage after `IOKitBSDInit` publishes the genuine `IOBSD`
+resource. Native media BSD clients require that resource during matching; the
+source entry point rejects startup before publication. The worker loads the
+original APFS module before root window publication. Missing-volume snapshots
+include resource presence and rejected/entered/returned read-completion counts.
+The first 16 requests per window log their LBA, size, result and callback return.
+This lifecycle correction still requires device verification of root mount.
+
 Start with the [adaptation procedure](/porting/ufs) for board inputs, source changes, build integration and verification order.
 
 ShengUfs provides the SM8550 UFS storage path. It owns the host

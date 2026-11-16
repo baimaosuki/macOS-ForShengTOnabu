@@ -337,6 +337,9 @@ extern "C" void native_source_storage_start(void)
     unsigned enabled = 0;
     if (!PE_parse_boot_argn("native-source-storage", &enabled, sizeof(enabled)) || enabled != 1 || attempted)
         return;
+    IOService *resources = IOService::getResourceService();
+    if (!resources || !resources->getProperty("IOBSD"))
+        panic("SourceStorage: storage startup before genuine IOBSD publication");
     attempted = true;
     thread_t thread = nullptr;
     if (kernel_thread_start(storage_worker, nullptr, &thread) != KERN_SUCCESS)

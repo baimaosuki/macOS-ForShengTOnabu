@@ -1906,6 +1906,7 @@ class NativeUfsBlock : public IOBlockStorageDevice {
   uint32_t bounceFree = 0;
   IOLock *windowLock = nullptr;   // guards bounceFree
   bool online = false;
+  volatile uint64_t traceRequests = 0;
   uint8_t *takeBounce ()
   {
     IOLockLock (windowLock);
@@ -1989,6 +1990,9 @@ extern "C" {
 volatile uint32_t native_ufs_blocks_published = 0;
 volatile uint64_t native_ufs_block_reads = 0;
 volatile uint64_t native_ufs_block_failures = 0;
+volatile uint64_t native_ufs_block_rejections = 0;
+volatile uint64_t native_ufs_block_completions = 0;
+volatile uint64_t native_ufs_block_returns = 0;
 }
 
 static char gRootDiagnosticText[2500];
@@ -2448,16 +2452,28 @@ bool NativeUfsBlock::start (IOService *provider)
 IOReturn NativeUfsBlock::doAsyncReadWrite (IOMemoryDescriptor *buffer, UInt64 block, UInt64 count,
                                            IOStorageAttributes *, IOStorageCompletion *completion)
 {
+  const uint64_t request = __atomic_add_fetch (&traceRequests, 1, __ATOMIC_RELAXED);
+  const bool trace = request <= 16;
+  const auto reject = [&] (IOReturn status) {
+    __atomic_fetch_add (&native_ufs_block_rejections, 1, __ATOMIC_RELAXED);
+    if (trace) IOLog ("NativeUfs: read %s #%llu lba=%llu count=%llu rejected=%x\n", label,
+                     static_cast<unsigned long long> (request), static_cast<unsigned long long> (block),
+                     static_cast<unsigned long long> (count), status);
+    return status;
+  };
   if (!buffer || !completion || !completion->action || !count || block >= bytes / 512 ||
       count > bytes / 512 - block || buffer->getLength () < count * 512) {
-    return kIOReturnBadArgument;
+    return reject (kIOReturnBadArgument);
   }
   if (buffer->getDirection () != kIODirectionIn) {
-    return kIOReturnNotWritable;
+    return reject (kIOReturnNotWritable);
   }
   if (!online) {
-    return kIOReturnNotReady;
+    return reject (kIOReturnNotReady);
   }
+  if (trace) IOLog ("NativeUfs: read %s #%llu lba=%llu count=%llu begin\n", label,
+                   static_cast<unsigned long long> (request), static_cast<unsigned long long> (block),
+                   static_cast<unsigned long long> (count));
   struct Operations {
     IOMemoryDescriptor *buffer;
 #if defined(NATIVE_VERIFIED_BLOCK) && NATIVE_VERIFIED_BLOCK
@@ -2524,7 +2540,12 @@ IOReturn NativeUfsBlock::doAsyncReadWrite (IOMemoryDescriptor *buffer, UInt64 bl
     gRootDiagnostic.result = static_cast<uint32_t> (result);
     rootDiagnosticFailure ("root window read failed");
   }
+  if (trace) IOLog ("NativeUfs: read %s #%llu callback status=%x bytes=%llu\n", label,
+                   static_cast<unsigned long long> (request), result, static_cast<unsigned long long> (done));
+  __atomic_fetch_add (&native_ufs_block_completions, 1, __ATOMIC_RELAXED);
   completion->action (completion->target, completion->parameter, result, done);
+  __atomic_fetch_add (&native_ufs_block_returns, 1, __ATOMIC_RELAXED);
+  if (trace) IOLog ("NativeUfs: read %s #%llu callback returned\n", label, static_cast<unsigned long long> (request));
   return kIOReturnSuccess;
 }
 
@@ -2671,10 +2692,16 @@ static void captureMissingMedia (const char *uuid, IOService *window)
 {
   char ioStats[768] = {};
   native_ufs_stats_text (ioStats, sizeof (ioStats));
+  IOService *resources = IOService::getResourceService ();
   int used = snprintf (gRootMediaText, sizeof (gRootMediaText),
-                       "Waiting for signed UUID %s block_reads=%llu block_failures=%llu\n%s\n", uuid,
+                       "Waiting for signed UUID %s block_reads=%llu block_failures=%llu\n"
+                       "IOBSD=%u rejected=%llu callbacks=%llu returned=%llu\n%s\n", uuid,
                        static_cast<unsigned long long> (native_ufs_block_reads),
-                       static_cast<unsigned long long> (native_ufs_block_failures), ioStats);
+                       static_cast<unsigned long long> (native_ufs_block_failures),
+                       resources && resources->getProperty ("IOBSD") ? 1u : 0u,
+                       static_cast<unsigned long long> (native_ufs_block_rejections),
+                       static_cast<unsigned long long> (native_ufs_block_completions),
+                       static_cast<unsigned long long> (native_ufs_block_returns), ioStats);
   IORegistryIterator *children = window ? IORegistryIterator::iterateOver (window, gIOServicePlane, kIORegistryIterateRecursively) : nullptr;
   unsigned examined = 0, shown = 0;
   bool complete = false;
