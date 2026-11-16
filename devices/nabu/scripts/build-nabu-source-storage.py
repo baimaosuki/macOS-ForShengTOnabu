@@ -58,8 +58,16 @@ def weak_defaults(source):
                 if l.startswith('#include')]
     # Element types the declarations name are defined in the source itself.
     named = set(re.findall(r'struct (\w+)', '\n'.join(lines)))
-    includes += [m.group(0) for m in re.finditer(r'^struct (\w+) \{[^;{}]*(?:;[^;{}]*)*\};', source.read_text(), re.M)
-                 if m.group(1) in named]
+    structures = list(re.finditer(r'^struct (\w+) \{[^;{}]*(?:;[^;{}]*)*\};', source.read_text(), re.M))
+    # Some exported records contain arrays of another local record.
+    while True:
+        previous = set(named)
+        for match in structures:
+            if match.group(1) in named:
+                named.update(re.findall(r'struct (\w+)', match.group(0)))
+        if named == previous:
+            break
+    includes += [m.group(0) for m in structures if m.group(1) in named]
     # The defaults keep the declarations' unnamed parameters.
     pragma = ['#pragma clang diagnostic ignored "-Wc23-extensions"']
     return '\n'.join(includes + pragma + lines) + '\n'
@@ -166,14 +174,19 @@ def main():
     # Only the independent trust anchor is linked into the kernel. The large
     # signed hash tables are a separate firmware handoff, authenticated in XNU.
     boot_log_defaults = out / 'BootLogDefaults.c'
-    touch_header = device_source('TouchTrace.h')
     boot_log_defaults.write_text(weak_defaults(device_source('BootLog.c')) +
-        f'#include "{touch_header}"\n' +
-        # NABU does not build the SHENG touch-path recorder. Export no rows;
-        # a board that supplies the recorder overrides this weak definition.
+        '#include <stdbool.h>\n#include <arm/thread.h>\n' +
+        # These interfaces belong to unselected SHENG hardware, not the CPU
+        # presenter. Strong component definitions take precedence if selected.
+        '__attribute__((weak, visibility("hidden"))) uint64_t native_gpu_role_thread(uint32_t, uint32_t) { return 0; }\n'
+        '__attribute__((weak, visibility("hidden"))) int native_gpu_trace_enabled(void) { return 0; }\n'
+        '__attribute__((weak, visibility("hidden"))) void native_gpu_trace_record(uint32_t, uint32_t, const uint64_t *, uint32_t) {}\n'
+        '__attribute__((weak, visibility("hidden"))) bool native_adreno_fences(uint32_t *, uint32_t *) { return false; }\n'
+        '__attribute__((weak, visibility("hidden"))) bool native_adreno_fences_detail(uint32_t *, uint32_t *, uint32_t *) { return false; }\n'
         '__attribute__((weak, visibility("hidden"))) '
-        'const struct touch_trace_row *sheng_touch_trace_freeze(uint32_t *total) '
-        '{ if (total) *total = 0; return 0; }\n')
+        'bool (*sheng_pmu_fixup)(arm_saved_state_t *);\n')
+    diag_defaults = out / 'BootDiagExportDefaults.c'
+    diag_defaults.write_text(weak_defaults(device_source('BootDiagExport.c')))
     anchor = out / 'RootAnchor.c'
     anchor.write_text('#include <stdint.h>\nconst uint8_t verified_root_key[395] = {' +
                       ','.join(str(b) for b in key) + '};\n')
@@ -195,7 +208,7 @@ OSDefineOperatorMethods(IOBlockStorageDevice)
     c = json.loads((obj / 'osfmk/DEVELOPMENT/startup.o.json').read_text().strip().rstrip(','))
     # BSD sources (sys/proc.h, the system calls) take kern_exec's flags.
     bsd = json.loads((obj / 'bsd/DEVELOPMENT/kern_exec.o.json').read_text().strip().rstrip(','))
-    bsd_sources = {'BootWatchdogPolicy.c', 'BootDiagExport.c', 'WifiFirmware.c', 'BluetoothFirmware.c'}
+    bsd_sources = {'BootWatchdogPolicy.c', 'BootDiagExport.c', 'BootDiagExportDefaults.c', 'WifiFirmware.c', 'BluetoothFirmware.c'}
     includes = ['-I', str(out / 'headers/include'), '-I', str(ROOT / 'kits/VerifiedRoot/include'),
                 '-I', str(ROOT / 'drivers/VirtioMmioBlock'), '-I', str(tree / '.cache/xnu-work/osfmk')]
     flags = ['-DNATIVE_UFS_SOURCE_API=1', '-DNATIVE_VERIFIED_BLOCK=1',
@@ -212,7 +225,7 @@ OSDefineOperatorMethods(IOBlockStorageDevice)
     # The RAM disk carries the Data seed; like NativeUfs its class registers with the source storage classes.
     sources = [base, device / 'drivers/ShengUfs/NativeUfs.cpp', ROOT / 'drivers/RamBlock/NativeRamBlock.cpp',
                device_source('SourceStorage.cpp'), device_source('SourceRootPolicies.cpp'),
-               device_source('SourceRootBinding.cpp'), device_source('BootLog.c'), boot_log_defaults,
+               device_source('SourceRootBinding.cpp'), device_source('BootLog.c'), boot_log_defaults, diag_defaults,
                ROOT / 'kits/VerifiedRoot/src/verified_root.c',
                ROOT / 'kits/VerifiedRoot/adapters/xnu_crypto.c', anchor]
     if int(os.environ['UNIXNU_IOS_VERSION'].split('.')[0]) >= 27:

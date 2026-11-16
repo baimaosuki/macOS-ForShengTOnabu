@@ -88,6 +88,9 @@ BUILDID_STRING = "nabu27-fresh"
 [bootimg]
 max_image_bytes = 202375168
 
+[bootimg.image]
+ramdisk_compression = "uefi-chunks"
+
 [adt.defaults.u32]
 sleep-disabled = 1
 vmm-present = 1
