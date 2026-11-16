@@ -163,6 +163,11 @@ EXTRA_MAKE_ARGS=()
 # A fileset boot replaces com.apple.kernel inside a kernel collection: the
 # native executable must carry chained fixups and split-segment records.
 EXTRA_MAKE_ARGS+=("XNU_KERNEL_CHAINED_FIXUPS=${XNU_KERNEL_CHAINED_FIXUPS:-0}")
+if [ "$XNU_ARCH_STRING" = arm64 ] && [ "${XNU_KERNEL_CHAINED_FIXUPS:-0}" = 1 ]; then
+  # Apple's linker defaults plain arm64 kernels to classic local relocations.
+  # The fileset emitter consumes explicit chains, just as for an arm64e kernel.
+  EXTRA_MAKE_ARGS+=("LDFLAGS_KERNEL_ONLY_SUBARCH_arm64=-Wl,-add_split_seg_info -Wl,-kernel -Wl,-fixup_chains")
+fi
 ARM_DT_PLATFORM=${XNU_ARM_DT_PLATFORM:-0}
 if [ "$ARM_DT_PLATFORM" != 0 ] && [ "$ARM_DT_PLATFORM" != 1 ]; then
   echo 'XNU_ARM_DT_PLATFORM must be 0 or 1' >&2
