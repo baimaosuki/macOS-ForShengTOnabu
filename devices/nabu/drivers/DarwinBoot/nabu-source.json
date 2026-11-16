@@ -1,0 +1,6 @@
+{
+  "upstream_repository": "https://github.com/UniXNU/DarwinBoot.git",
+  "upstream_commit": "5243c68ec332a227fe3680cd5da6d5a0e127035c",
+  "reason": "NABU plain ARM64 source kernel inside retained ARM64e MH_FILESET",
+  "device_tested": false
+}

@@ -23,3 +23,10 @@ kind = "driver"
 git = "https://github.com/UniXNU/ArmCpu.git"
 commit = "acba4ee2674cfb23434431feb124871ae9b3b581"
 local = "drivers/ArmCpu"
+
+[[source]]
+name = "DarwinBoot"
+kind = "driver"
+git = "https://github.com/UniXNU/DarwinBoot.git"
+commit = "5243c68ec332a227fe3680cd5da6d5a0e127035c"
+local = "drivers/DarwinBoot"
