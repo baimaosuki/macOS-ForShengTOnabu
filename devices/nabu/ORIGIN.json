@@ -1,0 +1,6 @@
+{
+  "base": "UniXNU/UniXNU@9931232fd68b8ae1db0abd957ecba417f1996e52",
+  "board_reference": "UniXNU/UniXNU-sheng@bc05635a483d69a6c51cafd44723372b66c941f3",
+  "method": "New format2 NABU device and SM8150 support on unchanged upstream core. Only CPU-renderer/PAC selected implementation will be ported from previous source. No old complete board, bootshim, desktop service gates or shared-cache policy imported.",
+  "old_cpu_pac_source": "78088687f6ddc6fc018b1f7b3b35eb8a4b5fa7c7"
+}

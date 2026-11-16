@@ -1,0 +1,27 @@
+--- a/osfmk/arm64/nabu_v82_emul.c
++++ b/osfmk/arm64/nabu_v82_emul.c
+@@ -711,18 +711,12 @@
+ 	return false;
+ }
+ 
+-static void
+-nabu_v82_emul_boot_log(void)
+-{
+-	if (nabu_v82_emul_is_enabled()) {
+-		printf("nabu: ARMv8.2 crypto emulation active "
+-		    "(eor3/bcax/rax1/xar/sha512h/sha512h2/sha512su0/sha512su1)\n");
+-	} else {
+-		printf("nabu: ARMv8.2 crypto emulation disabled by boot-arg %s\n",
+-		    NABU_V82_BOOTARG);
+-	}
+-}
+-STARTUP(TUNABLES, STARTUP_RANK_LAST, nabu_v82_emul_boot_log);
++/*
++ * No STARTUP(TUNABLES, ...) hook here.  On nabu that stage runs inside
++ * kernel_startup_bootstrap(), which is exactly where bring-up currently
++ * stops, and the early surface cannot distinguish a printf path from the
++ * stage itself.  The boot-arg switch stays honoured by the emulation hooks.
++ */
+ 
+ #else /* !ARM64_BOARD_CONFIG_NABU */
+ 

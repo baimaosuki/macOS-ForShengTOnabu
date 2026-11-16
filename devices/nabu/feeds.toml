@@ -1,0 +1,4 @@
+[[source]]
+name = "sm8150"
+kind = "soc"
+local = "../../soc/sm8150"

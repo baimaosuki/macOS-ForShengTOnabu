@@ -1,0 +1,10 @@
+schema_version = 2
+
+[soc]
+name = "sm8150"
+description = "Kryo 485, GICv3, 19.2 MHz counter and ARM SMMU-500"
+hardware_source_repository = "https://github.com/torvalds/linux"
+hardware_source_revision = "v6.12"
+
+[kernel]
+config_fragments = ["soc:configs/sm8150.config"]

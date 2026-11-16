@@ -1,0 +1,43 @@
+name: NABU fresh macOS 27.3
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: nabu27-fresh
+  cancel-in-progress: false
+jobs:
+  compile:
+    runs-on: macos-26-intel
+    timeout-minutes: 180
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: 1
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Require Intel host and report SDKs
+        run: |
+          test "$(uname -m)" = x86_64
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          xcrun --sdk macosx --show-sdk-version
+      - name: Install upstream build tools
+        run: brew install cmake ninja unifdef llvm lld dtc
+      - name: Select the fresh NABU profile
+        run: ./unixnu defconfig nabu_macos27_defconfig -D devices/nabu --os macos-27
+      - name: Compile original upstream 27.3 and NABU PAC source
+        run: python3 devices/nabu/scripts/compile-bootstrap.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nabu27-bootstrap
+          path: |
+            out/nabu/**/logs/
+            out/nabu/**/bootstrap-verification.json
+            out/nabu/**/tree/build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837.unstripped
+            out/nabu/**/tree/build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/osfmk/DEVELOPMENT/nabu_v82_emul.o*
+          if-no-files-found: warn
+          retention-days: 14

@@ -1,0 +1,18 @@
+{
+  "nabu_cpu_present.h": {
+    "source_commit": "78088687f6ddc6fc018b1f7b3b35eb8a4b5fa7c7",
+    "old_path": "platform/nabu/macos26/display/nabu_cpu_present.h"
+  },
+  "nabu_gop_scanout.h": {
+    "source_commit": "78088687f6ddc6fc018b1f7b3b35eb8a4b5fa7c7",
+    "old_path": "platform/nabu/macos26/display/nabu_gop_scanout.h"
+  },
+  "nabu_refresh_clock.h": {
+    "source_commit": "78088687f6ddc6fc018b1f7b3b35eb8a4b5fa7c7",
+    "old_path": "platform/nabu/macos26/display/nabu_refresh_clock.h"
+  },
+  "gop_layers.h": {
+    "source_commit": "78088687f6ddc6fc018b1f7b3b35eb8a4b5fa7c7",
+    "old_path": "platform/nabu/macos26/display/gop_layers.h"
+  }
+}

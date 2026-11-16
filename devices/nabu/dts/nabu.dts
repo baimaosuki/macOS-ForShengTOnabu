@@ -1,0 +1,16 @@
+// SPDX-License-Identifier: BSD-2-Clause-Patent
+/dts-v1/;
+/include/ "sm8150.dtsi"
+/ {
+    model = "Xiaomi Pad 5";
+    compatible = "xiaomi,nabu", "qcom,sm8150";
+    // The high physical bank, with holes/reservations supplied by DarwinBoot.
+    memory@c0000000 { device_type = "memory"; reg = <0 0xc0000000 1 0x40000000>; };
+    reserved-memory {
+        #address-cells = <2>;
+        #size-cells = <2>;
+        ranges;
+        // Firmware owns the initialized 1600x2560 BGRA scanout.
+        framebuffer@9c000000 { reg = <0 0x9c000000 0 0x1000000>; no-map; };
+    };
+};

@@ -1,0 +1,11 @@
+--- a/pexpert/pexpert/arm64/BCM2837.h
++++ b/pexpert/pexpert/arm64/BCM2837.h
+@@ -9,6 +9,8 @@
+ #define NO_ECORE 1
+ 
+ #define BCM2837
++#define NABU 1
++#define ARM64_BOARD_CONFIG_NABU 1
+ #define ARM_ARCH_TIMER
+ 
+ #define __ARM_ARCH__              8

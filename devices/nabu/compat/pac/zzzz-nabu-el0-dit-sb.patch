@@ -1,0 +1,91 @@
+--- a/osfmk/arm64/Makefile
++++ b/osfmk/arm64/Makefile
+@@ -49,6 +49,7 @@
+ 	cpc_arm64.h \
+ 	nabu_arm64e_compat.h \
+ 	nabu_nopac.h \
++	nabu_el0_sysreg.h \
+ 	hv_hvc.h \
+ 	lowglobals.h \
+ 	machine_cpuid.h \
+--- a/osfmk/arm64/nabu_v82_emul.c
++++ b/osfmk/arm64/nabu_v82_emul.c
+@@ -88,6 +88,7 @@
+ #include <arm64/proc_reg.h>             /* ESR_EC(), PSR64_IS_USER()        */
+ #include <arm64/nabu_v82_emul.h>
+ #include <arm64/nabu_nopac.h>
++#include <arm64/nabu_el0_sysreg.h>
+ 
+ #if defined(ARM64_BOARD_CONFIG_NABU)
+ 
+@@ -595,6 +596,14 @@
+ 	    copyin_kern((user_addr_t)address, (char *)value, sizeof(*value)) == 0;
+ }
+ 
++/* FEAT_SB's backwards-compatible sequence on ARMv8.2: a real barrier,
++ * never a NOP. See corecrypto's speculation_barrier() fallback. */
++static void
++nabu_v82_speculation_barrier(void)
++{
++	__asm__ volatile("dsb sy\n\tisb" ::: "memory");
++}
++
+ bool
+ nabu_v82_emul_sync_exception(arm_context_t *context, uint64_t esr)
+ {
+@@ -629,6 +638,20 @@
+ 	cns = &context->ns.ns_64;
+ 	ns = neon_state64(&context->ns);
+ 
++	/* No DIT hardware exists on NABU: expose its effective disabled state,
++	 * not a software flag that falsely promises data-independent timing. */
++	if (from_user) {
++		uint64_t value = 0;
++		bool write = false;
++		if (nabu_el0_sysreg_step(insn, &value, &write, nabu_v82_speculation_barrier)) {
++			unsigned int rt = insn & 31U;
++			if (write && rt < 29) ss->x[rt] = value;
++			else if (write && rt == 29) ss->fp = value;
++			else if (write && rt == 30) ss->lr = value;
++			set_saved_state_pc(state, pc + 4);
++			return true;
++		}
++	}
+ 	/* PAC preserves Xd; authentication strips its address bits. This must
+ 	 * run before vector crypto and must not fall back for invalid PAC forms. */
+ 	if (nabu_nopac_opcode(insn)) {
+--- a/osfmk/arm64/nabu_el0_sysreg.h
++++ b/osfmk/arm64/nabu_el0_sysreg.h
+@@ -0,0 +1,32 @@
++/* SPDX-License-Identifier: BSD-2-Clause-Patent */
++#ifndef NABU_EL0_SYSREG_H
++#define NABU_EL0_SYSREG_H
++#include <stdint.h>
++#include <stdbool.h>
++/* Narrow compatibility for unavailable FEAT_DIT and FEAT_SB. DIT remains
++ * effectively disabled: no hardware timing property or capability is claimed.
++ * MRS returns only that actual state; writes cannot enable missing hardware.
++ * A missing speculation barrier callback must never retire an SB instruction.
++ */
++static inline bool
++nabu_el0_sysreg_step(uint32_t op, uint64_t *value, bool *write, void (*barrier)(void))
++{
++    if ((op & 0xffffffe0U) == 0xd53b42a0U) { /* MRS Xt, DIT */
++        *value = 0;
++        *write = true;
++        return true;
++    }
++    if ((op & 0xffffffe0U) == 0xd51b42a0U || /* MSR DIT, Xt (including XZR) */
++        (op & 0xfffff0ffU) == 0xd503405fU) { /* MSR DIT, #imm4 */
++        *write = false;
++        return true;
++    }
++    if (op == 0xd50330ffU) { /* SB, no operands */
++        if (!barrier) return false;
++        barrier();
++        *write = false;
++        return true;
++    }
++    return false;
++}
++#endif
