@@ -2,7 +2,7 @@
 #pragma once
 #include <stdint.h>
 
-// 25F71 IOMFBRect: signed x, y, width, height (writeLayerDebugInfo).
+// Portable signed x, y, width, height used by the paired display adapter.
 struct NabuGopRect { int32_t x, y, width, height; };
 struct NabuGopClip { int64_t x0, y0, x1, y1; };
 

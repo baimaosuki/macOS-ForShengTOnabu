@@ -1,0 +1,13 @@
+--- a/osfmk/kern/debug.c
++++ b/osfmk/kern/debug.c
+@@ -2587,5 +2587,9 @@
+ unixnu_fileset_unmapped(uint64_t arg0, uint64_t arg1)
+ {
+ 	panic("fileset: original component called an unmapped kernel function from %p (x0 0x%llx x1 0x%llx)",
++#if __has_feature(ptrauth_calls)
+ 	    __builtin_ptrauth_strip(__builtin_return_address(0), 0), arg0, arg1);
+-}
++#else
++	    __builtin_return_address(0), arg0, arg1);
++#endif
++}

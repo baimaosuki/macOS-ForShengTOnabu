@@ -1,0 +1,12 @@
+{
+  "upstream": "9d527ae1a8d36a7ff210f9f4c9b429549c34c991",
+  "changes": [
+    "SM8150 GCC register map",
+    "UFS stream0x300",
+    "UFS GIC SPI265",
+    "compatible qcom,sm8150-ufshc"
+  ],
+  "device_tested": false,
+  "phy_programming_added": false,
+  "hardware_source": "Linuxv6.12 arch/arm64/boot/dts/qcom/sm8150.dtsi"
+}

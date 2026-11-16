@@ -3,3 +3,6 @@ device:compat/pac/zz-nabu-v82-crypto-emulation.patch
 device:compat/pac/zz-nabu-v82-emul-no-tunables.patch
 device:compat/pac/zzz-nabu-arm64e-userspace.patch
 device:compat/pac/zzzz-nabu-el0-dit-sb.patch
+source-storage-runtime.patch
+device:compat/pac/debug-return-address.patch
+soc:patches/xnu/sm8150-cold-start.patch

@@ -2,3 +2,24 @@
 name = "sm8150"
 kind = "soc"
 local = "../../soc/sm8150"
+
+[[source]]
+name = "ShengUfs"
+kind = "driver"
+git = "https://github.com/UniXNU/ShengUfs.git"
+commit = "9d527ae1a8d36a7ff210f9f4c9b429549c34c991"
+local = "drivers/ShengUfs"
+
+[[source]]
+name = "GopFramebuffer"
+kind = "driver"
+git = "https://github.com/UniXNU/GopFramebuffer.git"
+commit = "b0d812d578efa2acb005b66f73168891719af09a"
+local = "drivers/GopFramebuffer"
+
+[[source]]
+name = "ArmCpu"
+kind = "driver"
+git = "https://github.com/UniXNU/ArmCpu.git"
+commit = "acba4ee2674cfb23434431feb124871ae9b3b581"
+local = "drivers/ArmCpu"
