@@ -81,11 +81,16 @@ def main():
             command, length = struct.unpack_from('<II', raw, position)
             commands.add(command)
             position += length
-        if not {0x1e, 0x80000034} <= commands:
-            raise SystemExit('native fileset input requires split-segment and chained-fixup records')
+        if 0x1e not in commands:
+            raise SystemExit('native fileset input requires split-segment records')
+        sys.path.insert(0, str(ROOT / 'kits/XnuPrelink'))
+        from kc_image import Image
+        from nabu_arm64_relocations import evidence
+        relocation = evidence(Image(raw)) if 0x80000034 not in commands else {'format': 'chained'}
         import hashlib
         report.update(native_link_passed=True,
-                      has_split_segment_relocations=True, has_chained_fixups=True,
+                      has_split_segment_relocations=True, has_chained_fixups=0x80000034 in commands,
+                      native_relocation_input=relocation,
                       native_sha256=hashlib.sha256(native.read_bytes()).hexdigest(),
                       installable=False)
         (ctx.work / 'native-verification.json').write_text(json.dumps(report, indent=2) + '\n')

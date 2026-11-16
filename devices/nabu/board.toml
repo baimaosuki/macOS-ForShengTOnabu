@@ -20,6 +20,9 @@ config_fragments = ["arch:configs/common.config", "soc:configs/sm8150.config", "
 patch_series = ["device:patches/xnu/architecture.series", "soc:patches/xnu/series", "os:patches/xnu/series", "device:patches/xnu/series"]
 archives = ["build-corecrypto-14.py", "build-corecrypto-14.py --namespace", "component:ArmDTPlatform", "component:ArmCpu", "build-libpthread-kernel.py", "component:ShengUfs", "component:RamBlock", "component:AppleKeyStoreState", "component:SoftwareAES", "component:GopFramebuffer", "build-nabu-display27.py"]
 
+[kernel.prelink]
+tool = "scripts/prelink-nabu-arm64.py"
+
 [device_tree]
 source = "device:dts/nabu.dts"
 include_dirs = ["soc:dts"]
