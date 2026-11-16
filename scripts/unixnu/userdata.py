@@ -90,6 +90,9 @@ def build(ctx, dry_run=False):
     if platform.system() == 'Darwin':
         tool('hdiutil', 'the disk images are attached with macOS hdiutil')
     source = Ipsw(ctx)
+    partition = spec.get('partition', 'userdata')
+    if not re.fullmatch(r'[A-Za-z0-9_-]{1,36}', partition):
+        raise Error('invalid root partition name')
     capacity = (spec['last_lba'] - spec['first_lba'] + 1) * spec.get('lba_bytes', 4096)
     windows = []
     for window in spec.get('windows', []):
@@ -177,7 +180,7 @@ def build(ctx, dry_run=False):
     data = {'image_bytes': total, 'image_sha256': sha256_file(image), 'manifest_sha256': hashlib.sha256(bytes(header)).hexdigest(),
             'windows': [{'name': n, 'offset': o, 'size': s, 'sha256': d.hex()} for n, o, s, d in entries],
             'objects': [{'name': n, 'offset': o, 'size': s, 'sha256': d.hex()} for n, o, s, d in object_entries],
-            'userdata_bytes': capacity, 'flash_command': f'fastboot flash userdata {image}',
+            'userdata_bytes': capacity, 'partition': partition, 'flash_command': f'fastboot flash {partition} {image}',
             'source': 'remote' if source.remote else 'local', 'hardware_tested': False}
     report.write_text(json.dumps(data, indent=2) + '\n')
     log(f'userdata: {image}')

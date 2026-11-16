@@ -1,0 +1,44 @@
+{
+  "build": "26C5035r",
+  "subcache_uuid": "12C09024-BD03-321F-989A-28512B5971DD",
+  "patches": [
+    {
+      "name": "AccelServer::renderer",
+      "va": "0x18df51d00",
+      "file": "dyld_shared_cache_arm64e.03",
+      "offset": "0x5b51d00",
+      "original": "7f2303d5f44fbea9",
+      "replacement": "000080d2c0035fd6",
+      "page_sha256": "c48176f0e65e28794b1579a3c6464c618050b70d30e6a625806466450b44b42a"
+    },
+    {
+      "name": "VirtualServer::renderer",
+      "va": "0x18df4263c",
+      "file": "dyld_shared_cache_arm64e.03",
+      "offset": "0x5b4263c",
+      "original": "7f2303d5f657bda9",
+      "replacement": "000080d2c0035fd6",
+      "page_sha256": "429f38cd13e743244bf226d8da3a9fff1aaf209aac43307af65d6a9f832c3395"
+    },
+    {
+      "name": "IOMFBDisplay::BGRA",
+      "va": "0x18e1e1134",
+      "file": "dyld_shared_cache_arm64e.03",
+      "offset": "0x5de1134",
+      "original": "08060037",
+      "replacement": "1f2003d5",
+      "page_sha256": "8870b41a6e8d2ee6fa7db01d83f8425afabfd42dc9b29743d275fc25581bb510"
+    }
+  ],
+  "original_sw_renderer": "0x18e1869b8",
+  "original_render_update": "0x18e186bec",
+  "accel_null_branch": [
+    "0x18df51fb4",
+    "0x18df5203c"
+  ],
+  "virtual_null_branch": [
+    "0x18df428bc",
+    "0x18df4297c"
+  ],
+  "fallback": "Original27.3 render_update tail-calls Server::render_update when renderer returns NULL. sw_renderer is unchanged."
+}

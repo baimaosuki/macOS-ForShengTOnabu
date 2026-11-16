@@ -56,7 +56,7 @@ static bool rootEntryUsed (const uint8_t *entry)
   return used != 0;
 }
 
-// Find the partition named "userdata" in LUN 0's primary GPT (4096-byte sectors), then read the
+// Find the partition named "macosroot" in LUN 0's primary GPT (4096-byte sectors), then read the
 // manifest at its first block. Read-only. Returns false only if the GPT itself is unusable.
 static bool findRootLayout (RootLayout *layout, const char **why)
 {
@@ -105,7 +105,7 @@ static bool findRootLayout (RootLayout *layout, const char **why)
     *why = "GPT entries CRC";
     return false;
   }
-  static const char wanted[] = "userdata";
+  static const char wanted[] = "macosroot";
   bool found = false;
   for (uint32_t index = 0; index < count; index++) {
     const uint8_t *entry = gScratch + index * 128;
@@ -131,7 +131,7 @@ static bool findRootLayout (RootLayout *layout, const char **why)
     }
     if (match) {
       if (found) {
-        *why = "duplicate userdata partition";
+        *why = "duplicate macosroot partition";
         return false;
       }
       layout->userdataFirst = le64 (entry + 32);
@@ -140,7 +140,7 @@ static bool findRootLayout (RootLayout *layout, const char **why)
     }
   }
   if (!found || layout->userdataLast < layout->userdataFirst) {
-    *why = "no userdata partition";
+    *why = "no macosroot partition";
     return false;
   }
   gRootDiagnostic.first = layout->userdataFirst;

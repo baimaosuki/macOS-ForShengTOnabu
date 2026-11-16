@@ -5,6 +5,7 @@ The official bootstrap pass may stop at the final link because its external
 archives do not exist yet. Every kernel translation unit must still succeed.
 This command never calls that pass an installable kernel.
 """
+import argparse
 import json
 import os
 from pathlib import Path
@@ -18,6 +19,9 @@ from unixnu.config import Context
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--full', action='store_true', help='also compile archives and link the native kernel')
+    options = parser.parse_args()
     args = cli.parser().parse_args([
         "build", "kernel", "-D", str(ROOT / "devices/nabu"), "--os", "macos-27"
     ])
@@ -62,6 +66,19 @@ def main():
     (ctx.work / "bootstrap-verification.json").write_text(json.dumps(report, indent=2) + "\n")
     if missing:
         raise SystemExit("bootstrap file lists contain missing objects")
+    if options.full:
+        # The bootstrap has left real compile records and private headers.
+        # The official recipe now builds every selected archive and requires
+        # a successful native link; no missing-symbol success is accepted.
+        kernel.build(ctx, modules)
+        native = obj / 'mach.development.bcm2837.unstripped.noctf'
+        if not native.is_file():
+            raise SystemExit('full build did not produce the linked native kernel')
+        import hashlib
+        report.update(native_link_passed=True,
+                      native_sha256=hashlib.sha256(native.read_bytes()).hexdigest(),
+                      installable=False)
+        (ctx.work / 'native-verification.json').write_text(json.dumps(report, indent=2) + '\n')
 
 
 if __name__ == "__main__":

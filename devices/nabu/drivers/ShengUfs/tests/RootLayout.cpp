@@ -39,7 +39,7 @@ static void fixture() {
   put64(header+24,1);put64(header+32,511);put64(header+40,6);put64(header+48,506);
   put64(header+72,2);put32(header+80,32);put32(header+84,128);
   entries[0]=1; entries[16]=2;put64(entries+32,8);put64(entries+40,506);
-  for(unsigned i=0;i<8;++i)entries[56+2*i]="userdata"[i];
+  for(unsigned i=0;i<8;++i)entries[56+2*i]="macosroot"[i];
   memcpy(manifest,"SHNGROOT",8);put32(manifest+8,1);put32(manifest+12,2);put64(manifest+16,65536);
   for(unsigned i=0;i<2;++i) {
     uint8_t *e=manifest+24+i*128;strcpy(reinterpret_cast<char *>(e),i?"SystemOS":"OS");

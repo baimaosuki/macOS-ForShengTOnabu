@@ -574,7 +574,9 @@ sources = [ROOT / 'drivers/GopFramebuffer/NativeLegacyDisplay.cpp', ROOT / 'driv
            ROOT / 'drivers/GopFramebuffer/NativeGOPPresenter.cpp', ROOT / 'drivers/GopFramebuffer/NativeGOPWire.h', ROOT / 'drivers/GopFramebuffer/NativeHalfCodes.h',
            source, ABI_PATH, keystore_source, ROOT / 'drivers/AppleKeyStoreState/NativeKeyStoreEvents.cpp',
            KITS / 'ShengEthernet.cpp', KITS / 'SoftwareAesProbe.cpp', ROOT / 'drivers/SoftwareAES/NativeAES.cpp', Path(__file__)]
-sources += sorted(KITS.glob('nabu_cpu_*.h')) + sorted(KITS.glob('nabu_cpu_*.inc'))
+sources += sorted((ROOT / 'drivers/GopFramebuffer').glob('nabu_*.h'))
+sources += sorted((ROOT / 'drivers/GopFramebuffer').glob('nabu_*.inc'))
+sources += [ROOT / 'drivers/GopFramebuffer/gop_layers.h']
 def source_name(p):
     return str(p.relative_to(ROOT))
 (OUT / 'build-report.json').write_text(json.dumps(dict(

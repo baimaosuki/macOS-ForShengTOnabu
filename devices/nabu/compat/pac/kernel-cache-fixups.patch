@@ -1,0 +1,12 @@
+--- a/osfmk/mach/dyld_kernel_fixups.h
++++ b/osfmk/mach/dyld_kernel_fixups.h
+@@ -128,6 +128,9 @@
+ 		if (fixupLoc->fixup64.isAuth) {
+ 			slidValue = sign_pointer(fixupLoc->fixup64, fixupLoc, slidValue);
+ 		}
++#elif defined(NABU)
++        /* SM8150 no-PAuth ABI: the validated cache-level/target above is the
++         * canonical address. Keep the chain stride and all target bounds. */
+ #else
+ 		if (fixupLoc->fixup64.isAuth) {
+ 			dyldLogFunc("Unexpected authenticated fixup\n");

@@ -28,15 +28,20 @@ jobs:
         run: brew install cmake ninja unifdef llvm lld dtc
       - name: Select the fresh NABU profile
         run: ./unixnu defconfig nabu_macos27_defconfig -D devices/nabu --os macos-27
-      - name: Compile original upstream 27.3 and NABU PAC source
-        run: python3 devices/nabu/scripts/compile-bootstrap.py
+      - name: Compile upstream kernel and all fresh NABU source drivers
+        run: python3 devices/nabu/scripts/compile-bootstrap.py --full
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: nabu27-bootstrap
+          name: nabu27-native
           path: |
             out/nabu/**/logs/
             out/nabu/**/bootstrap-verification.json
+            out/nabu/**/native-verification.json
+            out/nabu/**/tree/build/**/report.json
+            out/nabu/**/tree/build/**/build-report.json
+            out/nabu/**/tree/build/**/qualification.json
+            out/nabu/**/tree/build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837.unstripped.noctf
             out/nabu/**/tree/build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837.unstripped
             out/nabu/**/tree/build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/osfmk/DEVELOPMENT/nabu_v82_emul.o*
           if-no-files-found: warn
