@@ -37,11 +37,14 @@ def weak_defaults(source):
     """
     import re
     lines = []
-    for line in source.read_text().splitlines():
-        line = line.strip()
-        if not (line.startswith('extern ') and line.endswith('__attribute__((weak_import));')):
+    # Optional telemetry can declare several objects across physical lines.
+    # Parse whole declarations so the VT counters get the same absent-device
+    # defaults as the single-line GPU counters.
+    for match in re.finditer(r'^\s*extern\s+([^;]+);', source.read_text(), re.M):
+        declaration = match.group(1)
+        if '__attribute__((weak_import))' not in declaration:
             continue
-        decl = line[len('extern '):-len('__attribute__((weak_import));')].replace('__attribute__((weak_import))', '').strip()
+        decl = ' '.join(declaration.replace('__attribute__((weak_import))', '').split())
         call = re.match(r'^(.*?[\s*])([A-Za-z_]\w*)\s*\((.*)\)$', decl)
         if call and '(*' not in decl.split(call.group(2))[0]:
             ret = call.group(1).strip()
@@ -163,7 +166,14 @@ def main():
     # Only the independent trust anchor is linked into the kernel. The large
     # signed hash tables are a separate firmware handoff, authenticated in XNU.
     boot_log_defaults = out / 'BootLogDefaults.c'
-    boot_log_defaults.write_text(weak_defaults(device_source('BootLog.c')))
+    touch_header = device_source('TouchTrace.h')
+    boot_log_defaults.write_text(weak_defaults(device_source('BootLog.c')) +
+        f'#include "{touch_header}"\n' +
+        # NABU does not build the SHENG touch-path recorder. Export no rows;
+        # a board that supplies the recorder overrides this weak definition.
+        '__attribute__((weak, visibility("hidden"))) '
+        'const struct touch_trace_row *sheng_touch_trace_freeze(uint32_t *total) '
+        '{ if (total) *total = 0; return 0; }\n')
     anchor = out / 'RootAnchor.c'
     anchor.write_text('#include <stdint.h>\nconst uint8_t verified_root_key[395] = {' +
                       ','.join(str(b) for b in key) + '};\n')
