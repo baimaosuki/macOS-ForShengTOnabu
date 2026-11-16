@@ -291,6 +291,14 @@ static void storage_worker(void *, wait_result_t)
     const OSReturn loaded = OSKextLoadKextWithIdentifier("com.apple.iokit.IOStorageFamily");
     if (loaded != kOSReturnSuccess && loaded != kOSKextReturnStartStopError)
         panic("SourceStorage: original IOStorageFamily load failed %x", loaded);
+    // Root publication waits for a signed APFS volume before exposing OS. Load its
+    // original filesystem and personalities while there are no source windows to
+    // match, rather than starting that dependency from an IOMedia matching job.
+    startup_mark("original APFS load");
+    const OSReturn apfsLoaded = OSKextLoadKextWithIdentifier("com.apple.filesystems.apfs");
+    if (apfsLoaded != kOSReturnSuccess)
+        panic("SourceStorage: original APFS load failed %x before root publication", apfsLoaded);
+    printf("SourceStorage: original APFS loaded before root publication\n");
     const OSSymbol *parentName = OSSymbol::withCString("IOBlockStorageDevice");
     storageParent = parentName ? OSMetaClass::getMetaClassWithName(parentName) : nullptr;
     OSSafeReleaseNULL(parentName);

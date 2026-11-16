@@ -1,5 +1,10 @@
 # ShengUfs
 
+NABU 源码存储路径先加载原生 APFS 模块，再发布根卷窗口。等待签名卷时会记录
+UFS 读取和失败计数，以及服务子树的 provider、Content、容量、Whole、Removable、
+Ejectable 属性，并分别标明遍历是否完整和有效。SystemOS 是从窗口偏移零开始的
+原始 APFS 容器，不新增 GPT 或替换媒体 UUID。签名卷门控保持启用；根卷挂载仍待实机验证。
+
 先按[适配流程](/zh/porting/ufs)准备板级输入、修改源码、接入构建并逐步验证。
 
 ShengUfs 提供 SM8550 UFS 存储路径，管理主机控制器、SMMU 映射、

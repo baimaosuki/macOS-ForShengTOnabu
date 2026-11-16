@@ -24,6 +24,7 @@ extern const uint8_t verified_root_key[];
 }
 #endif
 #include <libkern/c++/OSNumber.h>
+#include <libkern/c++/OSBoolean.h>
 #include <libkern/c++/OSIterator.h>
 #include <IOKit/IOBSD.h>
 #include <kern/thread.h>
@@ -1991,7 +1992,7 @@ volatile uint64_t native_ufs_block_failures = 0;
 }
 
 static char gRootDiagnosticText[2500];
-static char gRootMediaText[1000];
+static char gRootMediaText[4096];
 // Passive diagnostic reader: cached software values only. It must remain safe
 // when called from an IRQ while the transport is busy: no locks, allocations,
 // MMIO reads, queue resets, or changes to the command/trust state. Fields can
@@ -2664,23 +2665,54 @@ static bool mediaWithUuidExists (const char *uuid, NativeUfsBlock *window)
   return found;
 }
 
-// What sits below the window in the service plane, matched or not (getMatchingServices lists only services whose matching has
-// finished, so media held up in matching would not show): each entry's class, BSD name, busy count and whether its matching is done.
+// Snapshot the service subtree while its UUID is missing. This is observational only: do not
+// open media or force matching while the APFS personality may already own an I/O request.
 static void captureMissingMedia (const char *uuid, IOService *window)
 {
-  int used = snprintf (gRootMediaText, sizeof (gRootMediaText), "Waiting for signed UUID %s\n", uuid);
+  char ioStats[768] = {};
+  native_ufs_stats_text (ioStats, sizeof (ioStats));
+  int used = snprintf (gRootMediaText, sizeof (gRootMediaText),
+                       "Waiting for signed UUID %s block_reads=%llu block_failures=%llu\n%s\n", uuid,
+                       static_cast<unsigned long long> (native_ufs_block_reads),
+                       static_cast<unsigned long long> (native_ufs_block_failures), ioStats);
   IORegistryIterator *children = window ? IORegistryIterator::iterateOver (window, gIOServicePlane, kIORegistryIterateRecursively) : nullptr;
-  unsigned count = 0;
-  while (children && used < int (sizeof (gRootMediaText)) - 160 && count++ < 8) {
-    IOService *entry = OSDynamicCast (IOService, children->getNextObject ());
-    if (!entry) break;
+  unsigned examined = 0, shown = 0;
+  bool complete = false;
+  while (children && examined < 128) {
+    OSObject *object = children->getNextObject ();
+    if (!object) {
+      complete = true;
+      break;
+    }
+    ++examined;
+    IOService *entry = OSDynamicCast (IOService, object);
+    if (!entry || shown == 16 || used >= int (sizeof (gRootMediaText)) - 512) continue;
     OSString *id = OSDynamicCast (OSString, entry->getProperty ("UUID"));
     OSString *bsd = OSDynamicCast (OSString, entry->getProperty (kIOBSDNameKey));
-    used += snprintf (gRootMediaText + used, sizeof (gRootMediaText) - used, "%.32s %.12s busy=%u matched=%u uuid=%.36s\n",
+    OSString *content = OSDynamicCast (OSString, entry->getProperty ("Content"));
+    OSNumber *size = OSDynamicCast (OSNumber, entry->getProperty ("Size"));
+    OSNumber *blockSize = OSDynamicCast (OSNumber, entry->getProperty ("Preferred Block Size"));
+    OSObject *wholeProperty = entry->getProperty ("Whole");
+    const char *whole = wholeProperty == kOSBooleanTrue ? "1" : wholeProperty == kOSBooleanFalse ? "0" : "?";
+    const char *removable = entry->getProperty ("Removable") == kOSBooleanTrue ? "1" :
+                            entry->getProperty ("Removable") == kOSBooleanFalse ? "0" : "?";
+    const char *ejectable = entry->getProperty ("Ejectable") == kOSBooleanTrue ? "1" :
+                            entry->getProperty ("Ejectable") == kOSBooleanFalse ? "0" : "?";
+    IOService *provider = entry->getProvider ();
+    used += snprintf (gRootMediaText + used, sizeof (gRootMediaText) - used,
+                      "%.28s %.12s b=%u m=%u p=%.28s size=%llx blk=%llu whole=%s content=%.20s rem=%s eject=%s uuid=%.36s\n",
                       entry->getMetaClass ()->getClassName (), bsd ? bsd->getCStringNoCopy () : "-", entry->getBusyState (),
                       entry->isInactive () ? 2u : (entry->getState () & kIOServiceMatchedState) ? 1u : 0u,
+                      provider ? provider->getMetaClass ()->getClassName () : "-",
+                      size ? static_cast<unsigned long long> (size->unsigned64BitValue ()) : 0ULL,
+                      blockSize ? static_cast<unsigned long long> (blockSize->unsigned64BitValue ()) : 0ULL,
+                      whole, content ? content->getCStringNoCopy () : "-", removable, ejectable,
                       id ? id->getCStringNoCopy () : "-");
+    ++shown;
   }
+  snprintf (gRootMediaText + used, sizeof (gRootMediaText) - used,
+            "registry entries=%u shown=%u complete=%u valid=%u limit=%u\n", examined, shown, complete ? 1u : 0u,
+            children && children->isValid () ? 1u : 0u, 128u);
   OSSafeReleaseNULL (children);
 }
 

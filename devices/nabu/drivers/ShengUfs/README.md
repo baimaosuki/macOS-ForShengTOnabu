@@ -16,6 +16,14 @@ Verified userdata windows identify themselves as internal virtual storage. This
 keeps macOS Disk Arbitration from deferring their mounts until login or
 unmounting the App cryptex while the desktop session starts.
 
+The NABU source-storage worker loads the original APFS module before publishing
+any root windows. A load error stops startup with its actual return code. While
+waiting for a signed volume, the driver reports UFS read/failure counters and
+the service subtree's providers, media geometry, content and whole/removable/
+ejectable properties. Traversal completeness and validity are reported separately.
+The 27.3 SystemOS image is a raw APFS container at offset zero; no GPT wrapper or
+replacement media UUID is added. Root mount remains subject to device validation.
+
 The historical native UFS root qualification applies to the iOS 17 path.
 
 Build and interface details: [documentation](https://unixnu.com/drivers/sheng-ufs). Component sources and dependencies: [catalog](https://unixnu.com/reference/components).

@@ -44,6 +44,12 @@ VA64; it preserves all context registers and revalidates before configuration.
 Both transfer and task-management lists are stopped before SMMU access. These
 paths have host fault tests; the NABU 27.3 root handoff still needs device testing.
 
+For NABU source storage, the original APFS module is loaded before root-window
+publication. A missing signed volume reports transport counters and the service
+subtree's provider, content, geometry and whole/removable/ejectable properties,
+including traversal completeness and validity. These observations do not bypass
+the signed volume gate or qualify a root mount.
+
 Up to 32 commands run at once, one per command slot. The request list sits on a
 write-combined page of its own. Completion uses the controller interrupt with
 hybrid polling: a wait polls for 200 microseconds, then sleeps. Page-aligned
