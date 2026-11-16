@@ -40,8 +40,21 @@ def weak_defaults(source):
     # Optional telemetry can declare several objects across physical lines.
     # Parse whole declarations so the VT counters get the same absent-device
     # defaults as the single-line GPU counters.
-    for match in re.finditer(r'^\s*extern\s+([^;]+);', source.read_text(), re.M):
-        declaration = match.group(1)
+    text = source.read_text()
+    for match in re.finditer(r'^\s*extern\s+', text, re.M):
+        # Semicolons inside an anonymous telemetry struct do not terminate
+        # its extern declaration.
+        end, depth = match.end(), 0
+        while end < len(text):
+            char = text[end]
+            if char == '{':
+                depth += 1
+            elif char == '}':
+                depth -= 1
+            elif char == ';' and depth == 0:
+                break
+            end += 1
+        declaration = text[match.end():end]
         if '__attribute__((weak_import))' not in declaration:
             continue
         decl = ' '.join(declaration.replace('__attribute__((weak_import))', '').split())
@@ -244,6 +257,11 @@ OSDefineOperatorMethods(IOBlockStorageDevice)
                     if (directory / 'BootLatencyTrace.c').is_file()), None)
     if latency:
         sources.append(latency)
+        # The portable recorder also builds on XNU profiles without SHENG's
+        # optional exception/PMU instrumentation hooks.
+        latency_defaults = out / 'BootLatencyDefaults.c'
+        latency_defaults.write_text(weak_defaults(latency))
+        sources.append(latency_defaults)
     objects, inputs = [], {}
     objcopy = tool('llvm-objcopy')
     for source in sources:
