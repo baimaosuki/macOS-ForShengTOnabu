@@ -39,7 +39,7 @@ static void fixture() {
   put64(header+24,1);put64(header+32,511);put64(header+40,6);put64(header+48,506);
   put64(header+72,2);put32(header+80,32);put32(header+84,128);
   entries[0]=1; entries[16]=2;put64(entries+32,8);put64(entries+40,506);
-  for(unsigned i=0;i<8;++i)entries[56+2*i]="macosroot"[i];
+  for(unsigned i=0;i<sizeof("macosroot");++i)entries[56+2*i]="macosroot"[i];
   memcpy(manifest,"SHNGROOT",8);put32(manifest+8,1);put32(manifest+12,2);put64(manifest+16,65536);
   for(unsigned i=0;i<2;++i) {
     uint8_t *e=manifest+24+i*128;strcpy(reinterpret_cast<char *>(e),i?"SystemOS":"OS");
@@ -56,6 +56,8 @@ static void expect(const std::function<void()> &change,bool gpt,uint32_t status,
 int main(int argc,char **argv) {
   assert(rootCrc32(reinterpret_cast<const uint8_t *>("123456789"),9)==0xcbf43926);
   expect([]{},true,0);
+  // Android userdata must never be selected as the NABU macOS root.
+  expect([]{memset(entries+56,0,72);for(unsigned i=0;i<sizeof("userdata");++i)entries[56+2*i]="userdata"[i];},false,0);
   expect([]{header[16]^=1;},false,0,false);
   expect([]{entries[16]^=1;},false,0,false);
   expect([]{put32(header+12,4097);},false,0);
@@ -112,12 +114,12 @@ int main(int argc,char **argv) {
   }
   if(argc==2) {
     fixture();std::ifstream f(argv[1],std::ios::binary);f.read(reinterpret_cast<char *>(manifest),4096);assert(f.gcount()==4096);
-    userdata=0x2f3840;put64(entries+32,userdata);put64(entries+40,0x3d0abfa);
-    put64(header+32,0x3d0abff);put64(header+48,0x3d0abfa);
+    userdata=2752576;put64(entries+32,userdata);put64(entries+40,30660602);
+    put64(header+32,30660607);put64(header+48,30660602);
     // Only the synthetic GPT is rechecksummed. Preserve the actual on-host manifest hash.
     put32(header+88,rootCrc32(entries,4096));put32(header+16,rootCrc32(header,92,true));
     RootLayout layout;const char *why=nullptr;
-    assert(findRootLayout(&layout,&why) && layout.manifestStatus==0 && layout.windows==2);
+    assert(findRootLayout(&layout,&why) && layout.manifestStatus==0 && layout.windows==3 && layout.objects==3);
     printf("PASS: existing root image's 4096-byte manifest, OS=%llu SystemOS=%llu; synthetic GPT uses recorded geometry, no full-image rehash\n",
            (unsigned long long)layout.window[0].size,(unsigned long long)layout.window[1].size);
   }

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 // Diagnostic log on UFS (boot argument log=1): every 2 s the text the board page would show (the diagnostic page, the live
-// banner, the GPU rows, a caught panic message) and the kernel message buffer are written to the last 32 MiB of userdata through
+// banner, the GPU rows, a caught panic message) and the kernel message buffer are written to the last 32 MiB of macosroot through
 // NativeUfs's bounded log window, so a run can be read back afterwards (scripts/read-sheng-log.py over the Linux log reader).
 //
 // Window layout (4096-byte blocks): 0 header, 1..32 the kernel message buffer, 33.. text slots of 16 blocks in a ring, then the

@@ -29,7 +29,7 @@ def main():
     # Bootstrap needs only the selected shared components, never SM8550's GPU.
     selected = ["drivers/ArmDTPlatform", "drivers/ArmCpu", "drivers/RamBlock",
                 "drivers/DarwinBoot", "drivers/GopFramebuffer",
-                "drivers/AppleKeyStoreState", "drivers/SoftwareAES",
+                "drivers/AppleKeyStoreState", "drivers/SoftwareAES", "drivers/VirtioMmioBlock",
                 "kits/XnuPrelink", "kits/VerifiedRoot"]
     subprocess.run(["git", "-C", str(ROOT), "submodule", "update", "--init", "--", *selected], check=True)
     modules = feeds.resolve(ctx)

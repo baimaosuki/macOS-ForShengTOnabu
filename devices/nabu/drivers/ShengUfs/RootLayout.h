@@ -4,7 +4,7 @@
 // ---- LUN 0 GPT and the root-image manifest -------------------------------------------------
 struct RootWindow {
   char name[32];
-  uint64_t offset;   // bytes from the start of the userdata partition
+  uint64_t offset;   // bytes from the start of the macosroot partition
   uint64_t size;     // bytes
   uint8_t sha256[32];
 };
@@ -148,7 +148,7 @@ static bool findRootLayout (RootLayout *layout, const char **why)
   gRootDiagnostic.stage = "root manifest";
   // First block of the partition: manifest if the root image was flashed, ext4 otherwise.
   if (hostRead4k (0, layout->userdataFirst, 1, gScratch) != kIOReturnSuccess) {
-    *why = "userdata first block read";
+    *why = "macosroot first block read";
     return false;
   }
   layout->magic0 = le32 (gScratch);

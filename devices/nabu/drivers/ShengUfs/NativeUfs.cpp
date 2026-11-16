@@ -1480,7 +1480,7 @@ static uint32_t be32w (const uint8_t *at)
 
 // ---- Persistent Data store window (data-persist) ----------------------------------------------------------
 // The only part of this driver that ever writes. The consumer (NativeRamBlock's overlay) asks for a window of the given
-// size at the END of the userdata partition. Mode 1 (boot argument data-persist=1) only reads: it proves the window and
+// size at the END of the macosroot partition. Mode 1 (boot argument data-persist=1) only reads: it proves the window and
 // lets the consumer inspect its header. Mode 2 additionally opens the write window. A window is refused unless it lies inside
 // the partition, clear of the flashed root image plus a 4 MiB guard, and is at most a quarter of the partition.
 namespace {
@@ -1491,13 +1491,13 @@ struct StoreGeometry {
 };
 StoreGeometry gStoreGeometry;
 uint64_t gStoreRegionFirst, gStoreRegionBlocks;
-// The diagnostic log (log=1): always the last 32 MiB of userdata, so the Data store's place does not depend on logging.
+// The diagnostic log (log=1): always the last 32 MiB of macosroot, so the Data store's place does not depend on logging.
 constexpr uint64_t kLogReserveBlocks = 8192;
 // The log's export region: the 256 MiB just below the log window (the render server's pipeline caches, kits/sheng BootLog.c). It is
 // part of the log's write window, so the store ends below both.
 constexpr uint64_t kExportBlocks = 65536;
 uint64_t gLogRegionFirst, gLogRegionBlocks;
-// The reserve at the end of userdata that the Data store stays clear of: the log and its export region sit inside it (log=1), the rest
+// The reserve at the end of macosroot that the Data store stays clear of: the log and its export region sit inside it (log=1), the rest
 // is unused. log-reserve=<MiB>, default 1024; 0 gives all the room to Data and is only accepted with the log off. The store's place
 // depends on it, so an image keeps one value for its whole life (a different value moves the store: the old one is read as blank).
 constexpr uint32_t kDefaultReserveMiB = 1024;
@@ -1742,7 +1742,7 @@ extern "C" int native_ufs_extra_fault (uint32_t *out)
 }
 
 // ---- Diagnostic log window (log=1) --------------------------------------------------------------------------
-// The board's log writer (kits/sheng BootLog.c) gets the last kLogReserveBlocks of userdata and the kExportBlocks below them, refused
+// The board's log writer (kits/sheng BootLog.c) gets the last kLogReserveBlocks of macosroot and the kExportBlocks below them, refused
 // unless the partition holds them clear of the flashed root image plus a 4 MiB guard. Off without the boot argument.
 static unsigned logMode (void)
 {
@@ -1948,7 +1948,7 @@ public:
   char *getVendorString () override { return const_cast<char *> ("Native"); }
   char *getProductString () override { return label; }
   char *getRevisionString () override { return const_cast<char *> ("1.0"); }
-  char *getAdditionalDeviceInfoString () override { return const_cast<char *> ("UFS LUN 0 userdata window, read-only"); }
+  char *getAdditionalDeviceInfoString () override { return const_cast<char *> ("UFS LUN 0 macosroot window, read-only"); }
   IOReturn reportBlockSize (UInt64 *value) override { *value = 512; return kIOReturnSuccess; }
   IOReturn reportEjectability (bool *value) override { *value = false; return kIOReturnSuccess; }
   IOReturn reportMaxValidBlock (UInt64 *value) override { *value = bytes / 512 - 1; return kIOReturnSuccess; }
@@ -2847,7 +2847,7 @@ bool NativeUfs::start (IOService *provider)
     adoptAndRead (probe);
   }
   if (probe == 10) {
-    // Read-only check before anything is flashed: LUN 0 GPT -> "userdata" -> its first block.
+    // Read-only check before anything is flashed: LUN 0 GPT -> "macosroot" -> its first block.
     const char *why = "";
     if (!hostBringUp (&why)) {
       panic ("NATIVE_UFS root check: bring-up failed: %s", why);
@@ -2857,7 +2857,7 @@ bool NativeUfs::start (IOService *provider)
       panic ("NATIVE_UFS root check: %s", why);
     }
     panic ("NATIVE_UFS root check\n"
-           "userdata first=%llx last=%llx\n"
+           "macosroot first=%llx last=%llx\n"
            "block0 magic %08x %08x ext4magic=%04x ext4blocks=%u\n"
            "manifest status=%u windows=%u",
            layout->userdataFirst, layout->userdataLast, layout->magic0, layout->magic1,
@@ -2885,7 +2885,7 @@ bool NativeUfs::start (IOService *provider)
       }
     }
     panic ("NATIVE_UFS root windows\n"
-           "userdata first=%llx last=%llx manifest status=%u windows=%u\n"
+           "macosroot first=%llx last=%llx manifest status=%u windows=%u\n"
            "w0 %s off=%llx size=%llx gpt=%08x %08x read=%u\n"
            "w1 %s off=%llx size=%llx gpt=%08x %08x read=%u\n"
            "w0 sha %08x %08x %08x %08x\n"
@@ -2957,7 +2957,7 @@ bool NativeUfs::startRoot (IOService *provider)
   native_ufs_root_step = 3;
   if (layout->manifestStatus != 0) {
     rootDiagnosticFailure ("root manifest rejected");
-    IOLog ("NativeUfs: no valid root manifest in userdata (status %u, magic %08x %08x)\n",
+    IOLog ("NativeUfs: no valid root manifest in macosroot (status %u, magic %08x %08x)\n",
            layout->manifestStatus, layout->magic0, layout->magic1);
     IOFree (layout, sizeof (RootLayout));
     return false;
