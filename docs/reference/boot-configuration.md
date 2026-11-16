@@ -70,6 +70,7 @@ enabled = true
 | `path` | required | File path or `fv:<GUID>` |
 | `args` | | Load options |
 | `connect` | true | Connects controllers after the driver starts |
+| `required` | false | A load or start failure prevents OS entries from booting; actions remain available |
 | `enabled` | true | `false` skips the entry |
 
 A kit driver uses `file` instead of `path`.

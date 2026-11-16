@@ -54,13 +54,16 @@ STATIC
 VOID
 NoteDriverFailure (
   IN UNIXNU_CONFIG      *Config,
-  IN CONST CHAR16   *File,
+  IN CONST UNIXNU_DRIVER *Driver,
   IN CONST CHAR8    *What,
   IN EFI_STATUS     Status
   )
 {
-  if (Config->Error[0] == '\0') {
-    AsciiSPrint (Config->Error, sizeof (Config->Error), "driver %s: %a: %r", File, What, Status);
+  if (Driver->Required && !EFI_ERROR (Config->RequiredDriverFailure)) {
+    Config->RequiredDriverFailure = Status;
+  }
+  if ((Config->Error[0] == '\0') || Driver->Required) {
+    AsciiSPrint (Config->Error, sizeof (Config->Error), "driver %s: %a: %r", Driver->File, What, Status);
   }
 }
 
@@ -85,7 +88,7 @@ UniXNUInjectDrivers (
     Path   = UniXNUResolveImagePath (Driver->Volume, Driver->File);
     if (Path == NULL) {
       UniXNULog ("driver %s (%a): cannot resolve path", Driver->File, Driver->Origin);
-      NoteDriverFailure (Config, Driver->File, "cannot resolve path", EFI_NOT_FOUND);
+      NoteDriverFailure (Config, Driver, "cannot resolve path", EFI_NOT_FOUND);
       Stats->DriversFailed++;
       continue;
     }
@@ -101,7 +104,7 @@ UniXNUInjectDrivers (
       }
 
       UniXNULog ("driver %s (%a): load failed: %r", Driver->File, Driver->Origin, Status);
-      NoteDriverFailure (Config, Driver->File, "load failed", Status);
+      NoteDriverFailure (Config, Driver, "load failed", Status);
       Stats->DriversFailed++;
       continue;
     }
@@ -116,7 +119,7 @@ UniXNUInjectDrivers (
     Status = gBS->StartImage (Image, NULL, NULL);
     if (EFI_ERROR (Status)) {
       UniXNULog ("driver %s (%a): start failed: %r", Driver->File, Driver->Origin, Status);
-      NoteDriverFailure (Config, Driver->File, "start failed", Status);
+      NoteDriverFailure (Config, Driver, "start failed", Status);
       Stats->DriversFailed++;
       continue;
     }

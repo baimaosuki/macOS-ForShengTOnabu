@@ -12,9 +12,27 @@ UEFI bootloader. Installs the loader protocol and hands the kernel, ADT, trust c
 
 Not a driver. Used by every XNU boot path.
 
-The loader accepts arm64 and arm64e `MH_EXECUTE` kernels. CPU subtype
-capability bits are retained. XNU initializes pointer authentication and
-applies its chained fixups. `MH_FILESET` input is not supported yet.
+The loader accepts arm64 and arm64e `MH_EXECUTE` kernels and validates
+`MH_FILESET` membership, native entry, mappings and protections. The NABU board
+adapter also accepts a plain ARM64 native member inside an ARM64e collection.
+XNU initializes pointer authentication and applies its chained fixups.
+
+The NABU loader can be installed as `EFI/UniXNU/Drivers/DarwinBoot.efi` on ESP.
+Configure it before the XNU entry:
+
+```toml
+[[driver]]
+path = "Drivers/DarwinBoot.efi"
+args = "replace-existing"
+required = true
+connect = false
+```
+
+With this explicit option, one revision 1 or 2 firmware loader interface can
+be replaced. Its driver remains resident; unloading the ESP driver restores
+the original interface. Multiple providers and unknown revisions are refused.
+The supplied UniXNU application honors `required`: load or start failure keeps
+the menu available and prevents an OS entry from using the older loader.
 
 ## Build
 

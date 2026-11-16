@@ -10,6 +10,15 @@ also accepts a plain ARM64 native kernel inside an ARM64e collection; retained
 Apple kexts determine the collection subtype. All membership, bounds, entry and
 protection checks still apply.
 
+For an existing UEFI installation, load `DarwinBoot.efi` from ESP before the
+XNU entry. The exact load option `replace-existing` permits replacement of one
+revision 1 or 2 loader interface. The old driver stays resident and unloading
+this driver restores its interface. Unknown revisions, multiple providers and
+replacement errors leave the original interface intact. A UniXNU driver entry
+with `required = true` prevents OS boot if the independent loader did not start.
+`Test/Standalone.inf` exercises installation, replacement, restoration and the
+required-driver failure path under QEMU UEFI; it does not boot a kernel.
+
 UniXNU passes the selected boot entry's arguments to DarwinBoot, which copies
 them into XNU's command line and prints `DARWINBOOT: command line:` before
 handoff. The top green bar marks `DarwinEnter` before cache maintenance,

@@ -12,6 +12,7 @@
   PackedRamdisk.h
   MemoryWindow.h
   LoaderInputs.h
+  LoaderRegistration.h
   BootArgs.h
   BootVideo.h
   DiagFont.h

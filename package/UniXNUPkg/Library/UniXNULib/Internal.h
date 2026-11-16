@@ -157,6 +157,7 @@ typedef struct {
   CHAR16        *File;
   CHAR16        *Args;
   BOOLEAN       Connect;
+  BOOLEAN       Required;
   CHAR8         *Origin;
 } UNIXNU_DRIVER;
 
@@ -272,6 +273,7 @@ typedef struct {
   //
   UNIXNU_DRIVER      *Drivers;
   UINTN          DriverCount;
+  EFI_STATUS     RequiredDriverFailure;
   UNIXNU_DT_PATCH    *Patches;         ///< Global patches (config + kits).
   UINTN          PatchCount;
   UNIXNU_ACPI_TABLE  *AcpiTables;

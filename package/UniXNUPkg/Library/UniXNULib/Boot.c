@@ -125,6 +125,10 @@ UniXNUBootEntry (
   if (Entry->Type == UniXNUEntryAction) {
     return RunAction (Entry);
   }
+  if (EFI_ERROR (Config->RequiredDriverFailure)) {
+    UniXNULog ("boot: required driver failed: %r; entry refused", Config->RequiredDriverFailure);
+    return Config->RequiredDriverFailure;
+  }
 
   Fdt          = NULL;
   FdtSize      = 0;

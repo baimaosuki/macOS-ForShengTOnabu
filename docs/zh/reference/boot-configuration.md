@@ -62,6 +62,7 @@ console = "auto"
 path = "Drivers/MyDriver.efi"
 args = "board=1"
 connect = true
+required = false
 enabled = true
 ```
 

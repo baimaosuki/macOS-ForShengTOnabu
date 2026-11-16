@@ -577,6 +577,7 @@ AddDriver (
   Driver->File    = MakePath (BaseDir, Path);
   Driver->Args    = UniXNUAsciiToUnicode (TomlGetString (Table, "args", NULL));
   Driver->Connect = TomlGetBoolean (Table, "connect", TRUE);
+  Driver->Required = TomlGetBoolean (Table, "required", FALSE);
   Driver->Origin  = AsciiDup (Origin);
 }
 

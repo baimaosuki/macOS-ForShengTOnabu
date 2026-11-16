@@ -1168,13 +1168,16 @@ Fail:
 }
 
 STATIC UNIXNU_LOADER_PROTOCOL mLoader = { UNIXNU_LOADER_REVISION, Boot };
+#include "LoaderRegistration.h"
+STATIC DARWIN_LOADER_REGISTRATION mRegistration;
 
 STATIC
 EFI_STATUS
 EFIAPI
 Unload (EFI_HANDLE ImageHandle)
 {
-  return gBS->UninstallMultipleProtocolInterfaces (ImageHandle, &gUniXNULoaderProtocolGuid, &mLoader, NULL);
+  (VOID)ImageHandle;
+  return DarwinUnregisterLoader (&mRegistration, &mLoader);
 }
 
 EFI_STATUS
@@ -1183,18 +1186,23 @@ DarwinBootEntry (EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
 {
   EFI_LOADED_IMAGE_PROTOCOL *Loaded;
   EFI_STATUS               Status;
-  VOID                     *Existing;
+  BOOLEAN                  Replace;
+  STATIC CONST CHAR16      ReplaceOption[] = L"replace-existing";
 
   (VOID)SystemTable;
-  Status = gBS->LocateProtocol (&gUniXNULoaderProtocolGuid, NULL, &Existing);
-  if (!EFI_ERROR (Status)) { return EFI_ALREADY_STARTED; }
   Status = gBS->HandleProtocol (ImageHandle, &gEfiLoadedImageProtocolGuid, (VOID **)&Loaded);
   if (EFI_ERROR (Status)) { return Status; }
+  Replace = (Loaded->LoadOptions != NULL) && (Loaded->LoadOptionsSize == sizeof (ReplaceOption)) &&
+            (CompareMem (Loaded->LoadOptions, ReplaceOption, sizeof (ReplaceOption)) == 0);
+  if ((Loaded->LoadOptionsSize != 0) && !Replace) { return EFI_INVALID_PARAMETER; }
   mImage = ImageHandle;
-  Status = gBS->InstallMultipleProtocolInterfaces (&ImageHandle, &gUniXNULoaderProtocolGuid, &mLoader, NULL);
+  Status = DarwinRegisterLoader (ImageHandle, &mLoader, Replace, &mRegistration);
   if (!EFI_ERROR (Status)) {
     Loaded->Unload = Unload;
-    Print (L"DARWINBOOT: loader v2 installed EL%u\n", (UINT32)(DarwinCurrentEl () >> 2));
+    Print (L"DARWINBOOT: ESP loader v2 %s EL%u\n", mRegistration.Previous != NULL ? L"replaced firmware loader" : L"installed",
+           (UINT32)(DarwinCurrentEl () >> 2));
+  } else {
+    Print (L"DARWINBOOT: ESP loader registration failed: %r\n", Status);
   }
   return Status;
 }
