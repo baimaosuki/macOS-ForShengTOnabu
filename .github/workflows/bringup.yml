@@ -1,13 +1,19 @@
 name: NABU fresh macOS 27.3
 on:
   workflow_dispatch:
+    inputs:
+      stage:
+        type: choice
+        options: [native, runtime]
+        default: native
 permissions:
   contents: read
 concurrency:
-  group: nabu27-fresh
+  group: nabu27-${{ inputs.stage || 'native' }}
   cancel-in-progress: false
 jobs:
   compile:
+    if: inputs.stage != 'runtime'
     runs-on: macos-26-intel
     timeout-minutes: 180
     env:
@@ -65,4 +71,34 @@ jobs:
             out/nabu/**/tree/build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/mach.development.bcm2837.unstripped
             out/nabu/**/tree/build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837/osfmk/DEVELOPMENT/nabu_v82_emul.o*
           if-no-files-found: warn
+          retention-days: 14
+  runtime:
+    if: inputs.stage == 'runtime'
+    runs-on: macos-26-intel
+    timeout-minutes: 120
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Require Intel host and prepare runtime tools
+        run: |
+          test "$(uname -m)" = x86_64
+          brew install blacktop/tap/ipsw
+          python3 -m pip install cryptography
+      - name: Select the fresh profile and prepare packed seed tools
+        run: |
+          git submodule update --init -- drivers/DarwinBoot
+          ./unixnu defconfig nabu_macos27_defconfig -D devices/nabu --os macos-27
+      - name: Build new Data and signed upstream boot shims
+        run: python3 devices/nabu/scripts/build-fresh-runtime.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nabu27-runtime-encrypted
+          path: |
+            out/fresh-runtime/runtime.enc
+            out/fresh-runtime/runtime-envelope.json
+          if-no-files-found: error
           retention-days: 14
