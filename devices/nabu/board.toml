@@ -40,7 +40,11 @@ text_fixups = [
     "dyld_shared_cache_arm64e.03,5b4263c,7f2303d5f657bda9,000080d2c0035fd6",
     "dyld_shared_cache_arm64e.03,5de1134,08060037,1f2003d5",
 ]
-kernel_args = ["debug=0x14e", "kt_fixed_zones=120", "-no_slto_panic", "use_contiguous_hint=0", "native-source-storage=1", "native-ufs-root=1", "apfs-boot-shim=1", "vc-text=1", "exec-log=1", "timebase-hz=24000000", "offline-mobile-graphics-load=1", "offline-mobile-graphics-client=1", "offline-legacy-register=1", "offline-legacy-gop=1", "offline-legacy-pm=1", "offline-legacy-validate=1", "offline-legacy-transfer=1", "offline-legacy-cpu-present=1", "offline-legacy-phase=4", "vsync=60", "aks=1", "aks-sls=3", "smp=1", "armcpu-edge=1", "log=1", "disable-watchdogd=1", "offline-key-events=1", "ethernet=1", "data-persist=2"]
+# CPU display registration has its own offline-legacy-register switch. The
+# optional offline-mobile-graphics-client diagnostic calls the legacy five-arg
+# externalMethod on an unattached IOUserClient2022, whose implementation panics.
+# Keep that diagnostic off so BSD startup can reach IOKitBSDInit normally.
+kernel_args = ["debug=0x14e", "kt_fixed_zones=120", "-no_slto_panic", "use_contiguous_hint=0", "native-source-storage=1", "native-ufs-root=1", "apfs-boot-shim=1", "vc-text=1", "exec-log=1", "timebase-hz=24000000", "offline-mobile-graphics-load=1", "offline-legacy-register=1", "offline-legacy-gop=1", "offline-legacy-pm=1", "offline-legacy-validate=1", "offline-legacy-transfer=1", "offline-legacy-cpu-present=1", "offline-legacy-phase=4", "vsync=60", "aks=1", "aks-sls=3", "smp=1", "armcpu-edge=1", "log=1", "disable-watchdogd=1", "offline-key-events=1", "ethernet=1", "data-persist=2"]
 
 [payload.adt]
 chip_id = "6050"
