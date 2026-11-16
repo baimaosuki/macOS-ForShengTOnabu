@@ -1,26 +1,46 @@
-macOS userspace expects the macOS user address space: xzone malloc maps its range groups with VM_FLAGS_FIXED at
-455 to 512 GiB and stops launchd with brk when that fails. On XNU_TARGET_OS_OSX the user address space limit is the
-macOS value (0x7FFFFE000000); the user pmaps already use a 47-bit TTBR0 range. As on 16K macOS, the commpage then lies
-inside the user range, reserved by the VM, so the 4K nesting assertion does not apply (macOS-DroidVM uses the same layout,
-virt-user-va-512g and virt-user-va-commpage-inside, with a 39-bit range).
+Nabu macOS 4K user VA must match the translation tables. The VM previously
+advertised 47 bits, while the board's subpage L1 limited pmap and TCR to 38 bits.
+A user fault at 0x721a004000 (456 GiB) therefore panicked in pmap_enter_options.
+Use the full 512-entry L1 (39 bits, T0SZ/T1SZ=25), preserving the real L1 boot
+and secondary-CPU hierarchy, and derive the VM ceiling from that same T0SZ.
+The 455-512 GiB xzone range then fits, with the existing 32 MiB top guard.
+Other board configurations retain their existing address-space policy.
 --- a/osfmk/mach/arm/vm_param.h
 +++ b/osfmk/mach/arm/vm_param.h
-@@ -148,6 +148,15 @@
+@@ -148,6 +148,17 @@
  #undef MACH_VM_MAX_ADDRESS_RAW
  #define MACH_VM_MAX_ADDRESS_RAW 0x00007FFFFE000000ULL
  #endif /* defined(XNU_PLATFORM_iPhoneOS) && EXTENDED_USER_VA_SUPPORT */
 +#if defined(XNU_PLATFORM_iPhoneOS) && XNU_TARGET_OS_OSX && !EXTENDED_USER_VA_SUPPORT
-+/*
-+ * macOS userspace gets the macOS user address space: xzone malloc maps its range groups (24 GiB, VM_FLAGS_FIXED) at
-+ * 455 to 512 GiB, above the GPU carveout. The user pmaps use a 47-bit TTBR0 range (T0SZ_USER, osfmk/arm64/proc_reg.h);
-+ * the commpage nesting region and the GPU carveout stay reserved in every map (vm_reserved_regions).
-+ */
++/* Keep VM allocations inside the hardware TTBR0 range. Nabu uses the full
++ * 512 GiB L1 on 4K pages; xzone's fixed 455-512 GiB groups fit below it.
++ * Retain the macOS 32 MiB guard at the top of the user address space. */
 +#undef MACH_VM_MAX_ADDRESS_RAW
++#if defined(ARM64_BOARD_CONFIG_NABU) && !__ARM_16K_PG__ && !CONFIG_SPTM
++#define MACH_VM_MAX_ADDRESS_RAW ((1ULL << (64 - T0SZ_BOOT)) - 0x2000000ULL)
++#else
 +#define MACH_VM_MAX_ADDRESS_RAW 0x00007FFFFE000000ULL
++#endif
 +#endif
  /* threshold for allocations to be placed in the large file range */
  #define VM_LARGE_FILE_THRESHOLD (1ULL << 30)
  #define MACH_VM_JUMBO_ADDRESS ((mach_vm_offset_t) 0x0000000FC0000000ULL)
+--- a/osfmk/arm64/proc_reg.h
++++ b/osfmk/arm64/proc_reg.h
+@@ -96,6 +96,13 @@
+ #undef __ARM64_PMAP_KERN_SUBPAGE_L1__
+ #endif /* __ARM_42BIT_PA_SPACE__ */
+ #endif /* !CONFIG_SPTM */
++
++#if defined(ARM64_BOARD_CONFIG_NABU) && XNU_TARGET_OS_OSX && !__ARM_16K_PG__ && !CONFIG_SPTM
++/* A full 4K L1 covers 512 GiB, including macOS xzone. Keep the L1 bootstrap
++ * hierarchy: 47-bit/level-0 tables are not built by this machine's start.s. */
++#undef __ARM64_PMAP_SUBPAGE_L1__
++#undef __ARM64_PMAP_KERN_SUBPAGE_L1__
++#endif
+ 
+ /* For arm platforms, create one pset per cluster */
+ #define MAX_PSETS MAX_CPU_CLUSTERS
 --- a/osfmk/arm/pmap/pmap.c
 +++ b/osfmk/arm/pmap/pmap.c
 @@ -11671,12 +11671,19 @@

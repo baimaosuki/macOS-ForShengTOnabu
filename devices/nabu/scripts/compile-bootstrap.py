@@ -39,6 +39,9 @@ def main():
                                    (m.kind != "refer" or m.name in wanted)})
     tree.assemble(ctx, modules)
     order = patches.prepare(ctx, modules)
+    subprocess.run([sys.executable, str(ROOT / 'devices/nabu/tests/test_user_va.py'),
+                    '--xnu', str(ctx.tree / '.cache/xnu-work'),
+                    '--work', str(ctx.work / 'user-va-verification')], check=True)
     env = dict(os.environ)
     env.update(kernel.xnu_env(ctx))
     env.update(kernel.version_env(modules, ctx))
