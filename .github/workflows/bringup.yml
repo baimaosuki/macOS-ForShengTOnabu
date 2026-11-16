@@ -38,6 +38,7 @@ jobs:
         id: kernel-cache
         with:
           key: nabu27-native-v1-${{ runner.arch }}-${{ hashFiles('patches/**', 'profiles/**', 'devices/nabu/patches/**', 'devices/nabu/compat/pac/**', 'devices/nabu/configs/**', 'soc/sm8150/patches/**') }}
+          restore-keys: nabu27-native-v1-${{ runner.arch }}-
           path: |
             out/feeds/
             out/nabu/**/xnu-inputs.json

@@ -1,0 +1,12 @@
+--- a/makedefs/MakeInc.def
++++ b/makedefs/MakeInc.def
+@@ -1125,6 +1125,9 @@
+ LDFLAGS_KERNEL_ONLY_SUBARCH_arm64e = \
+ 	-Wl,-add_split_seg_info \
+ 	-Wl,-kernel
++# A no-PAuth arm64 kernel needs the same relocation records when it is
++# placed around retained fileset kexts. This does not change its CPU subtype.
++LDFLAGS_KERNEL_ONLY_SUBARCH_arm64 = $(LDFLAGS_KERNEL_ONLY_SUBARCH_arm64e)
+ else
+ # A standalone arm64e MH_EXECUTE boots without a kernel collection builder:
+ # arm_init rebases and signs __TEXT,__thread_starts, which only ld-classic emits.

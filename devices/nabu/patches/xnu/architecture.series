@@ -68,3 +68,5 @@ arch:../../../patches/xnu-12377/fileset-unmapped-call.patch
 arch:../../../patches/xnu-12377/native-4k-block-split.patch
 arch:../../../patches/xnu-12377/native-modload-lock-order.patch
 arch:../../../patches/xnu-12377/native-union-readdir-eof.patch
+device:patches/xnu/native-entitlement-stack-alignment.patch
+device:patches/xnu/arm64-fileset-relocations.patch

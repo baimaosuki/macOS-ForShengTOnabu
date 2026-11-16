@@ -74,8 +74,18 @@ def main():
         native = obj / 'mach.development.bcm2837.unstripped.noctf'
         if not native.is_file():
             raise SystemExit('full build did not produce the linked native kernel')
+        import struct
+        raw = native.read_bytes()
+        position, commands = 32, set()
+        for _ in range(struct.unpack_from('<I', raw, 16)[0]):
+            command, length = struct.unpack_from('<II', raw, position)
+            commands.add(command)
+            position += length
+        if not {0x1e, 0x80000034} <= commands:
+            raise SystemExit('native fileset input requires split-segment and chained-fixup records')
         import hashlib
         report.update(native_link_passed=True,
+                      has_split_segment_relocations=True, has_chained_fixups=True,
                       native_sha256=hashlib.sha256(native.read_bytes()).hexdigest(),
                       installable=False)
         (ctx.work / 'native-verification.json').write_text(json.dumps(report, indent=2) + '\n')
