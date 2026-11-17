@@ -216,13 +216,20 @@ IOBlockStorageDevice::MetaClass::MetaClass()
 OSDefineAbstractStructors(IOBlockStorageDevice, IOService)
 OSDefineOperatorMethods(IOBlockStorageDevice)
 '''))
+    # Bind the journal to the actual board logger source, not a wall clock.
+    logger_sources = sorted((device / 'drivers/ShengUfs').glob('NabuLog*.h'))
+    logger_digest = hashlib.sha256()
+    for entry in logger_sources + [device / 'drivers/ShengUfs/NativeUfs.cpp', device_source('BootLog.c')]:
+        logger_digest.update(entry.name.encode() + b'\0' + entry.read_bytes())
+    (out / 'NabuLogBuild.h').write_text('static const uint8_t nabu_log_build_id[32] = {' +
+                                      ','.join(str(b) for b in logger_digest.digest()) + '};\n')
     obj = tree / 'build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837'
     cpp = json.loads((obj / 'iokit/DEVELOPMENT/IOPlatformExpert.cpo.json').read_text().strip().rstrip(','))
     c = json.loads((obj / 'osfmk/DEVELOPMENT/startup.o.json').read_text().strip().rstrip(','))
     # BSD sources (sys/proc.h, the system calls) take kern_exec's flags.
     bsd = json.loads((obj / 'bsd/DEVELOPMENT/kern_exec.o.json').read_text().strip().rstrip(','))
     bsd_sources = {'BootWatchdogPolicy.c', 'BootDiagExport.c', 'BootDiagExportDefaults.c', 'WifiFirmware.c', 'BluetoothFirmware.c'}
-    includes = ['-I', str(out / 'headers/include'), '-I', str(ROOT / 'kits/VerifiedRoot/include'),
+    includes = ['-I', str(out), '-I', str(out / 'headers/include'), '-I', str(ROOT / 'kits/VerifiedRoot/include'),
                 '-I', str(ROOT / 'drivers/VirtioMmioBlock'), '-I', str(tree / '.cache/xnu-work/osfmk')]
     flags = ['-DNATIVE_UFS_SOURCE_API=1', '-DNATIVE_VERIFIED_BLOCK=1',
              '-DNATIVE_VERIFIED_BLOCK_MULTI_POLICY=1', '-DNATIVE_VERIFIED_POLICY_HANDOFF=1']
@@ -300,6 +307,7 @@ OSDefineOperatorMethods(IOBlockStorageDevice)
     shutil.copyfile(archive, catalog_output)
     report = dict(archive=str(archive), archive_sha256=build.sha(archive), sources=inputs,
                   headers=header_report, target=target.TRIPLE,
+                  esp_logger_build_id=logger_digest.hexdigest(),
                   policy_bundle_sha256=build.sha(out / 'root-policies.bin'),
                   trusted_key_sha256=hashlib.sha256(key).hexdigest(), runtime_qualified=False)
     (out / 'report.json').write_text(json.dumps(report, indent=2) + '\n')

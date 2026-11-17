@@ -46,6 +46,7 @@ static UfsSlot ufsSlot (unsigned index) { return gSlotGeom[index]; }
 struct HardwareTransferPort {
   const UfsSlot &slot;
   uint64_t deadline;
+  bool pollOnly = false;  // diagnostic panic I/O never sleeps or changes global host mode
   uint32_t seen = 0;
   uint64_t started = mach_absolute_time ();   // when the wait began: the port polls first and sleeps only past its spin budget
   uint32_t doorbell () { seen = hostCompletionCount (slot.index); return (read32 (gHost.hc, 0x58) & slot.bit) ? 1U : 0U; }
@@ -55,7 +56,7 @@ struct HardwareTransferPort {
     return *reinterpret_cast<volatile uint32_t *> (slot.utrd + 8) & 0xff;
   }
   bool expired () { return mach_absolute_time () >= deadline; }
-  void delay () { hostWaitCompletion (slot.index, seen, started); }
+  void delay () { if (!pollOnly) hostWaitCompletion (slot.index, seen, started); }
 };
 
 static void putBe32 (uint8_t *at, uint32_t value)
@@ -165,9 +166,9 @@ static IOReturn hostIssue (const UfsSlot &slot, uint32_t direction, uint32_t dat
 // arch_sync_dma_for_cpu returns at once for DMA_TO_DEVICE). An invalidate there would also drop a line a CPU wrote to the caller's
 // page while the command ran.
 static IOReturn hostAwait (const UfsSlot &slot, uint32_t dataBytes, uint64_t deadline, uint32_t *ocs, const void *buffer = nullptr,
-                           unsigned direction = 2)
+                           unsigned direction = 2, bool pollOnly = false)
 {
-  HardwareTransferPort port = { slot, deadline, 0 };
+  HardwareTransferPort port = { slot, deadline, pollOnly, 0 };
   UfsTransferPoll state;
   UfsTransferEnd end = pollUfsTransfer (port, state);
   __atomic_store_n (&gSlotIssuedAt[slot.index], 0, __ATOMIC_RELAXED);
@@ -288,11 +289,11 @@ static IOReturn hostScsiIssue (const UfsSlot &slot, uint8_t lun, const uint8_t *
 }
 
 static IOReturn hostScsiAwait (const UfsSlot &slot, uint8_t lun, uint32_t dataBytes, uint64_t deadline, uint32_t *scsiStatus,
-                               const void *buffer = nullptr, unsigned direction = 2)
+                               const void *buffer = nullptr, unsigned direction = 2, bool pollOnly = false)
 {
   *scsiStatus = 0xffff;
   uint32_t ocs = 0xf;
-  IOReturn status = hostAwait (slot, dataBytes, deadline, &ocs, buffer, direction);
+  IOReturn status = hostAwait (slot, dataBytes, deadline, &ocs, buffer, direction, pollOnly);
   if (status != kIOReturnSuccess) return status;
   const uint8_t tag = static_cast<uint8_t> (slot.entry);
   status = hostResponseHeader (slot, 0x21, lun, tag);
@@ -319,12 +320,12 @@ static IOReturn hostScsiAwait (const UfsSlot &slot, uint8_t lun, uint32_t dataBy
 
 static IOReturn hostScsiDir (const UfsSlot &slot, uint8_t lun, const uint8_t *cdb, unsigned cdbLength, unsigned direction,
                              uint32_t dataBytes, uint32_t timeoutUs, uint32_t *scsiStatus,
-                             const UfsPrd *prd = nullptr, unsigned prds = 0, const void *buffer = nullptr)
+                             const UfsPrd *prd = nullptr, unsigned prds = 0, const void *buffer = nullptr, bool pollOnly = false)
 {
   uint64_t deadline = 0;
   IOReturn status = hostScsiIssue (slot, lun, cdb, cdbLength, direction, dataBytes, timeoutUs, &deadline, scsiStatus, prd, prds, buffer);
   return status != kIOReturnSuccess ? status
-                                    : hostScsiAwait (slot, lun, dataBytes, deadline, scsiStatus, prds ? buffer : nullptr, direction);
+                                    : hostScsiAwait (slot, lun, dataBytes, deadline, scsiStatus, prds ? buffer : nullptr, direction, pollOnly);
 }
 
 // The original read-only entry point: data, when present, always flows device -> host.
@@ -447,6 +448,29 @@ static void hostSlotGive (const UfsSlot &slot, bool pooled)
   IOLockUnlock (gSlotLock);
 }
 
+// A diagnostic writer must not queue behind a stopped root thread. Normal
+// requests try a free pool slot once; panic uses the reserved slot only when
+// there are at least two. A one-slot host refuses panic logging rather than
+// reusing a descriptor which the controller may still own.
+static bool hostDiagnosticSlotTake (UfsSlot *slot, bool panic)
+{
+  if (panic) {
+    if (gSlotCount < 2 || gHostPanic) return false;
+    *slot = ufsSlot (gSlotCount - 1);
+    return true; // caller owns the single ESP journal commit lock
+  }
+  if (gHostPanic || !IOLockTryLock (gSlotLock)) return false;
+  bool ok = gSlotFree && !gSlotWaitHead;
+  if (ok) {
+    unsigned index = static_cast<unsigned> (__builtin_ctz (gSlotFree));
+    gSlotFree &= ~(1U << index);
+    if (++gSlotsBusy > gSlotsPeak) gSlotsPeak = gSlotsBusy;
+    *slot = ufsSlot (index);
+  }
+  IOLockUnlock (gSlotLock);
+  return ok;
+}
+
 // A command the device refused for now: BUSY (0x08) or TASK SET FULL (0x28), as when more commands are queued than it accepts. It is
 // sent again after a short pause, up to kBusyRetries times; any other status is final.
 static constexpr unsigned kBusyRetries = 50;
@@ -518,16 +542,18 @@ static IOReturn hostRead4k (uint8_t lun, uint64_t lba, uint32_t blocks, void *ds
 }
 
 // ---- Persistent store and log windows ------------------------------------------------------------------------------
-// The only place this driver writes. At most two windows of 4096-byte LBAs on LUN 0 (the Data store and the diagnostic log),
-// each opened once by its integration after it has proved that the window lies inside the userdata partition and clear of the
-// root image; every write is checked against them again here, so nothing outside them can be written even if a caller is wrong.
-static bool gStoreOpen = false, gLogOpen = false;
+// Three one-time write windows on LUN0: Data, raw SHLOG and a validated
+// preallocated ESP journal. The ESP config block, FAT, directories and GPT
+// are excluded. Every writer checks its own window before issuing WRITE(10).
+static bool gStoreOpen = false, gLogOpen = false, gEspLogOpen = false;
 static uint64_t gStoreFirst = 0, gStoreBlocks = 0, gLogFirst = 0, gLogBlocks = 0;
+static uint64_t gEspLogFirst = 0, gEspLogBlocks = 0;
 
 static bool hostLogOpen (uint64_t first, uint64_t blocks)
 {
   if (gLogOpen || !blocks || first > 0xffffffffULL || blocks > 0xffffffffULL - first) return false;
   if (gStoreOpen && first < gStoreFirst + gStoreBlocks && gStoreFirst < first + blocks) return false;
+  if (gEspLogOpen && first < gEspLogFirst + gEspLogBlocks && gEspLogFirst < first + blocks) return false;
   gLogFirst = first;
   gLogBlocks = blocks;
   gLogOpen = true;
@@ -537,16 +563,27 @@ static bool hostLogOpen (uint64_t first, uint64_t blocks)
 static bool hostInWindow (uint64_t lba, uint32_t blocks)
 {
   if (gStoreOpen && lba >= gStoreFirst && lba - gStoreFirst < gStoreBlocks && blocks <= gStoreBlocks - (lba - gStoreFirst)) return true;
-  return gLogOpen && lba >= gLogFirst && lba - gLogFirst < gLogBlocks && blocks <= gLogBlocks - (lba - gLogFirst);
+  if (gLogOpen && lba >= gLogFirst && lba - gLogFirst < gLogBlocks && blocks <= gLogBlocks - (lba - gLogFirst)) return true;
+  return gEspLogOpen && lba >= gEspLogFirst && lba - gEspLogFirst < gEspLogBlocks && blocks <= gEspLogBlocks - (lba - gEspLogFirst);
 }
 
 static bool hostStoreOpen (uint64_t first, uint64_t blocks)
 {
   if (gStoreOpen || !blocks || first > 0xffffffffULL || blocks > 0xffffffffULL - first) return false;
   if (gLogOpen && first < gLogFirst + gLogBlocks && gLogFirst < first + blocks) return false;
+  if (gEspLogOpen && first < gEspLogFirst + gEspLogBlocks && gEspLogFirst < first + blocks) return false;
   gStoreFirst = first;
   gStoreBlocks = blocks;
   gStoreOpen = true;
+  return true;
+}
+
+static bool hostEspLogOpen (uint64_t first, uint64_t blocks)
+{
+  if (gEspLogOpen || !blocks || first > 0xffffffffULL || blocks > 0xffffffffULL - first) return false;
+  if (gStoreOpen && first < gStoreFirst + gStoreBlocks && gStoreFirst < first + blocks) return false;
+  if (gLogOpen && first < gLogFirst + gLogBlocks && gLogFirst < first + blocks) return false;
+  gEspLogFirst = first; gEspLogBlocks = blocks; gEspLogOpen = true;
   return true;
 }
 
@@ -586,7 +623,7 @@ static IOReturn hostWrite4k (uint8_t lun, uint64_t lba, uint32_t blocks, const v
 // SYNCHRONIZE CACHE(10) for the whole LUN: every write that completed before this call is on the medium when it returns.
 static IOReturn hostSyncCache (void)
 {
-  if (!gHost.ready || (!gStoreOpen && !gLogOpen)) return kIOReturnNotReady;
+  if (!gHost.ready || (!gStoreOpen && !gLogOpen && !gEspLogOpen)) return kIOReturnNotReady;
   bool pooled;
   const UfsSlot slot = hostSlotTake (&pooled);
   uint8_t cdb[10] = { 0x35 };

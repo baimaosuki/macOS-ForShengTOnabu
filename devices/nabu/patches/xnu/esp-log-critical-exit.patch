@@ -1,0 +1,105 @@
+diff --git a/osfmk/console/serial_console.c b/osfmk/console/serial_console.c
+--- a/osfmk/console/serial_console.c
++++ b/osfmk/console/serial_console.c
+@@ -41,6 +41,10 @@
+ #include <vm/vm_kern_xnu.h>
+ #include <vm/vm_map.h>
+ #include <console/video_console.h>
++#include <arm64/nabu_arm64e_compat.h>
++#if NABU_ARM64E_COMPAT
++extern void nabu_capture_append(const char *, unsigned);
++#endif
+ #include <console/serial_protos.h>
+ #include <kern/startup.h>
+ #include <kern/thread.h>
+@@ -532,6 +536,10 @@
+ void
+ console_write(char *str, int size)
+ {
++#if NABU_ARM64E_COMPAT
++	/* RAM only, once at input; never wait behind a stopped console CPU. */
++	if (str != NULL && size > 0) nabu_capture_append(str, (unsigned)size);
++#endif
+ 	if (disableConsoleOutput) {
+ 		return;
+ 	}
+@@ -617,6 +625,9 @@
+ void
+ console_write_unbuffered(char c)
+ {
++#if NABU_ARM64E_COMPAT
++	nabu_capture_append(&c, 1);
++#endif
+ 	if (disableConsoleOutput) {
+ 		return;
+ 	}
+diff --git a/bsd/kern/kern_exit.c b/bsd/kern/kern_exit.c
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -74,6 +74,11 @@
+  */
+ 
+ #include <machine/reg.h>
++#include <arm64/nabu_arm64e_compat.h>
++#if NABU_ARM64E_COMPAT
++#include <arm/thread.h>
++extern void nabu_log_checkpoint(void);
++#endif
+ #include <machine/psl.h>
+ #include <stdatomic.h>
+ 
+@@ -1966,6 +1971,43 @@
+ #endif /* (DEVELOPMENT || DEBUG) && CONFIG_COREDUMP */
+ }
+ 
++#if NABU_ARM64E_COMPAT
++/* This runs while the exiting task is still current and faultable. Keep the
++ * real panic policy; capture the abort origin before coredump/sync/panic. */
++static void
++nabu_critical_user_context(proc_t p, int rv)
++{
++	if (p != current_proc()) return;
++	arm_saved_state_t *state = get_user_regs(current_thread());
++	printf("NABU-CRITICAL: pid=%d name=%s tid=%llu signal=%d exit=%d\n",
++	    proc_getpid(p), p->p_name, thread_tid(current_thread()), WTERMSIG(rv), WEXITSTATUS(rv));
++	if (state && is_saved_state64(state)) {
++		printf("NABU-CRITICAL: user pc=0x%llx lr=0x%llx sp=0x%llx fp=0x%llx\n",
++		    get_saved_state_pc(state), get_saved_state_lr(state),
++		    get_saved_state_sp(state), get_saved_state_fp(state));
++	}
++	uintptr_t frames[32];
++	struct backtrace_user_info info = BTUINFO_INIT;
++	unsigned count = backtrace_user(frames, 32, NULL, &info);
++	printf("NABU-CRITICAL: user frames=%u error=%d flags=0x%x\n", count, info.btui_error, info.btui_info);
++	for (unsigned i = 0; i < count; ++i)
++		printf("NABU-CRITICAL: frame=%u pc=0x%llx\n", i, (uint64_t)frames[i]);
++	struct user64_dyld_all_image_infos images;
++	if (!copyin((user_addr_t)task_get_all_image_info_addr(current_task()), &images, sizeof(images))) {
++		printf("NABU-CRITICAL: dyld cache_base=0x%llx cache_slide=0x%llx images=%u\n",
++		    images.sharedCacheBaseAddress, images.sharedCacheSlide, images.infoArrayCount);
++		unsigned n = images.infoArrayCount > 16 ? 16 : images.infoArrayCount;
++		for (unsigned i = 0; i < n; ++i) {
++			struct user64_dyld_image_info image;
++			if (copyin(images.infoArray + i * sizeof(image), &image, sizeof(image))) break;
++			printf("NABU-CRITICAL: image=%u base=0x%llx path_ptr=0x%llx\n",
++			    i, image.imageLoadAddress, image.imageFilePath);
++		}
++	}
++	nabu_log_checkpoint();
++}
++#endif
++
+ static void
+ proc_handle_critical_exit(proc_t p, int rv)
+ {
+@@ -2016,6 +2058,10 @@
+ 		prefix_str = prefix_str_buf;
+ 	}
+ 
++
++#if NABU_ARM64E_COMPAT
++	nabu_critical_user_context(p, rv);
++#endif
+ 	proc_crash_coredump(p);
+ 
+ 	sync(p, (void *)NULL, (int *)NULL);

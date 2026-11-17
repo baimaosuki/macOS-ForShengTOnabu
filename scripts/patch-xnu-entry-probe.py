@@ -223,6 +223,13 @@ def assemble_c(source, va, workdir, symbols):
         if not any(base <= text and text + 256 <= base + size for base, size, _, _ in SEGMENTS):
             raise SystemExit('Invalid _boot_progress_panic_text')
         definitions.append(f'-DPANIC_TEXT={text:#x}UL')
+    # NABU's panic entry is replaced below. Connect the compiled bounded
+    # journal callback explicitly; optional on other boards.
+    panic_log = symbols.get('_nabu_log_panic_stack')
+    if panic_log is not None:
+        if not any(base <= panic_log < base + size for base, size, _, _ in SEGMENTS):
+            raise SystemExit('Invalid _nabu_log_panic_stack')
+        definitions.append(f'-DPANIC_ESP_LOG={panic_log:#x}UL')
     subprocess.run([clang, '--target=aarch64-none-elf', '-ffreestanding', '-fno-builtin', '-fno-stack-protector',
                     '-mgeneral-regs-only', '-fno-pic', '-mcmodel=tiny', '-Oz', f'-DVINFO={VINFO_VA:#x}UL',
                     *definitions, f'-I{font_dir}', '-c', source, '-o', obj], check=True)

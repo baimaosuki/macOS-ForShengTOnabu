@@ -35,6 +35,9 @@ struct ctx {
   u32 logn;
 };
 
+#ifndef PANIC_ESP_LOG
+#define PANIC_ESP_LOG 0UL
+#endif
 #ifndef PANIC_TEXT
 #define PANIC_TEXT 0UL
 #endif
@@ -222,6 +225,14 @@ __attribute__((noreturn, used, section(".text.b_main"))) void panic_screen_main 
   u32 row, col;
 
   __asm__ volatile ("msr daifset, #15");
+  /* Preserve the final message even if GOP is unavailable. This callback is
+   * resolved from this kernel's symbols and uses only preallocated memory,
+   * the reserved UFS slot and finite polling. Other boards compile it out. */
+  if (PANIC_ESP_LOG && fmt) {
+    ((void (*)(const char *, const u64 *, u64))PANIC_ESP_LOG)
+      (fmt, args, (u64)__builtin_return_address(0));
+  }
+
   g.base = (u8 *)v->v_baseaddr;
   g.rb   = v->v_rowbytes;
   g.w    = v->v_width;

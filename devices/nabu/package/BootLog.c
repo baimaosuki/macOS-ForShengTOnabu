@@ -3015,7 +3015,11 @@ void boot_log_panic_flush(void) {
   native_ufs_log_sync();
 }
 
+extern void nabu_log_panic_record(const char *, va_list *, unsigned long);
+
 void boot_log_panic_record(const char *format, va_list *args, unsigned long caller) {
+  /* NABU ESP capture is independent of the optional raw storage probe. */
+  nabu_log_panic_record(format, args, caller);
   static unsigned recorded;
   uint32_t probe = 0;
   if (boot_log_state != 2 || !&boot_progress_panic_text ||

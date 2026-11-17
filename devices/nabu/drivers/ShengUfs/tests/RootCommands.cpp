@@ -177,6 +177,27 @@ int main()
   reset(); ufs_test_slots(1); assert(ufs_test_slot_count()==1 && ufs_test_free_slots()==1);
   assert(ufs_test_read(0,1,1,out.data())==0 && lastSlot==0 && ufs_test_free_slots()==1);
   ufs_test_panic(); assert(ufs_test_read(0,1,1,out.data())==0 && lastSlot==0);
+  reset(); assert(gSpinUs==200);
+  assert(ufs_test_esp_open(501,2050)==1 && !ufs_test_esp_open(501,2050));
+  assert(!ufs_test_store_open(500,3) && !ufs_test_log_open(2500,100));
+  assert(ufs_test_store_open(4000,64) && ufs_test_log_open(5000,64));
+  { std::vector<uint8_t> data(4096,0x77);
+    const unsigned before=writes;
+    assert(ufs_test_write(0,500,1,data.data())==kIOReturnBadArgument); // config
+    assert(ufs_test_write(0,2550,2,data.data())==kIOReturnBadArgument); // end
+    assert(ufs_test_write(0,3000,1,data.data())==kIOReturnBadArgument); // gap
+    assert(writes==before);
+    assert(ufs_test_write(0,501,1,data.data())==0 && written==data);
+  }
+  assert(ufs_test_diagnostic_take(false)==0);
+  ufs_test_slot_give(0);
+  assert(ufs_test_diagnostic_take(true)==int(kRegionSlots-1));
+  reset(); ufs_test_slots(1);
+  assert(ufs_test_diagnostic_take(true)==-1); // never steal the only slot
+  assert(ufs_test_diagnostic_take(false)==0 && ufs_test_diagnostic_take(false)==-1);
+  ufs_test_slot_give(0);
+  assert(ufs_test_diagnostic_take(false)==0);ufs_test_slot_give(0);
+  puts("PASS: ESP config/metadata exclusion, three disjoint write windows, try-slot and reserved panic slot");
   puts("PASS: command slots: per-slot entry, descriptor, tag and data; pool; busy and task-set-full retries; panic slot; one-slot fallback");
   puts("PASS: actual command/queue path; malformed DMA responses, bounds, short reads, sense, quarantine, queue refusal and full-width DMA");
 }

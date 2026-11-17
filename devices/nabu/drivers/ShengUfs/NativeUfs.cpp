@@ -42,6 +42,9 @@ extern "C" {
 #include <libkern/libkern.h>
 #include <pexpert/pexpert.h>
 #include <kern/debug.h>
+#define NABU_LOG_IMPLEMENTATION
+#include "NabuLogCore.h"
+#undef NABU_LOG_IMPLEMENTATION
 #include "GccUfs.h"
 #include "RootDiagnostics.h"
 #include "TransferPoll.h"
@@ -1534,6 +1537,8 @@ static unsigned storeMode (void)
   return static_cast<unsigned> (cached);
 }
 }
+
+#include "NabuLogUfs.h"
 
 extern "C" unsigned native_ufs_store_mode (void) { return storeMode (); }
 
@@ -3116,6 +3121,7 @@ bool NativeUfs::startRoot (IOService *provider)
                           "root window preparation failed");
     return false;
   }
+  nabuLogStart (); // validated root geometry exists; startup never waits for logging
   return true;
 }
 

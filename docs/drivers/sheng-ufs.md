@@ -71,3 +71,24 @@ The WCN7850 DMA window maps 128 MiB at IOVA 0x10000000 using 64 two-MiB
 blocks in its own SMMU context bank. Device checks reach Wi-Fi interface
 readiness and traffic with zero DMA allocation failures. The board fixture
 `scripts/check-wifi-dma.py` checks capacity and allocation boundaries.
+
+## NABU ESP boot journal
+
+`nabu-log=1 nabu-log-token=<32hex>` captures console output in a 4 MiB RAM
+ring and commits every 2 seconds to the existing 8,400,896-byte
+`XNU2LOG.BIN` in the ESP root. GPT/FAT mirrors, a contiguous allocation, no
+aliases and its config token must all validate first. Writes exclude GPT,
+FAT, directories and the immutable config block. The fixed macosroot Data
+layout and 1024 MiB reserve do not change.
+
+Critical process exit records the current user registers, up to 32 user
+frames and dyld load addresses before a normal checkpoint. The replacement
+panic entry explicitly calls the journal: it tries the reserved UFS slot,
+uses polling with a 250 ms command timeout and a 3 s commit deadline, and
+skips a busy writer. The prior A/B commit survives an interrupted update.
+This cannot persist a panic before UFS/file validation, a poisoned
+controller, or logs produced since the last commit when the writer is busy.
+Physical ring overwrite and capture contention are counted.
+
+Host verification: `python3 devices/nabu/drivers/ShengUfs/tests/check_esp_log.py --output /tmp/nabu-esp-log-test`.
+These tests do not prove device write completion or resolve the PID 1 abort.
