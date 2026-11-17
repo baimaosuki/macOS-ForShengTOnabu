@@ -35,7 +35,8 @@ def main():
     configured = tomllib.loads((device / 'board.toml').read_text())['payload']['text_fixups']
     checked = []
     session = json.loads((device / 'compat/cpu-display/safe-aperture-26C5035r.json').read_text())
-    for entry in fixture['patches'] + session['patches']:
+    magnify = json.loads((device / 'compat/cpu-display/magnify-26C5035r.json').read_text())
+    for entry in fixture['patches'] + session['patches'] + magnify['patches']:
         path = args.cache.with_name(entry['file'])
         offset = int(entry['offset'], 16)
         expected = bytes.fromhex(entry['original'])

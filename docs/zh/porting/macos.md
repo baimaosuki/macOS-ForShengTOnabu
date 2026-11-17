@@ -1,5 +1,14 @@
 # macOS 配置
 
+后一轮 Nabu 实机日志确认 SafeAperture 规则已命中，loginwindow 随后在
+325、418、498 秒停在 `NSApplication init+0x720 → _NSMagnifyMode →
+_HIMagnifiedMode → CFURLCopyResourcePropertyForKey → _LSCopyServerStore`。
+新增 `0x18f0f7304` 签名文本规则仅将这处可选 `kCFURLIsApplicationKey` 查询
+报告为不可用，保留原生 URL 释放、默认分支与 `AppleMagnifiedMode` 偏好读取。
+该分支也跳过 bundle／`NSHighResolutionCapable` 元数据推断，不改变通用 URL 或
+信任评估。lsd 的栈曾在注册必需 bundle 时执行代码签名信任评估，后一轮又继续
+运行；后端问题与桌面显示仍未验收。七条页面规则保留既有 CPU 渲染路径。
+
 Nabu 的 26C5035r 实机栈在 374 至 499 秒三次捕获 loginwindow 卡在
 `NSApplication init → SafeAperture → URL 属性查询 → _LSCopyServerStore`。
 设备签名文本规则在 `0x18acbb658` 仅将这处可选 SafeAperture URL 查询转为

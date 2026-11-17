@@ -1,5 +1,17 @@
 # macOS profile
 
+The following Nabu hardware capture confirms the SafeAperture rule applied.
+`loginwindow` then waits in `NSApplication init+0x720 -> _NSMagnifyMode ->
+_HIMagnifiedMode -> CFURLCopyResourcePropertyForKey -> _LSCopyServerStore` at
+325, 418 and 498 seconds. A separate signed-text rule at `0x18f0f7304` reports
+only this optional `kCFURLIsApplicationKey` query unavailable. The native URL
+release, default branch and `AppleMagnifiedMode` preference reader remain.
+This also skips the block's inferred bundle/`NSHighResolutionCapable` metadata;
+it does not change general URL or trust evaluation. The `lsd` stack was seen
+registering a required bundle and evaluating its code-signing trust, and later
+doing CPU work again. Its backend remains unresolved, as does hardware desktop
+display. The seven page rules preserve the existing CPU rendering path.
+
 The Nabu 26C5035r session capture found `loginwindow` blocked in
 `NSApplication init -> SafeAperture -> getResourceValue:forKey:error: ->
 _LSCopyServerStore` at three snapshots between 374 and 499 seconds. The board's

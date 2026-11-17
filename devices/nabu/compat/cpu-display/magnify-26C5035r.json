@@ -1,0 +1,19 @@
+{
+  "build": "26C5035r",
+  "captured_chain": "loginwindow147/tid895: NSApplication init+0x720 -> NSMagnifyMode -> HIMagnifiedMode -> CFURLCopyResourcePropertyForKey -> LSCopyServerStore; rounds2/3/4",
+  "patches": [
+    {
+      "name": "HIToolbox::Magnify-optional-URL-unavailable",
+      "va": "0x18f0f7304",
+      "file": "dyld_shared_cache_arm64e.03",
+      "offset": "0x6cf7304",
+      "original": "fb214094",
+      "replacement": "00008052",
+      "page_sha256": "0ed06982c79694e7a459b823fa45f742a5ff99b3dded708b373a0fd45a51990e",
+      "patched_page_sha256": "72bb4ac260a1c787c680d3c243cb2e03007b411779c1c94028f9fae31d63f027"
+    }
+  ],
+  "block": "0x18f0f72a0",
+  "preference": "0x18f0f74d0",
+  "scope": "Return unavailable only at the optional kCFURLIsApplicationKey call. Native URL release, false/default branch and AppleMagnifiedMode preference remain. Shared block also skips inferred NSHighResolutionCapable bundle metadata; not a repair of lsd/trust evaluation."
+}
