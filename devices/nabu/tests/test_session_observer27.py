@@ -1,6 +1,7 @@
 """Execute the real raw-stack reader against failing/racing Mach boundaries."""
 from pathlib import Path
 import subprocess
+import shutil
 
 ROOT = Path(__file__).resolve().parents[3]
 
@@ -67,7 +68,7 @@ static int thread_get_state(unsigned port,unsigned flavor,int *out,unsigned *cou
 static int mach_port_deallocate(unsigned self,unsigned port){assert(self==7&&(port==42||port>=100));deallocated++;return 0;}
 static int mach_vm_deallocate(unsigned self,uint64_t at,uint64_t length){assert(self==7&&at==(uintptr_t)ports&&length==array_count*sizeof(*ports));vm_deallocated++;return 0;}
 static int task_info(unsigned task,unsigned flavor,int *out,unsigned *count){assert(task==42&&flavor==17);if(!dyld_mode)return 5;struct task_dyld_info *info=(void*)out;info->all_image_info_addr=0x5000;info->all_image_info_size=sizeof(image_data);info->all_image_info_format=2;*count=6;return 0;}
-static int mach_vm_read_overwrite(unsigned task,uint64_t at,uint64_t length,uint64_t destination,uint64_t *actual){assert(task==42);reads++;if(dyld_mode&&at>=0x5000){const void *src=0;if(at==0x5000&&length==sizeof(image_data))src=&image_data;else if(at==0x6000&&length==sizeof(image_entry))src=&image_entry;else if(at>=0x7000&&at+length<=0x7000+sizeof(image_commands))src=image_commands+at-0x7000;assert(src);memcpy((void*)(uintptr_t)destination,src,length);*actual=length;return 0;}assert(length==16);uint64_t *out=(void*)(uintptr_t)destination;*actual=length;if(mode==5){*actual=8;return 0;}if(mode==6)return 1;assert(at>=0x2000&&at<0x3000&&(at&15)==0);frame_calls++;out[0]=(mode==7)?at:mode==8?at+16:at==0x2000?0x2020:0;out[1]=0xfedc000018731234;return 0;}
+static int mach_vm_read_overwrite(unsigned task,uint64_t at,uint64_t length,uint64_t destination,uint64_t *actual){assert(task==42);reads++;if(dyld_mode&&at>=0x5000){const void *src=0;if(at==0x5000&&length==sizeof(image_data))src=&image_data;else if(at==0x6000&&length==sizeof(image_entry))src=&image_entry;else if(at>=0x7000&&at+length<=0x7000+sizeof(image_commands))src=image_commands+(at-0x7000);assert(src);memcpy((void*)(uintptr_t)destination,src,length);*actual=length;return 0;}assert(length==16);uint64_t *out=(void*)(uintptr_t)destination;*actual=length;if(mode==5){*actual=8;return 0;}if(mode==6)return 1;assert(at>=0x2000&&at<0x3000&&(at&15)==0);frame_calls++;out[0]=(mode==7)?at:mode==8?at+16:at==0x2000?0x2020:0;out[1]=0xfedc000018731234;return 0;}
 static unsigned write_mode, write_calls, mirror_calls;
 static ssize_t fixture_write(int fd,const void *data,size_t n){
  if(fd==9){mirror_calls++;errno=EIO;return -1;}
@@ -113,7 +114,7 @@ assert(!nabu_raw_target(321));assert(strstr(output,"cache slide=0x123000")&&strs
     source = tmp_path / 'raw.c'
     source.write_text(harness)
     binary = tmp_path / 'raw'
-    subprocess.run(['cc', '-std=c11', '-D_DEFAULT_SOURCE', '-Wall', '-Wextra', '-Werror',
+    subprocess.run([shutil.which('clang') or 'cc', '-std=c11', '-D_DEFAULT_SOURCE', '-Wall', '-Wextra', '-Werror',
                     '-fsanitize=address,undefined', '-fno-sanitize-recover=all',
                     '-I', str(ROOT / 'scripts/macos-boot-shims'),
                     str(source), '-o', str(binary)], check=True)
@@ -152,7 +153,7 @@ int main(void) {
 }
 ''')
     binary = tmp_path / 'schedule'
-    subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
+    subprocess.run([shutil.which('clang') or 'cc', '-std=c11', '-Wall', '-Wextra', '-Werror',
                     '-fsanitize=address,undefined', '-fno-sanitize-recover=all',
                     '-I', str(ROOT / 'scripts/macos-boot-shims'), str(source), '-o', str(binary)], check=True)
     subprocess.run([binary], check=True)
