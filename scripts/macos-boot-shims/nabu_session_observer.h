@@ -7,8 +7,9 @@
 #include <stdint.h>
 #include <string.h>
 
-static const unsigned nabu_session_offsets[] = {0, 120, 240, 320};
-static const unsigned nabu_session_auth_offsets[] = {0, 30, 90, 180};
+static const unsigned nabu_session_offsets[] = {0, 120, 240, 320, 480, 660};
+static const unsigned nabu_session_auth_offsets[] = {0, 30, 90, 180, 360, 540};
+#define NABU_SESSION_ROUNDS 6u
 static int
 nabu_session_auth_target(const char *name)
 {
@@ -25,7 +26,7 @@ nabu_session_due(const struct nabu_session_target *target, uint64_t now)
 {
     const unsigned *offsets = nabu_session_auth_target(target->name) ?
         nabu_session_auth_offsets : nabu_session_offsets;
-    return now && target->round < 4 &&
+    return now && target->round < NABU_SESSION_ROUNDS &&
         (!target->round || (now >= target->discovered &&
         now - target->discovered >= UINT64_C(1000000000) * offsets[target->round]));
 }
@@ -54,7 +55,9 @@ nabu_session_enabled(const char *arguments)
 #include <sys/stat.h>
 #include <sys/sysctl.h>
 #include <sys/wait.h>
+#include <sys/reboot.h>
 #include "nabu_observer_output.h"
+#include "nabu_clean_shutdown.h"
 
 extern char **environ;
 
@@ -88,7 +91,7 @@ nabu_session_watch(void)
         fprintf(stderr, "NABU27-SESSION: console open failed errno=%d\n", errno);
     nabu_raw_output_fd = -1;
     nabu_raw_timestamp_ns = nabu_session_clock();
-    nabu_raw_printf("NABU-RAWSTACK startup version=29 pid=%d console_errno=%d\n",
+    nabu_raw_printf("NABU-RAWSTACK startup version=30 pid=%d console_errno=%d\n",
         getpid(), nabu_raw_console_fd < 0 ? errno : 0);
     /* Lock the persistent inode, not a PID file: a reboot automatically
      * releases it and a repeated phase-2 invocation cannot start a second watch. */
@@ -135,12 +138,24 @@ nabu_session_watch(void)
     };
     const unsigned count = sizeof(targets) / sizeof(targets[0]);
     uint64_t started = nabu_session_clock();
+    char bootargs[8192];
+    size_t bootargs_bytes = sizeof(bootargs) - 1;
+    unsigned halt_seconds = 0;
+    if (!sysctlbyname("kern.bootargs", bootargs, &bootargs_bytes, NULL, 0) &&
+        bootargs_bytes < sizeof(bootargs)) {
+        bootargs[bootargs_bytes] = 0;
+        halt_seconds = nabu_clean_shutdown_seconds(bootargs);
+    }
     nabu_raw_timestamp_ns = started;
-    nabu_raw_printf("NABU-RAWSTACK watch begin version=29 timeout=900 rounds=4 "
-        "after_discovery=0,120,240,320 auth_after_discovery=0,30,90,180 "
+    nabu_raw_printf("NABU-RAWSTACK watch begin version=30 timeout=900 rounds=6 "
+        "after_discovery=0,120,240,320,480,660 auth_after_discovery=0,30,90,180,360,540 "
         "disk=/private/var/log/nabu-session27/%s "
         "disk_open_errno=%d mirror=/dev/console readonly=1\n", name, output_error);
+    nabu_raw_printf("NABU-RAWSTACK clean-shutdown configured_seconds=%u opt_in=%u\n",
+        halt_seconds, halt_seconds != 0);
     while (nabu_session_clock() - started < UINT64_C(900000000000)) {
+        if (halt_seconds && nabu_session_clock() - started >=
+            UINT64_C(1000000000) * halt_seconds) break;
         int mib[] = {CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0};
         size_t bytes = 0;
         if (!sysctl(mib, 4, NULL, &bytes, NULL, 0) && bytes && bytes <= 8 * 1024 * 1024) {
@@ -175,7 +190,7 @@ nabu_session_watch(void)
                                 nabu_raw_printf("NABU-RAWSTACK schedule target=%s "
                                     "after_discovery=%s\n", targets[n].name,
                                     nabu_session_auth_target(targets[n].name) ?
-                                    "0,30,90,180" : "0,120,240,320");
+                                    "0,30,90,180,360,540" : "0,120,240,320,480,660");
                             (void)fsync(output);
                             pid_t child = fork();
                             if (!child) {
@@ -202,7 +217,7 @@ nabu_session_watch(void)
             }
         }
         unsigned complete = 0;
-        for (unsigned n = 0; n < count; ++n) complete += targets[n].round == 4;
+        for (unsigned n = 0; n < count; ++n) complete += targets[n].round == NABU_SESSION_ROUNDS;
         if (complete == count) break;
         usleep(500000);
     }
@@ -212,6 +227,18 @@ nabu_session_watch(void)
             targets[n].name, targets[n].round);
     nabu_raw_printf("NABU-RAWSTACK watch end io_errors=%u\n", nabu_raw_io_errors);
     (void)fsync(output);
+    if (halt_seconds) {
+        while (nabu_session_clock() - started < UINT64_C(1000000000) * halt_seconds)
+            usleep(500000);
+        nabu_raw_timestamp_ns = nabu_session_clock();
+        nabu_raw_printf("NABU-RAWSTACK clean-shutdown request sync=1 reboot_flags=RB_HALT\n");
+        (void)fsync(output);
+        alarm(0);
+        int result = nabu_clean_shutdown_request(halt_seconds, sync, reboot, RB_HALT);
+        int error = errno;
+        nabu_raw_printf("NABU-RAWSTACK clean-shutdown returned result=%d errno=%d\n",
+            result, error);
+    }
     if (nabu_raw_console_fd >= 0) close(nabu_raw_console_fd);
     if (output >= 0) close(output);
     close(lock);

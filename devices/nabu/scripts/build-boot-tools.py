@@ -56,6 +56,7 @@ def main():
               'scripts/macos-boot-shims/nabu_raw_stacks.h',
               'scripts/macos-boot-shims/nabu_session_observer.h',
               'scripts/macos-boot-shims/nabu_observer_output.h',
+              'scripts/macos-boot-shims/nabu_clean_shutdown.h',
               'scripts/macos-boot-shims/observer-entitlements.plist',
               'scripts/absent-service/build.py', 'scripts/absent-service/absentd.c',
               'devices/nabu/board.toml', 'devices/nabu/scripts/build-boot-tools.py']

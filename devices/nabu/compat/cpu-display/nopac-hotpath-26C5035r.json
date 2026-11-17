@@ -1,0 +1,76 @@
+{
+  "build": "26C5035r",
+  "cpu": "SM8150 no hardware PAuth",
+  "kernel_policy": "existing nabu_nopac data auth preserves TBI byte and clears bits48..55; PACGA returns source XOR modifier",
+  "scope": "Six exact blocks; twelve trapping AUTD/XPACD/PACGA operations lowered to BFC/XOR. Native comparisons, control flow, branches/returns, memory accesses and general PAC policy retained.",
+  "patches": [
+    {
+      "name": "CF_IS_OBJC::class-auth",
+      "va": "0x184879260",
+      "file": "dyld_shared_cache_arm64e.01",
+      "offset": "0x4479260",
+      "original": "301ac1daf10310aaf147c1da",
+      "replacement": "f01f50b3f10310aaf11f50b3",
+      "page_sha256": "1cd10ce14e69b7291d9aa0546b3ca1fa074816dbe889b43e1b715736b2fcffb2",
+      "patched_page_sha256": "f74f4dd65e4d3876431aedd3589e0ccb65f709fab8c9c495ce70abdde936f2ea",
+      "page_hash_scope": "all nopac-hotpath rules on the same page"
+    },
+    {
+      "name": "CF_IS_OBJC::type-auth",
+      "va": "0x1848792f8",
+      "file": "dyld_shared_cache_arm64e.01",
+      "offset": "0x44792f8",
+      "original": "301ec1daf10310aaf147c1da",
+      "replacement": "f01f50b3f10310aaf11f50b3",
+      "page_sha256": "1cd10ce14e69b7291d9aa0546b3ca1fa074816dbe889b43e1b715736b2fcffb2",
+      "patched_page_sha256": "f74f4dd65e4d3876431aedd3589e0ccb65f709fab8c9c495ce70abdde936f2ea",
+      "page_hash_scope": "all nopac-hotpath rules on the same page"
+    },
+    {
+      "name": "CFCheckCFInfoPACSignature::PACGA-pair",
+      "va": "0x184879378",
+      "file": "dyld_shared_cache_arm64e.01",
+      "offset": "0x4479378",
+      "original": "0831ca9a0830c89a",
+      "replacement": "08010aca080008ca",
+      "page_sha256": "1cd10ce14e69b7291d9aa0546b3ca1fa074816dbe889b43e1b715736b2fcffb2",
+      "patched_page_sha256": "f74f4dd65e4d3876431aedd3589e0ccb65f709fab8c9c495ce70abdde936f2ea",
+      "page_hash_scope": "all nopac-hotpath rules on the same page"
+    },
+    {
+      "name": "CFCheckCFInfoPACSignature_Bridged::class-auth",
+      "va": "0x1848793b8",
+      "file": "dyld_shared_cache_arm64e.01",
+      "offset": "0x44793b8",
+      "original": "301ac1daf10310aaf147c1da",
+      "replacement": "f01f50b3f10310aaf11f50b3",
+      "page_sha256": "1cd10ce14e69b7291d9aa0546b3ca1fa074816dbe889b43e1b715736b2fcffb2",
+      "patched_page_sha256": "f74f4dd65e4d3876431aedd3589e0ccb65f709fab8c9c495ce70abdde936f2ea",
+      "page_hash_scope": "all nopac-hotpath rules on the same page"
+    },
+    {
+      "name": "CFRetain::class-auth",
+      "va": "0x184721070",
+      "file": "dyld_shared_cache_arm64e.01",
+      "offset": "0x4321070",
+      "original": "301ac1daf10310aaf147c1da",
+      "replacement": "f01f50b3f10310aaf11f50b3",
+      "page_sha256": "a1ef28af06392d233bed86f67006d52dc0d1fa6a20e12d07ee52072c37d42a6c",
+      "patched_page_sha256": "3d8c622cc8b7696c430f37c9dd616e3f2d1003c5a189162ee5f4f626192f628c",
+      "page_hash_scope": "all nopac-hotpath rules on the same page"
+    },
+    {
+      "name": "CFRetain::type-auth",
+      "va": "0x18472110c",
+      "file": "dyld_shared_cache_arm64e.01",
+      "offset": "0x432110c",
+      "original": "301ec1daf10310aaf147c1da",
+      "replacement": "f01f50b3f10310aaf11f50b3",
+      "page_sha256": "a1ef28af06392d233bed86f67006d52dc0d1fa6a20e12d07ee52072c37d42a6c",
+      "patched_page_sha256": "3d8c622cc8b7696c430f37c9dd616e3f2d1003c5a189162ee5f4f626192f628c",
+      "page_hash_scope": "all nopac-hotpath rules on the same page"
+    }
+  ],
+  "hardware_tested": false,
+  "measured_speedup": null
+}

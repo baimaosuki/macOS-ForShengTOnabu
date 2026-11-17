@@ -37,7 +37,9 @@ def main():
     session = json.loads((device / 'compat/cpu-display/safe-aperture-26C5035r.json').read_text())
     magnify = json.loads((device / 'compat/cpu-display/magnify-26C5035r.json').read_text())
     disclosure = json.loads((device / 'compat/cpu-display/managed-tcc-26C5035r.json').read_text())
-    for entry in fixture['patches'] + session['patches'] + magnify['patches'] + disclosure['patches']:
+    hotpath = json.loads((device / 'compat/cpu-display/nopac-hotpath-26C5035r.json').read_text())
+    entries = fixture['patches'] + session['patches'] + magnify['patches'] + disclosure['patches'] + hotpath['patches']
+    for entry in entries:
         path = args.cache.with_name(entry['file'])
         offset = int(entry['offset'], 16)
         expected = bytes.fromhex(entry['original'])
@@ -50,8 +52,14 @@ def main():
         setting = '{file},{offset},{original},{replacement}'.format(**dict(entry, offset=entry['offset'][2:]))
         assert setting in configured, 'qualified CPU fixup absent from payload'
         patched = bytearray(original_page)
-        at = offset & 4095
-        patched[at:at + len(expected)] = bytes.fromhex(entry['replacement'])
+        for other in entries:
+            other_offset = int(other['offset'], 16)
+            if other['file'] != entry['file'] or other_offset & ~4095 != offset & ~4095:
+                continue
+            at = other_offset & 4095
+            before = bytes.fromhex(other['original'])
+            assert patched[at:at + len(before)] == before
+            patched[at:at + len(before)] = bytes.fromhex(other['replacement'])
         actual=hashlib.sha256(patched).hexdigest()
         if entry.get('patched_page_sha256'):
             assert actual==entry['patched_page_sha256'],entry['name']

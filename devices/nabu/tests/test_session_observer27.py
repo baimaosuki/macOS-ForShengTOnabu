@@ -147,7 +147,13 @@ int main(void) {
     assert(!nabu_session_due(&target,424*second));
     assert(!nabu_session_due(&target,474*second-1));
     assert(nabu_session_due(&target,474*second));
-    target.round=4;assert(!nabu_session_due(&target,1000*second));
+    target.round=4;
+    assert(!nabu_session_due(&target,start+480*second-1));
+    assert(nabu_session_due(&target,start+480*second));
+    target.round=5;
+    assert(!nabu_session_due(&target,start+660*second-1));
+    assert(nabu_session_due(&target,start+660*second));
+    target.round=6;assert(!nabu_session_due(&target,1000*second));
     const char *auth[]={"authd","authorizationhost","SecurityAgent","usermanagerd"};
     for(unsigned i=0;i<sizeof(auth)/sizeof(*auth);++i) {
         struct nabu_session_target late={auth[i],342*second,0};
@@ -162,7 +168,13 @@ int main(void) {
         late.round=3;
         assert(!nabu_session_due(&late,522*second-1));
         assert(nabu_session_due(&late,522*second));
-        late.round=4;assert(!nabu_session_due(&late,1000*second));
+        late.round=4;
+        assert(!nabu_session_due(&late,702*second-1));
+        assert(nabu_session_due(&late,702*second));
+        late.round=5;
+        assert(!nabu_session_due(&late,882*second-1));
+        assert(nabu_session_due(&late,882*second));
+        late.round=6;assert(!nabu_session_due(&late,1000*second));
     }
     assert(!nabu_session_auth_target("authd-helper"));
     assert(!nabu_session_auth_target("tccd"));
@@ -225,6 +237,37 @@ int main(int argc,char **argv) {
     subprocess.run([binary, str(directory)], check=True)
 
 
+def test_clean_shutdown_requires_explicit_valid_token(tmp_path):
+    source=tmp_path/'shutdown.c'
+    source.write_text(r'''
+#include <assert.h>
+#include <errno.h>
+#include "nabu_clean_shutdown.h"
+static unsigned order;
+static void flush(void){assert(order==0);order=1;}
+static int halt(int flags){assert(order==1&&flags==8);order=2;errno=EPERM;return -1;}
+int main(void){
+ assert(!nabu_clean_shutdown_seconds(0));
+ const char *bad[]={"","nabu-clean-shutdown=0","nabu-clean-shutdown=599",
+  "nabu-clean-shutdown=901","nabu-clean-shutdown=900x","nabu-clean-shutdown=-1",
+  "nabu-clean-shutdown=","nabu-clean-shutdown=99999999999999999999999999",
+  "other-nabu-clean-shutdown=900","nabu-clean-shutdown=900 nabu-clean-shutdown=900"};
+ for(unsigned i=0;i<sizeof(bad)/sizeof(*bad);++i)assert(!nabu_clean_shutdown_seconds(bad[i]));
+ assert(nabu_clean_shutdown_seconds("x=1 nabu-clean-shutdown=900 y=2")==900);
+ assert(nabu_clean_shutdown_seconds("\tnabu-clean-shutdown=600\t")==600);
+ assert(!nabu_clean_shutdown_request(0,flush,halt,8)&&order==0);
+ assert(!nabu_clean_shutdown_request(901,flush,halt,8)&&order==0);
+ assert(nabu_clean_shutdown_request(900,flush,halt,8)==-1&&order==2&&errno==EPERM);
+ return 0;
+}
+''')
+    binary=tmp_path/'shutdown'
+    subprocess.run([shutil.which('clang') or 'cc','-std=c11','-Wall','-Wextra','-Werror',
+        '-fsanitize=address,undefined','-fno-sanitize-recover=all',
+        '-I',str(ROOT/'scripts/macos-boot-shims'),str(source),'-o',str(binary)],check=True)
+    subprocess.run([binary],check=True)
+
+
 if __name__ == '__main__':
     import tempfile
     with tempfile.TemporaryDirectory(prefix='nabu-observer-test-') as directory:
@@ -232,4 +275,5 @@ if __name__ == '__main__':
         test_real_raw_stack_header(work)
         test_observer_schedule_and_gate(work)
         test_repeated_boot_output_files(work)
-    print('Raw reader, independent sinks, repeated clock/PID log creation and late schedule passed (ASan/UBSan).')
+        test_clean_shutdown_requires_explicit_valid_token(work)
+    print('Raw reader, independent sinks, repeated clock/PID output, schedules and opt-in sync/halt passed (ASan/UBSan).')

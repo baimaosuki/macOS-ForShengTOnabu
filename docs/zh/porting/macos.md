@@ -1,5 +1,19 @@
 # macOS 配置
 
+Nabu 在不支持硬件 PAC 的 CPU 上将26C5035r CoreFoundation六处精确代码块降为
+原生指令：五处 `AUTD; MOV; XPACD` 改为 `BFC; MOV; BFC`，按现有模拟器保留
+数据顶字节、清除48..55位；签名检查的两个PACGA改为现有模拟语义的两个XOR。
+共移除12处静态陷入点，保留原比较、访存和控制流。生产C模拟器与AArch64指令
+的5,376组寄存器／SP／NZCV等价测试通过；实际提速尚未测量。
+
+观察器version30加两轮晚采样：普通目标0/120/240/320/480/660秒，认证目标
+0/30/90/180/360/540秒，总观察窗口仍为900秒。独立可选菜单传入
+`nabu-clean-shutdown=900`，等待观察窗口后调用 `sync()` 和 `reboot(RB_HALT)`，
+保留内核文件系统停机路径；普通启动没有定时停机，失败会记录错误。
+这不能证明回滚的未知inode就是LS缓存。APFS Data角色为0x40，0x4是Recovery。
+上游seed本来就未加入System卷组；改变seed容量会改变持久化存储身份，不能当作
+保留现有Data的原地修复。
+
 managedTCC 实机日志确认第八条规则命中，loginwindow 已进入 `NSApplication run`。
 正常登录 worker 调用 `LoginAuthRefMgr login → AuthorizationCopyRights`；另一
 worker 从 `AuthorizationCreate` 推进到清理 Platform SSO 临时用户目录时的

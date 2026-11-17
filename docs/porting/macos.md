@@ -1,5 +1,23 @@
 # macOS profile
 
+Nabu lowers six exact 26C5035r CoreFoundation blocks to native instructions on
+its no-PAuth CPU. Five `AUTD; MOV; XPACD` blocks become `BFC; MOV; BFC`, preserving
+the top data tag and clearing bits 48..55 exactly as the board's emulator does.
+The signature helper's two PACGA operations become the emulator's two XORs.
+This removes twelve static trap sites without changing their comparisons,
+memory operations or control flow. Production C helper versus AArch64 replay
+passes 5,376 register/SP/NZCV cases. Actual performance remains unmeasured.
+
+Observer version 30 adds two late rounds: general offsets are
+0/120/240/320/480/660 seconds, authorization offsets 0/30/90/180/360/540, within
+the existing 900-second watcher deadline. A separate opt-in menu entry passes
+`nabu-clean-shutdown=900`: after this observation interval it calls `sync()`
+and `reboot(RB_HALT)`, retaining the kernel's filesystem shutdown path. Normal
+boot has no timed halt; failure is logged. This does not prove that an unknown
+rolled-back inode was an LS store. APFS Data role is 0x40; 0x4 is Recovery.
+The upstream seed intentionally starts without a System volume group. Changing
+its size changes persistent-store identity and is not an in-place Data repair.
+
 The managedTCC hardware capture confirms the eighth rule applied and
 `loginwindow` reached `NSApplication run`. Its normal-login worker calls
 `LoginAuthRefMgr login -> AuthorizationCopyRights`; another worker has moved
