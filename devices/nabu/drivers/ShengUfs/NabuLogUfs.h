@@ -8,6 +8,7 @@
 static struct nb_log_volume nabu_esp_volume;
 static struct nb_log_journal nabu_esp_journal;
 static unsigned nabu_esp_started, nabu_esp_panic_seen;
+static uint64_t nabu_esp_lun_blocks;
 struct nb_esp_io_context { bool panic; uint64_t deadline; };
 extern "C" {
 volatile unsigned nabu_log_writer_state=0, nabu_log_writer_rounds=0, nabu_log_writer_failures=0;
@@ -20,7 +21,7 @@ static int nabuEspIo (nb_esp_io_context *ctx, unsigned op, uint64_t lba,
 {
   if (!ctx || !gHost.ready || gHost.poisoned || mach_absolute_time () >= ctx->deadline ||
       (!ctx->panic && __atomic_load_n (&nabu_esp_panic_seen, __ATOMIC_ACQUIRE))) return 0;
-  if (op != 2 && (!blocks || blocks > 16 || !bytes || lba >= gHost.blocks || blocks > gHost.blocks-lba)) return 0;
+  if (op != 2 && (!blocks || blocks > 16 || !bytes || lba >= nabu_esp_lun_blocks || blocks > nabu_esp_lun_blocks-lba)) return 0;
   if (op == 1 && (!nb_volume_write_allowed (&nabu_esp_volume,lba,blocks) ||
       !gEspLogOpen || lba < gEspLogFirst || lba-gEspLogFirst >= gEspLogBlocks ||
       blocks > gEspLogBlocks-(lba-gEspLogFirst))) return 0;
@@ -46,6 +47,23 @@ static int nabuEspIo (nb_esp_io_context *ctx, unsigned op, uint64_t lba,
   if (status == kIOReturnSuccess && op == 0) memcpy (bytes,slot.data,blocks*4096);
   if (!ctx->panic) hostSlotGive (slot,true);
   return status == kIOReturnSuccess;
+}
+// The current source transport does not cache LUN capacity in UfsHost.
+// Prove the 4K LUN geometry through a normal free slot before reading GPT.
+static bool nabuEspCapacity (nb_esp_io_context *ctx) {
+  if (!ctx || !gHost.ready || gHost.poisoned || mach_absolute_time () >= ctx->deadline) return false;
+  UfsSlot slot;
+  if (!hostDiagnosticSlotTake (&slot,false)) return false;
+  uint8_t cdb[10]={0x25}; uint32_t scsi=0;
+  IOReturn status=hostScsiDir (slot,0,cdb,10,2,8,1000000,&scsi);
+  uint32_t last=0,size=0;
+  if (status==kIOReturnSuccess) {
+    for (unsigned i=0;i<4;++i) {last=(last<<8)|slot.data[i];size=(size<<8)|slot.data[i+4];}
+  }
+  hostSlotGive (slot,true);
+  if (status!=kIOReturnSuccess || size!=4096 || last==0xffffffffU || last<7) return false;
+  nabu_esp_lun_blocks=uint64_t(last)+1;
+  return true;
 }
 static int nabuEspRead (void *ctx,uint64_t lba,uint32_t blocks,uint8_t *bytes) {
   return nabuEspIo (static_cast<nb_esp_io_context *>(ctx),0,lba,blocks,bytes);
@@ -133,7 +151,12 @@ static void nabuEspThread (void *,wait_result_t) {
     nb_esp_io_context ctx={false,0}; bool opened=false;
     for (unsigned attempt=0;attempt<10 && !nabu_esp_panic_seen;++attempt) {
       clock_interval_to_deadline (5000,kMillisecondScale,&ctx.deadline);
-      if (nb_volume_open (&nabu_esp_volume,nabuEspRead,&ctx,gHost.blocks,token)) {opened=true;break;}
+      if (!nabu_esp_lun_blocks && !nabuEspCapacity (&ctx)) {
+        IOLog ("NABULOG2: LUN capacity unavailable or not 4K; preserving ESP\n");
+        if (!gHost.ready || gHost.poisoned) break;
+        IOSleep (1000);continue;
+      }
+      if (nb_volume_open (&nabu_esp_volume,nabuEspRead,&ctx,nabu_esp_lun_blocks,token)) {opened=true;break;}
       IOLog ("NABULOG2: volume refused reason=%s ready=%u poisoned=%u\n",
              nb_volume_failure_name(nabu_esp_volume.failure),gHost.ready?1:0,gHost.poisoned?1:0);
       if (!gHost.ready || gHost.poisoned) break;

@@ -10,7 +10,7 @@
 static uint8_t nabu_log_build_id[32]={1};
 using IOReturn=unsigned;using wait_result_t=int;using thread_t=void *;
 constexpr unsigned kIOReturnSuccess=0,KERN_SUCCESS=0,kMillisecondScale=1000;
-static struct {bool ready=true,poisoned=false;uint64_t blocks=130000;}gHost;
+static struct {bool ready=true,poisoned=false;}gHost;
 static struct {bool valid=true;uint64_t first=110000,last=129990;}gStoreGeometry;
 static bool gEspLogOpen=true;static uint64_t gEspLogFirst=501,gEspLogBlocks=2050;
 struct UfsSlot {unsigned index;uint8_t *data;};
@@ -20,10 +20,11 @@ static uint64_t mach_absolute_time(){return ++ticks;}
 static void clock_interval_to_deadline(unsigned n,unsigned scale,uint64_t *d){*d=ticks+uint64_t(n)*scale;}
 static bool hostDiagnosticSlotTake(UfsSlot *slot,bool panic){takes++;*slot={panic?15U:0U,dma};return slot_available;}
 static void hostSlotGive(const UfsSlot &,bool pooled){assert(pooled);gives++;}
-static unsigned hostScsiDir(const UfsSlot &slot,unsigned lun,const uint8_t *cdb,unsigned len,unsigned dir,unsigned bytes,unsigned timeout,uint32_t *scsi,void *,unsigned,void *,bool panic){
+static unsigned hostScsiDir(const UfsSlot &slot,unsigned lun,const uint8_t *cdb,unsigned len,unsigned dir,unsigned bytes,unsigned timeout,uint32_t *scsi,void * = nullptr,unsigned = 0,void * = nullptr,bool panic=false){
   scsi_calls++;assert(lun==0 && len==10 && timeout==(panic?250000U:1000000U));
   assert(slot.index==(panic?15U:0U));*scsi=0;
-  if(cdb[0]==0x35)assert(!bytes && !dir);
+  if(cdb[0]==0x25) {assert(dir==2 && bytes==8);const uint8_t cap[8]={0,1,0xfb,0xcf,0,0,0x10,0};memcpy(dma,cap,8);}
+  else if(cdb[0]==0x35)assert(!bytes && !dir);
   else if(cdb[0]==0x2a)assert(cdb[1]==8 && dir==1 && bytes);
   else {assert(cdb[0]==0x28 && dir==2 && bytes);memset(dma,0x5a,bytes);}
   return 0;
@@ -51,7 +52,8 @@ int main(){
  nabu_esp_volume.validated=1;nabu_esp_volume.file_first=500;
  nb_esp_io_context ctx={false,1000000};
  assert(!nabuEspWrite(&ctx,500,1,data) && scsi_calls==0);
- assert(nabuEspWrite(&ctx,501,1,data) && takes==1 && gives==1);
+ assert(nabuEspCapacity(&ctx) && nabu_esp_lun_blocks==130000);
+ assert(nabuEspWrite(&ctx,501,1,data) && takes==2 && gives==2);
  assert(nabuEspRead(&ctx,1,1,data) && data[0]==0x5a && data[4095]==0x5a);
  assert(nabuEspSync(&ctx));
  unsigned before=scsi_calls;
