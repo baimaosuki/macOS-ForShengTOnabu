@@ -54,6 +54,13 @@ def main():
             assert actual==entry['patched_page_sha256'],entry['name']
         checked.append(dict(entry, patched_page_sha256=actual))
     with args.cache.with_name('dyld_shared_cache_arm64e.03').open('rb') as stream:
+        allocation = fixture['cpu_framebuffer_allocation']
+        assert word(stream, 0x18e1e63cc - 0x188400000) == 0x1a981118
+        assert int(allocation['pixel_format'], 16) == 0x42475241
+        assert allocation['superseded_partial_branch_fix'] not in configured
+        final = next(e for e in fixture['patches']
+                     if e['va'] == allocation['final_format_site'])
+        assert final['replacement'] == 'f803082a'  # mov w24, w8: final BGRA before reuse/allocation
         # Both exact NULL branches still restore the caller's stack and jump
         # to the real Server::render_update, which calls sw_renderer itself.
         for site, target in ((0x18df5203c, 0x18e186bec), (0x18df4297c, 0x18e186bec)):
@@ -65,6 +72,9 @@ def main():
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(dict(build='26C5035r', cpu_null_fallback_verified=True,
         native_sw_renderer_unchanged=True, disk_cache_modified=False,
+        final_framebuffer_format_before_reuse_and_allocation=True,
+        superseded_partial_format_branch_removed=True,
+        destination_guard_not_patched=True,
         patches=checked, device_tested=False), indent=2) + '\n')
     print('26C5035r: exact CPU NULL fallback, native software renderer and five signed-text pages verified')
 

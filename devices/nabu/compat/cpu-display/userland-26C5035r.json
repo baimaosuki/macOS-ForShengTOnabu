@@ -21,13 +21,14 @@
       "page_sha256": "429f38cd13e743244bf226d8da3a9fff1aaf209aac43307af65d6a9f832c3395"
     },
     {
-      "name": "IOMFBDisplay::BGRA",
-      "va": "0x18e1e1134",
+      "name": "IOMFBDisplay::CPU-final-framebuffer-BGRA",
+      "va": "0x18e1e63cc",
       "file": "dyld_shared_cache_arm64e.03",
-      "offset": "0x5de1134",
-      "original": "08060037",
-      "replacement": "1f2003d5",
-      "page_sha256": "8870b41a6e8d2ee6fa7db01d83f8425afabfd42dc9b29743d275fc25581bb510"
+      "offset": "0x5de63cc",
+      "original": "1811981a",
+      "replacement": "f803082a",
+      "page_sha256": "534eb22cb60d777d1b8bd1c3bdc2dccae664c7edd5d9172ff7eefb7e72805d90",
+      "patched_page_sha256": "b81dfa5fdaa2e324eecc18fc428953ece166a8b17ff9fe937ff4f06dacba7427"
     },
     {
       "name": "SkyLight::Metal-capability-no-device",
@@ -60,7 +61,17 @@
     "0x18df428bc",
     "0x18df4297c"
   ],
-  "fallback": "SkyLight completes the Metal capability once callback with its static no-device state and selects its original activate_compositor_sw. QuartzCore render_update uses the existing Server::sw_renderer. BGRA8 is selected for the framebuffer and intermediate software pool.",
+  "fallback": "SkyLight completes the Metal capability once callback with its static no-device state and selects its original activate_compositor_sw. QuartzCore render_update uses the existing Server::sw_renderer. IOMFBDisplay current_page_surface selects plain BGRA after all format overrides and before reuse checks/allocation, keeping the actual framebuffer allocation and surface metadata consistent. The intermediate pool uses MTLPixelFormatBGRA8Unorm. The original SkyLight destination format guard remains intact.",
+  "cpu_framebuffer_allocation": {
+    "final_format_site": "0x18e1e63cc",
+    "current_page_surface": "0x18e1e604c",
+    "allocate_surface": "0x18dfd3dc4",
+    "create_surface": "0x18e2002bc",
+    "allocate_iosurface": "0x18e0ed204",
+    "pixel_format": "0x42475241",
+    "superseded_partial_branch_fix": "dyld_shared_cache_arm64e.03,5de1134,08060037,1f2003d5",
+    "native_destination_guard": "0x1826ef888"
+  },
   "skylight_cpu_selection": {
     "capability_callback": "0x1828dfd58",
     "metal_state": "0x1eb1b7638",
