@@ -49,7 +49,7 @@ def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--output',required=True,type=Path);a=p.parse_args()
     out=a.output.resolve();out.mkdir(parents=True,exist_ok=True);source=Path(__file__).resolve().parent
     cc=shutil.which('g++') or shutil.which('clang++');assert cc
-    env=dict(os.environ,ASAN_OPTIONS='detect_leaks=1:abort_on_error=1')
+    env=dict(os.environ,ASAN_OPTIONS='abort_on_error=1')
     (out/'NabuLogBuild.h').write_text('/* test identity is supplied by the harness */\n')
     for name in ('EspLog','RootCommands','EspLogTransport'):
         cmd=[cc,'-std=c++17','-g','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-I'+str(out),str(source/(name+'.cpp')),'-o',str(out/name)]
@@ -58,7 +58,11 @@ def main():
     for mode in range(8):
         path=out/f'media-{mode}.img';first=disk(path,mode)
         with path.open('rb') as f:before=f.read((first+1)*BLOCK);f.seek((first+FILE//BLOCK)*BLOCK);after=hashlib.file_digest(f,'sha256').hexdigest()
-        r=subprocess.run([str(out/'EspLog'),str(path),str(mode)],check=True,capture_output=True,text=True,env=env)
+        r=subprocess.run([str(out/'EspLog'),str(path),str(mode)],capture_output=True,text=True,env=env)
+        (out/f'EspLog-{mode}.log').write_text(r.stdout+r.stderr)
+        if r.returncode:
+            print(r.stdout+r.stderr,flush=True)
+            r.check_returncode()
         with path.open('rb') as f:
             assert f.read(len(before))==before
             f.seek((first+FILE//BLOCK)*BLOCK);assert hashlib.file_digest(f,'sha256').hexdigest()==after
@@ -76,9 +80,15 @@ def main():
             else:assert payload==b'EARLY\n'
         results.append(dict(mode=mode,passed=True,output=r.stdout.strip()))
         path.unlink()
-    r=subprocess.run([str(out/'RootCommands')],check=True,capture_output=True,text=True,env=env)
+    r=subprocess.run([str(out/'RootCommands')],capture_output=True,text=True,env=env)
+    (out/'RootCommands.log').write_text(r.stdout+r.stderr)
+    if r.returncode:
+        print(r.stdout+r.stderr,flush=True);r.check_returncode()
     results.append(dict(name='production UFS commands and window gates',passed=True,output=r.stdout.strip()))
-    r=subprocess.run([str(out/'EspLogTransport')],check=True,capture_output=True,text=True,env=env)
+    r=subprocess.run([str(out/'EspLogTransport')],capture_output=True,text=True,env=env)
+    (out/'EspLogTransport.log').write_text(r.stdout+r.stderr)
+    if r.returncode:
+        print(r.stdout+r.stderr,flush=True);r.check_returncode()
     results.append(dict(name='production ESP adapter',passed=True,output=r.stdout.strip()))
     (out/'verification.json').write_text(json.dumps(dict(passed=True,sanitizers=['address','undefined'],cases=results),indent=2)+'\n')
     print(json.dumps(dict(passed=True,cases=len(results),sanitizers=['address','undefined'])))
