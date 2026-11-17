@@ -32,7 +32,7 @@
 extern int task_read_for_pid(unsigned int, int, unsigned int *);
 #endif
 
-#define NABU_RAW_MAX_FRAMES 32u
+#define NABU_RAW_MAX_FRAMES 64u
 #define NABU_RAW_STACK_WINDOW (UINT64_C(8) * 1024 * 1024)
 #define NABU_RAW_USER_LIMIT (UINT64_C(1) << 39)
 static long nabu_raw_pid;
@@ -42,23 +42,26 @@ static int nabu_raw_output_fd = 2;
 static int nabu_raw_console_fd = -1;
 static unsigned nabu_raw_io_errors;
 
-/* Save the entire record before mirroring it to the ESP-captured console.
- * A mirror failure never discards the persistent copy. */
+/* Attempt both independent sinks. One failed sink must not silence the other. */
 static int
 nabu_raw_emit(const void *record, size_t length)
 {
     const char *bytes = record;
     size_t at = 0;
-    while (at < length) {
+    int delivered = 0;
+    while (nabu_raw_output_fd >= 0 && at < length) {
         ssize_t written = write(nabu_raw_output_fd, bytes + at, length - at);
         if (written < 0 && errno == EINTR) continue;
-        if (written <= 0) { ++nabu_raw_io_errors; return -1; }
+        if (written <= 0) { ++nabu_raw_io_errors; break; }
         at += (size_t)written;
     }
-    if (nabu_raw_console_fd >= 0 && nabu_raw_console_fd != nabu_raw_output_fd &&
-        write(nabu_raw_console_fd, record, length) != (ssize_t)length)
-        ++nabu_raw_io_errors;
-    return (int)length;
+    delivered = at == length;
+    if (nabu_raw_console_fd >= 0 && nabu_raw_console_fd != nabu_raw_output_fd) {
+        if (write(nabu_raw_console_fd, record, length) == (ssize_t)length)
+            delivered = 1;
+        else ++nabu_raw_io_errors;
+    }
+    return delivered ? (int)length : -1;
 }
 
 /* One complete, prefixed fd2 write per record. The kernel's opt-in bounded

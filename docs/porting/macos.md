@@ -1,5 +1,14 @@
 # macOS profile
 
+The Nabu observer reserves a new suffixed log file with exclusive creation on
+every boot. Its early wall-clock second and PID may repeat; an existing log
+must never stop observation or be overwritten. Startup reports precede disk
+setup. Disk writes and the ESP console mirror are independent, so a full disk
+does not silence the console copy. User stacks are bounded to 64 frames.
+The target list also includes `trustd`, `securityd` and `amfid` to follow the
+code-signing trust request captured during `lsd` bootstrap. These are read-only
+diagnostics, not service replacements or a black-screen fix.
+
 The following Nabu hardware capture confirms the SafeAperture rule applied.
 `loginwindow` then waits in `NSApplication init+0x720 -> _NSMagnifyMode ->
 _HIMagnifiedMode -> CFURLCopyResourcePropertyForKey -> _LSCopyServerStore` at

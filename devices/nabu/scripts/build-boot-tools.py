@@ -55,6 +55,7 @@ def main():
     inputs = ['scripts/build-boot-runtime.py', 'scripts/macos-boot-shims/apfs_boot_util.c',
               'scripts/macos-boot-shims/nabu_raw_stacks.h',
               'scripts/macos-boot-shims/nabu_session_observer.h',
+              'scripts/macos-boot-shims/nabu_observer_output.h',
               'scripts/macos-boot-shims/observer-entitlements.plist',
               'scripts/absent-service/build.py', 'scripts/absent-service/absentd.c',
               'devices/nabu/board.toml', 'devices/nabu/scripts/build-boot-tools.py']

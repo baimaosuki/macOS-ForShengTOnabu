@@ -1,5 +1,11 @@
 # macOS 配置
 
+Nabu 观察器每次启动都以排他创建方式保留新的带序号日志；早期系统秒数和 PID
+可能重复，已有日志不能导致抓栈停止或被覆盖。落盘准备前先报告启动状态，磁盘
+写入和 ESP 控制台镜像互不阻断，磁盘满也继续镜像。用户栈上限为 64 帧。
+观察目标增加 `trustd`、`securityd` 和 `amfid`，跟进 lsd 建库期间已捕获的代码
+签名信任请求。此项是只读诊断修复，不替换服务，也不代表黑屏已解决。
+
 后一轮 Nabu 实机日志确认 SafeAperture 规则已命中，loginwindow 随后在
 325、418、498 秒停在 `NSApplication init+0x720 → _NSMagnifyMode →
 _HIMagnifiedMode → CFURLCopyResourcePropertyForKey → _LSCopyServerStore`。

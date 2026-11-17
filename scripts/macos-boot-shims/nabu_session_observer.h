@@ -45,6 +45,7 @@ nabu_session_enabled(const char *arguments)
 #include <sys/stat.h>
 #include <sys/sysctl.h>
 #include <sys/wait.h>
+#include "nabu_observer_output.h"
 
 extern char **environ;
 
@@ -73,28 +74,43 @@ nabu_session_directory(void)
 static int
 nabu_session_watch(void)
 {
+    nabu_raw_console_fd = open("/dev/console", O_WRONLY | O_NOCTTY | O_CLOEXEC | O_NONBLOCK);
+    if (nabu_raw_console_fd < 0)
+        fprintf(stderr, "NABU27-SESSION: console open failed errno=%d\n", errno);
+    nabu_raw_output_fd = -1;
+    nabu_raw_timestamp_ns = nabu_session_clock();
+    nabu_raw_printf("NABU-RAWSTACK startup version=28 pid=%d console_errno=%d\n",
+        getpid(), nabu_raw_console_fd < 0 ? errno : 0);
     /* Lock the persistent inode, not a PID file: a reboot automatically
      * releases it and a repeated phase-2 invocation cannot start a second watch. */
     int directory = nabu_session_directory();
     int lock = directory < 0 ? -1 : openat(directory, "observer.lock",
         O_RDWR | O_CREAT | O_NOFOLLOW | O_CLOEXEC | O_NONBLOCK, 0600);
     struct stat st;
-    if (lock < 0 || fstat(lock, &st) || !S_ISREG(st.st_mode) || st.st_uid ||
-        (st.st_mode & 077) || flock(lock, LOCK_EX | LOCK_NB)) {
+    int lock_ok = lock >= 0 && !fstat(lock, &st);
+    if (lock_ok && (!S_ISREG(st.st_mode) || st.st_uid || (st.st_mode & 077))) {
+        errno = EPERM; lock_ok = 0;
+    }
+    if (!lock_ok || flock(lock, LOCK_EX | LOCK_NB)) {
+        int error = errno;
+        nabu_raw_printf("NABU-RAWSTACK startup disk_lock_failed errno=%d directory=%d lock=%d\n",
+            error, directory, lock);
         if (lock >= 0) close(lock);
         if (directory >= 0) close(directory);
-        fprintf(stderr, "NABU27-SESSION: observer not started: lock/directory errno=%d\n", errno);
+        if (nabu_raw_console_fd >= 0) close(nabu_raw_console_fd);
         return 1;
     }
     char name[96];
-    snprintf(name, sizeof(name), "session-%llu-%d.log",
-        (unsigned long long)time(NULL), getpid());
-    int output = openat(directory, name,
-        O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0600);
+    int output = nabu_observer_output(directory, (unsigned long long)time(NULL),
+        getpid(), name, sizeof(name));
+    int output_error = output < 0 ? errno : 0;
     close(directory);
-    if (output < 0) { close(lock); return 1; }
+    if (output < 0) {
+        nabu_raw_printf("NABU-RAWSTACK startup disk_open_failed errno=%d file=%s fallback=console\n",
+            output_error, name);
+        if (nabu_raw_console_fd < 0) { close(lock); return 1; }
+    }
     nabu_raw_output_fd = output;
-    nabu_raw_console_fd = open("/dev/console", O_WRONLY | O_NOCTTY | O_CLOEXEC);
     int input = open("/dev/null", O_RDONLY);
     if (input >= 0) { dup2(input, STDIN_FILENO); close(input); }
     (void)setsid();
@@ -104,14 +120,15 @@ nabu_session_watch(void)
         {"WindowServer", 0, 0}, {"loginwindow", 0, 0}, {"lsd", 0, 0},
         {"syspolicyd", 0, 0}, {"opendirectoryd", 0, 0},
         {"coreservicesd", 0, 0}, {"launchservicesd", 0, 0},
-        {"backgroundtaskmanagementd", 0, 0}, {"SecurityAgent", 0, 0}
+        {"backgroundtaskmanagementd", 0, 0}, {"SecurityAgent", 0, 0},
+        {"trustd", 0, 0}, {"securityd", 0, 0}, {"amfid", 0, 0}
     };
     const unsigned count = sizeof(targets) / sizeof(targets[0]);
     uint64_t started = nabu_session_clock();
     nabu_raw_timestamp_ns = started;
-    nabu_raw_printf("NABU-RAWSTACK watch begin version=27 timeout=900 rounds=4 "
+    nabu_raw_printf("NABU-RAWSTACK watch begin version=28 timeout=900 rounds=4 "
         "after_discovery=0,120,240,320 disk=/private/var/log/nabu-session27/%s "
-        "mirror=/dev/console readonly=1\n", name);
+        "disk_open_errno=%d mirror=/dev/console readonly=1\n", name, output_error);
     while (nabu_session_clock() - started < UINT64_C(900000000000)) {
         int mib[] = {CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0};
         size_t bytes = 0;
@@ -180,7 +197,8 @@ nabu_session_watch(void)
     nabu_raw_printf("NABU-RAWSTACK watch end io_errors=%u\n", nabu_raw_io_errors);
     (void)fsync(output);
     if (nabu_raw_console_fd >= 0) close(nabu_raw_console_fd);
-    close(output); close(lock);
+    if (output >= 0) close(output);
+    close(lock);
     return 0;
 }
 

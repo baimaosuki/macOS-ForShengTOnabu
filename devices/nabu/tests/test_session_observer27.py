@@ -71,9 +71,9 @@ static int task_info(unsigned task,unsigned flavor,int *out,unsigned *count){ass
 static int mach_vm_read_overwrite(unsigned task,uint64_t at,uint64_t length,uint64_t destination,uint64_t *actual){assert(task==42);reads++;if(dyld_mode&&at>=0x5000){const void *src=0;if(at==0x5000&&length==sizeof(image_data))src=&image_data;else if(at==0x6000&&length==sizeof(image_entry))src=&image_entry;else if(at>=0x7000&&at+length<=0x7000+sizeof(image_commands))src=image_commands+(at-0x7000);assert(src);memcpy((void*)(uintptr_t)destination,src,length);*actual=length;return 0;}assert(length==16);uint64_t *out=(void*)(uintptr_t)destination;*actual=length;if(mode==5){*actual=8;return 0;}if(mode==6)return 1;assert(at>=0x2000&&at<0x3000&&(at&15)==0);frame_calls++;out[0]=(mode==7)?at:mode==8?at+16:at==0x2000?0x2020:0;out[1]=0xfedc000018731234;return 0;}
 static unsigned write_mode, write_calls, mirror_calls;
 static ssize_t fixture_write(int fd,const void *data,size_t n){
- if(fd==9){mirror_calls++;errno=EIO;return -1;}
+ if(fd==9){mirror_calls++;if(write_mode==4)return (ssize_t)n;errno=EIO;return -1;}
  assert(fd==2&&n<=512);
- if(write_mode==3){errno=ENOSPC;return -1;}
+ if(write_mode==3||write_mode==4){errno=ENOSPC;return -1;}
  if(write_mode==1){if(!write_calls++){errno=EINTR;return -1;}size_t part=n<7?n:7;memcpy(output+used,data,part);used+=part;output[used]=0;return part;}
  assert(n>14);assert(!memcmp(data,"NABU-RAWSTACK ",14));assert(((const char*)data)[n-1]=='\n');for(size_t i=0;i+1<n;i++)assert(((const char*)data)[i]!='\n');assert(used+n+1<sizeof(output));memcpy(output+used,data,n);used+=n;output[used]=0;return (ssize_t)n;}
 #define write fixture_write
@@ -90,7 +90,7 @@ int main(void){
  reset(5);assert(!nabu_raw_target(321));assert(!strstr(output," frame ")&&strstr(output,"actual=8")&&strstr(output,"truncated=1"));
  reset(6);assert(!nabu_raw_target(321));assert(!strstr(output," frame ")&&strstr(output,"kr=1"));
  reset(7);assert(!nabu_raw_target(321));assert(frame_calls==3&&strstr(output,"nonascending-fp"));
- reset(8);assert(!nabu_raw_target(321));assert(frame_calls==96&&strstr(output,"reason=frame-limit truncated=1"));
+ reset(8);assert(!nabu_raw_target(321));assert(frame_calls==192&&strstr(output,"reason=frame-limit truncated=1"));
  reset(0);state_fp=0x2001;assert(!nabu_raw_target(321));assert(!reads&&strstr(output,"invalid-fp"));
  reset(0);state_fp=0x1000;assert(!nabu_raw_target(321));assert(!reads);
  reset(0);state_fp=0x1000000000000;assert(!nabu_raw_target(321));assert(!reads);
@@ -107,7 +107,11 @@ assert(!nabu_raw_target(321));assert(strstr(output,"cache slide=0x123000")&&strs
  reset(0);write_mode=2;nabu_raw_console_fd=9;nabu_raw_io_errors=0;
  assert(nabu_raw_printf("disk-before-mirror=1\n")>0);assert(strstr(output,"disk-before-mirror=1\n")&&mirror_calls==1&&nabu_raw_io_errors==1);
  reset(0);write_mode=3;mirror_calls=0;nabu_raw_io_errors=0;
- assert(nabu_raw_printf("disk-failure=1\n")==-1);assert(!used&&!mirror_calls&&nabu_raw_io_errors==1);
+ assert(nabu_raw_printf("disk-failure=1\n")==-1);assert(!used&&mirror_calls==1&&nabu_raw_io_errors==2);
+ reset(0);write_mode=4;mirror_calls=0;nabu_raw_io_errors=0;
+ assert(nabu_raw_printf("disk-failed-console-kept=1\n")>0);assert(!used&&mirror_calls==1&&nabu_raw_io_errors==1);
+ reset(0);nabu_raw_output_fd=-1;mirror_calls=0;nabu_raw_io_errors=0;
+ assert(nabu_raw_printf("console-only=1\n")>0);assert(!used&&mirror_calls==1&&!nabu_raw_io_errors);
  return 0;
 }
 '''
@@ -159,10 +163,55 @@ int main(void) {
     subprocess.run([binary], check=True)
 
 
+def test_repeated_boot_output_files(tmp_path):
+    source = tmp_path / 'output.c'
+    source.write_text(r'''
+#include <assert.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <string.h>
+#include "nabu_observer_output.h"
+int main(int argc,char **argv) {
+    assert(argc==2);
+    int dir=open(argv[1],O_RDONLY|O_DIRECTORY);assert(dir>=0);
+    const unsigned long long time=1794824455ULL;const pid_t pid=8;
+    const char *legacy="session-1794824455-8.log";
+    int old=openat(dir,legacy,O_CREAT|O_WRONLY|O_EXCL,0600);assert(old>=0);
+    assert(write(old,"previous-boot",13)==13);close(old);
+    /* Reproduce the previous production failure with the frozen clock/PID. */
+    errno=0;old=openat(dir,legacy,O_CREAT|O_WRONLY|O_EXCL,0600);assert(old<0&&errno==EEXIST);
+    char names[3][96];
+    for(unsigned i=0;i<3;i++) {
+        int fd=nabu_observer_output(dir,time,pid,names[i],sizeof(names[i]));assert(fd>=0);
+        assert(write(fd,"current-boot",12)==12);
+        struct stat st;assert(!fstat(fd,&st)&&S_ISREG(st.st_mode)&&(st.st_mode&0777)==0600);
+        close(fd);for(unsigned j=0;j<i;j++)assert(strcmp(names[i],names[j]));
+    }
+    old=openat(dir,legacy,O_RDONLY);char bytes[32]={0};assert(read(old,bytes,32)==13);
+    assert(!memcmp(bytes,"previous-boot",13));close(old);
+    assert(!symlinkat(legacy,dir,"session-1794824455-8-3.log"));
+    char name[96];int fd=nabu_observer_output(dir,time,pid,name,sizeof(name));assert(fd>=0);
+    assert(!strcmp(name,"session-1794824455-8-4.log"));close(fd);
+    assert(nabu_observer_output(dir,time,pid,name,4)<0&&errno==ENAMETOOLONG);
+    assert(nabu_observer_output(-1,time,pid,name,sizeof(name))<0&&errno==EBADF);
+    close(dir);return 0;
+}
+''')
+    binary = tmp_path / 'output'
+    subprocess.run([shutil.which('clang') or 'cc', '-std=c11', '-D_DEFAULT_SOURCE',
+                    '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined',
+                    '-fno-sanitize-recover=all', '-I', str(ROOT / 'scripts/macos-boot-shims'),
+                    str(source), '-o', str(binary)], check=True)
+    directory = tmp_path / 'repeated-boots'
+    directory.mkdir()
+    subprocess.run([binary, str(directory)], check=True)
+
+
 if __name__ == '__main__':
     import tempfile
     with tempfile.TemporaryDirectory(prefix='nabu-observer-test-') as directory:
         work = Path(directory)
         test_real_raw_stack_header(work)
         test_observer_schedule_and_gate(work)
-    print('Production raw reader, output failure handling and late schedule passed (ASan/UBSan).')
+        test_repeated_boot_output_files(work)
+    print('Raw reader, independent sinks, repeated clock/PID log creation and late schedule passed (ASan/UBSan).')
