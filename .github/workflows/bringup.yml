@@ -89,6 +89,8 @@ jobs:
             out/nabu/**/esp-log-verification/verification.json
             out/nabu/**/lockdown-public-verification/verification.json
             out/nabu/**/lockdown-public-verification/handler.log
+            out/nabu/**/windowserver-abort-verification/verification.json
+            out/nabu/**/windowserver-abort-verification/selection.log
             out/nabu/**/tree/build/**/report.json
             out/nabu/**/tree/build/**/build-report.json
             out/nabu/**/tree/build/**/qualification.json

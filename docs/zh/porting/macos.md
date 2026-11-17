@@ -270,3 +270,5 @@ scripts/package.sh --os macos-27 --uefi ../uefi-<device>
 `porting.toml` 的 `device.os_profile` 等于 `board.os_profile`，即板子的默认 profile。
 服务多个 profile 的板子只保留一份记录：把 macOS 的配置、发现和证据写入相同的范围，
 并在每一项中写明 profile 和构建号。见[移植记录](/zh/porting/records)。
+
+Nabu 沿用 SHENG 的 `no-lc=1` 调试选项，使自带可信 daemon 替身能承接 launchd 任务。WindowServer 前三次普通 SIGABRT 退出会在生成 corpse 前将实际退出线程的用户栈和共享缓存 slide 写入现有 ESP 日志；保留原信号与服务重启行为。抓栈本身不表示已定位或消除 abort。

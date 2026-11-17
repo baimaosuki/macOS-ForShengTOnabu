@@ -1,0 +1,51 @@
+--- a/bsd/kern/kern_exit.c
++++ b/bsd/kern/kern_exit.c
+@@ -1974,7 +1974,7 @@
+ #if NABU_ARM64E_COMPAT
+ /* This runs while the exiting task is still current and faultable. Keep the
+  * real panic policy; capture the abort origin before coredump/sync/panic. */
+-static void
++__attribute__((noinline)) static void
+ nabu_critical_user_context(proc_t p, int rv)
+ {
+ 	if (p != current_proc()) return;
+@@ -2006,6 +2006,27 @@
+ 	}
+ 	nabu_log_checkpoint();
+ }
++
++/* SHENG's exit() trace misses fatal signals. Capture the real aborting
++ * thread before corpse creation; never change the signal/restart policy. */
++__attribute__((noinline)) static void
++nabu_windowserver_abort_context(proc_t p, int rv)
++{
++	static _Atomic unsigned captured;
++	if (p != current_proc() || WTERMSIG(rv) != SIGABRT ||
++	    strcmp(p->p_name, "WindowServer") != 0) return;
++	unsigned slot = atomic_load_explicit(&captured, memory_order_relaxed);
++	do {
++		if (slot >= 3) return;
++	} while (!atomic_compare_exchange_weak_explicit(&captured, &slot, slot + 1,
++	    memory_order_relaxed, memory_order_relaxed));
++	char *description = exit_reason_get_string_desc(p->p_exit_reason);
++	printf("NABU-WS-ABORT: capture=%u/3 namespace=%u code=0x%llx description=%.256s\n",
++	    slot + 1, p->p_exit_reason ? p->p_exit_reason->osr_namespace : 0,
++	    p->p_exit_reason ? p->p_exit_reason->osr_code : 0,
++	    description ? description : "none");
++	nabu_critical_user_context(p, rv);
++}
+ #endif
+ 
+ static void
+@@ -2097,6 +2118,11 @@
+ 	boot_progress_exit(proc_getpid(p),p->p_name,rv,
+ 	    p->p_exit_reason ? p->p_exit_reason->osr_namespace : 0,
+ 	    p->p_exit_reason ? p->p_exit_reason->osr_code : 0);
++
++#if NABU_ARM64E_COMPAT
++	if (p->p_crash_behavior == 0 && p != initproc)
++		nabu_windowserver_abort_context(p, rv);
++#endif
+ 
+ 	if (p->p_crash_behavior != 0 || p == initproc) {
+ 		proc_handle_critical_exit(p, rv);

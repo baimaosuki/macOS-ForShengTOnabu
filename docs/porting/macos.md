@@ -294,3 +294,5 @@ that fails.
 profile of the board. A board that serves several profiles keeps one record:
 write the macOS configuration, findings and evidence into the same areas and
 name the profile and build in each entry. See [porting records](/porting/records).
+
+Nabu uses SHENG’s `no-lc=1` bring-up option so owner-trusted daemon stand-ins can satisfy launchd jobs. Its first three ordinary WindowServer SIGABRT exits record the aborting user stack and shared-cache slide to the existing ESP journal before corpse creation; service restart and signal handling retain their original behavior. This capture does not diagnose or suppress the abort.

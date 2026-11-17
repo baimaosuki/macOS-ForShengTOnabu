@@ -9,3 +9,4 @@ device:compat/pac/debug-return-address.patch
 soc:patches/xnu/sm8150-cold-start.patch
 device:compat/pac/kernel-cache-fixups.patch
 esp-log-critical-exit.patch
+esp-log-windowserver-abort.patch
