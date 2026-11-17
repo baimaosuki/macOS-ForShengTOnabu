@@ -1,5 +1,17 @@
 # macOS profile
 
+The managedTCC hardware capture confirms the eighth rule applied and
+`loginwindow` reached `NSApplication run`. Its normal-login worker calls
+`LoginAuthRefMgr login -> AuthorizationCopyRights`; another worker has moved
+from `AuthorizationCreate` to the OpenDirectory user query used by temporary
+Platform SSO home cleanup. These are distinct from the native main event loop.
+Observer version 29 adds the missing `authd`, `authorizationhost` and
+`usermanagerd` targets. They and `SecurityAgent` use 0, 30, 90 and 180 seconds
+after discovery; other targets retain 0, 120, 240 and 320. Each target reports
+its schedule. This only gathers read-only evidence: the 465-second capture
+does not yet establish an authd deadlock, successful authentication or desktop
+pixels, and its SecurityAgent has only one snapshot before exiting with 0.
+
 The next Nabu capture has working observer output. At 294, 414 and 494
 seconds, `loginwindow` has identical registers, captured frames and CPU times
 in `NSApplication init+0x734 -> TCCAccessLaunchDisclosurePromptIfNeeded ->

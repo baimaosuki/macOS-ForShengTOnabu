@@ -8,6 +8,13 @@
 #include <string.h>
 
 static const unsigned nabu_session_offsets[] = {0, 120, 240, 320};
+static const unsigned nabu_session_auth_offsets[] = {0, 30, 90, 180};
+static int
+nabu_session_auth_target(const char *name)
+{
+    return !strcmp(name, "authd") || !strcmp(name, "authorizationhost") ||
+        !strcmp(name, "SecurityAgent") || !strcmp(name, "usermanagerd");
+}
 struct nabu_session_target {
     const char *name;
     uint64_t discovered;
@@ -16,9 +23,11 @@ struct nabu_session_target {
 static int
 nabu_session_due(const struct nabu_session_target *target, uint64_t now)
 {
+    const unsigned *offsets = nabu_session_auth_target(target->name) ?
+        nabu_session_auth_offsets : nabu_session_offsets;
     return now && target->round < 4 &&
         (!target->round || (now >= target->discovered &&
-        now - target->discovered >= UINT64_C(1000000000) * nabu_session_offsets[target->round]));
+        now - target->discovered >= UINT64_C(1000000000) * offsets[target->round]));
 }
 
 /* Match complete boot-argument tokens, not substrings or later false values. */
@@ -79,7 +88,7 @@ nabu_session_watch(void)
         fprintf(stderr, "NABU27-SESSION: console open failed errno=%d\n", errno);
     nabu_raw_output_fd = -1;
     nabu_raw_timestamp_ns = nabu_session_clock();
-    nabu_raw_printf("NABU-RAWSTACK startup version=28 pid=%d console_errno=%d\n",
+    nabu_raw_printf("NABU-RAWSTACK startup version=29 pid=%d console_errno=%d\n",
         getpid(), nabu_raw_console_fd < 0 ? errno : 0);
     /* Lock the persistent inode, not a PID file: a reboot automatically
      * releases it and a repeated phase-2 invocation cannot start a second watch. */
@@ -121,13 +130,15 @@ nabu_session_watch(void)
         {"syspolicyd", 0, 0}, {"opendirectoryd", 0, 0},
         {"coreservicesd", 0, 0}, {"launchservicesd", 0, 0},
         {"backgroundtaskmanagementd", 0, 0}, {"SecurityAgent", 0, 0},
-        {"trustd", 0, 0}, {"securityd", 0, 0}, {"amfid", 0, 0}
+        {"trustd", 0, 0}, {"securityd", 0, 0}, {"amfid", 0, 0},
+        {"authd", 0, 0}, {"authorizationhost", 0, 0}, {"usermanagerd", 0, 0}
     };
     const unsigned count = sizeof(targets) / sizeof(targets[0]);
     uint64_t started = nabu_session_clock();
     nabu_raw_timestamp_ns = started;
-    nabu_raw_printf("NABU-RAWSTACK watch begin version=28 timeout=900 rounds=4 "
-        "after_discovery=0,120,240,320 disk=/private/var/log/nabu-session27/%s "
+    nabu_raw_printf("NABU-RAWSTACK watch begin version=29 timeout=900 rounds=4 "
+        "after_discovery=0,120,240,320 auth_after_discovery=0,30,90,180 "
+        "disk=/private/var/log/nabu-session27/%s "
         "disk_open_errno=%d mirror=/dev/console readonly=1\n", name, output_error);
     while (nabu_session_clock() - started < UINT64_C(900000000000)) {
         int mib[] = {CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0};
@@ -160,6 +171,11 @@ nabu_session_watch(void)
                             nabu_raw_timestamp_ns = now;
                             nabu_raw_printf("NABU-RAWSTACK watch target=%s pid=%d path=%.160s\n",
                                 targets[n].name, pid, path);
+                            if (!targets[n].round)
+                                nabu_raw_printf("NABU-RAWSTACK schedule target=%s "
+                                    "after_discovery=%s\n", targets[n].name,
+                                    nabu_session_auth_target(targets[n].name) ?
+                                    "0,30,90,180" : "0,120,240,320");
                             (void)fsync(output);
                             pid_t child = fork();
                             if (!child) {

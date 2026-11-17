@@ -148,6 +148,24 @@ int main(void) {
     assert(!nabu_session_due(&target,474*second-1));
     assert(nabu_session_due(&target,474*second));
     target.round=4;assert(!nabu_session_due(&target,1000*second));
+    const char *auth[]={"authd","authorizationhost","SecurityAgent","usermanagerd"};
+    for(unsigned i=0;i<sizeof(auth)/sizeof(*auth);++i) {
+        struct nabu_session_target late={auth[i],342*second,0};
+        assert(nabu_session_due(&late,late.discovered));
+        late.round=1;
+        assert(!nabu_session_due(&late,late.discovered-1));
+        assert(!nabu_session_due(&late,372*second-1));
+        assert(nabu_session_due(&late,372*second));
+        late.round=2;
+        assert(!nabu_session_due(&late,432*second-1));
+        assert(nabu_session_due(&late,432*second));
+        late.round=3;
+        assert(!nabu_session_due(&late,522*second-1));
+        assert(nabu_session_due(&late,522*second));
+        late.round=4;assert(!nabu_session_due(&late,1000*second));
+    }
+    assert(!nabu_session_auth_target("authd-helper"));
+    assert(!nabu_session_auth_target("tccd"));
     assert(nabu_session_enabled("a=1 nabu-session-observer=1 z=3"));
     assert(nabu_session_enabled("\tnabu-session-observer=1\t"));
     const char *bad[]={""," ","nabu-session-observer=0","nabu-session-observer=10",

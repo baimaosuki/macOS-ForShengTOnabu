@@ -1,5 +1,14 @@
 # macOS 配置
 
+managedTCC 实机日志确认第八条规则命中，loginwindow 已进入 `NSApplication run`。
+正常登录 worker 调用 `LoginAuthRefMgr login → AuthorizationCopyRights`；另一
+worker 从 `AuthorizationCreate` 推进到清理 Platform SSO 临时用户目录时的
+OpenDirectory 用户查询。这些线程与主事件循环不同。观察器 version29 补上
+`authd`、`authorizationhost`、`usermanagerd`；这三者和 `SecurityAgent` 在发现后
+0、30、90、180 秒抓栈，其他目标保留0、120、240、320秒，各自打印时间表。
+此改动仅补齐只读证据：当前日志到465秒，不能证明authd死锁、认证成功或桌面
+有像素；SecurityAgent退出0，但仅抓到其启动阶段一轮栈。
+
 最新 Nabu 实机观察器已正常输出。294、414、494 秒的 loginwindow 主线程
 寄存器、已捕获栈和 CPU 时间相同，停在 `NSApplication init+0x734 →
 TCCAccessLaunchDisclosurePromptIfNeeded → _tccd_send_message →
