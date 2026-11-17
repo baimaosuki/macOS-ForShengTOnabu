@@ -1,5 +1,11 @@
 # GopFramebuffer
 
+NABU CPU bring-up logs each submitted plane's full descriptor mapping, source
+RGB/alpha and composed RGB/alpha. The boot framebuffer is write-combined.
+Bounded eight-row red/yellow/cyan probes mark mapping/power/black-frame stages;
+the first nonblack CPU frame permanently stops probe writes for that boot.
+Probe visibility and desktop output still require device validation.
+
 UEFI GOP framebuffer and MobileFramebuffer integration.
 
 CPU and GPU scanout are supported. With `vsync=<Hz>`, a work-loop timer sends the MobileFramebuffer vsync message to the compositor.

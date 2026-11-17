@@ -20,10 +20,10 @@ nabu_clean_shutdown_seconds(const char *args)
         if (++seen != 1) return 0;
         unsigned value = 0;
         for (size_t i = sizeof(key) - 1; i < length; ++i) {
-            if (start[i] < '0' || start[i] > '9' || value > 900) return 0;
+            if (start[i] < '0' || start[i] > '9' || value > 1800) return 0;
             value = value * 10 + (unsigned)(start[i] - '0');
         }
-        if (value < 600 || value > 900) return 0;
+        if (value < 600 || value > 1800) return 0;
         selected = value;
     }
     return selected;
@@ -34,7 +34,7 @@ static int
 nabu_clean_shutdown_request(unsigned seconds, void (*flush)(void),
     int (*halt)(int), int halt_flags)
 {
-    if (seconds < 600 || seconds > 900) return 0;
+    if (seconds < 600 || seconds > 1800) return 0;
     flush();
     return halt(halt_flags);
 }

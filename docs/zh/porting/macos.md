@@ -1,5 +1,24 @@
 # macOS 配置
 
+P0/P1/P2 更新在 GOP 顶部八行增加红（映射）、黄（上电成功）、青（黑帧）
+色条，首次真实非黑软件帧后停止覆盖；驱动启动时机取决于实机，不能承诺 50 秒。
+完整提交描述符映射到 kernel_task 并验证全部长度，没有首物理段读取或默认空表面
+替换。输出采用 write-combine 映射和完成屏障，逐帧记录源及最终 RGB/Alpha。
+UFS 接管不改全局 sCR0 或无关显示流项。
+
+NABU commpage 明确屏蔽 SHA3、SHA512、FCMA 发布，保留 SHA256。原机制已读取
+硬件能力寄存器，不能断言此前虚报。成功的 crypto 模拟不再打印。纯寄存器 PAC
+直接更新目标，避免两轮全寄存器复制，成功退休清除 SPSR.SS。带内存访问的认证
+加载保留原可恢复访问路径。本轮是 C 分派优化，尚未删除汇编 SIMD 上下文保存，
+未测实机加速，也不承诺用户态/内核态时间比例。
+
+v32 以两倍探测大小加 64 KiB（最大 8 MiB）读取进程表，ENOMEM 最多五次。
+每十秒不跟随符号链接地检查系统 LS 目录；真实普通 .csstore >=4 MiB 后执行
+fsync 和间隔两秒的两次 sync，每次启动仅一次。体积阈值不代表初始化完成。
+观察器保持到 1800 秒，默认 sync/sleep/sync 后 reboot(0)，不使用 RB_NOSYNC。
+显式 600..1800 秒 halt 参数优先。本轮明确将启用观察器的普通启动改为三十分钟
+后正常重启；sync 本身不等于干净卸载。没有向 Data 镜像导入机器绑定的缓存。
+
 coldstart 完整日志到 933 秒。WindowServer 159 在
 `CompositorSW -> CGLayerKitFetch -> CARenderOGLRender -> prepare_layers_roi`
 因 `r.update()->_backdrop_invalidations_finalized` 断言退出。

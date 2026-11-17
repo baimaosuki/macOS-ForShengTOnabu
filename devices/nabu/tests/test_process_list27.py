@@ -31,7 +31,7 @@ static int sysctl(int *mib, unsigned count, void *out, size_t *n, void *in, size
         *n=mode==5 ? SIZE_MAX : 20*sizeof(struct kinfo_proc); return 0;
     }
     ++fetches;
-    assert(*n==40*sizeof(struct kinfo_proc));
+    assert(*n==40*sizeof(struct kinfo_proc)+65536);
     if (mode==2 || (mode==1 && fetches<=3)) {
         memset(out,0x55,*n); *n+=sizeof(struct kinfo_proc); errno=ENOMEM; return -1;
     }
@@ -72,3 +72,8 @@ int main(void) {
     subprocess.run([compiler, '-Wall', '-Wextra', '-Werror', '-fsanitize=address,undefined',
                     '-I', str(ROOT / 'scripts/macos-boot-shims'), str(source), '-o', str(output)], check=True)
     subprocess.run([str(output)], check=True)
+
+if __name__ == "__main__":
+    import tempfile
+    with tempfile.TemporaryDirectory() as work:
+        test_snapshot_growth_and_errors(Path(work))

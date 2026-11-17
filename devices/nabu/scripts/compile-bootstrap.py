@@ -50,6 +50,9 @@ def main():
                     '--output', str(ctx.work / 'windowserver-abort-verification')], check=True)
     subprocess.run([sys.executable, str(ROOT / 'devices/nabu/drivers/ShengUfs/tests/check_esp_log.py'),
                     '--output', str(ctx.work / 'esp-log-verification')], check=True)
+    subprocess.run([sys.executable, str(ROOT / 'devices/nabu/tests/test_gpr_dispatch27.py'),
+                    '--xnu', str(ctx.tree / '.cache/xnu-work'),
+                    '--output', str(ctx.work / 'gpr-dispatch-verification')], check=True)
     env = dict(os.environ)
     env.update(kernel.xnu_env(ctx))
     env.update(kernel.version_env(modules, ctx))

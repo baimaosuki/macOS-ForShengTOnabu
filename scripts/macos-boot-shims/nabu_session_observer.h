@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: MIT
- * Opt-in, read-only observation of the native macOS session. It does not
+ * Opt-in observation of the native macOS session, LS-store sync and a bounded
+ * clean reboot. It does not
  * substitute an XPC reply, suspend a target or alter rendering/service policy.
  */
 #ifndef NABU_SESSION_OBSERVER_H
@@ -59,6 +60,7 @@ nabu_session_enabled(const char *arguments)
 #include "nabu_observer_output.h"
 #include "nabu_clean_shutdown.h"
 #include "nabu_process_list.h"
+#include "nabu_store_sync.h"
 
 extern char **environ;
 
@@ -92,7 +94,7 @@ nabu_session_watch(void)
         fprintf(stderr, "NABU27-SESSION: console open failed errno=%d\n", errno);
     nabu_raw_output_fd = -1;
     nabu_raw_timestamp_ns = nabu_session_clock();
-    nabu_raw_printf("NABU-RAWSTACK startup version=31 pid=%d console_errno=%d\n",
+    nabu_raw_printf("NABU-RAWSTACK startup version=32 pid=%d console_errno=%d\n",
         getpid(), nabu_raw_console_fd < 0 ? errno : 0);
     /* Lock the persistent inode, not a PID file: a reboot automatically
      * releases it and a repeated phase-2 invocation cannot start a second watch. */
@@ -128,7 +130,7 @@ nabu_session_watch(void)
     if (input >= 0) { dup2(input, STDIN_FILENO); close(input); }
     (void)setsid();
     signal(SIGALRM, SIG_DFL);
-    alarm(960); /* A failed observer can never delay the mount boot task. */
+    alarm(1860); /* A failed observer can never delay the mount boot task. */
     struct nabu_session_target targets[] = {
         {"WindowServer", 0, 0}, {"loginwindow", 0, 0}, {"lsd", 0, 0},
         {"syspolicyd", 0, 0}, {"opendirectoryd", 0, 0},
@@ -148,15 +150,22 @@ nabu_session_watch(void)
         halt_seconds = nabu_clean_shutdown_seconds(bootargs);
     }
     nabu_raw_timestamp_ns = started;
-    nabu_raw_printf("NABU-RAWSTACK watch begin version=31 timeout=900 rounds=6 "
+    nabu_raw_printf("NABU-RAWSTACK watch begin version=32 timeout=1800 rounds=6 "
         "after_discovery=0,120,240,320,480,660 auth_after_discovery=0,30,90,180,360,540 "
         "disk=/private/var/log/nabu-session27/%s "
         "disk_open_errno=%d mirror=/dev/console readonly=1\n", name, output_error);
     nabu_raw_printf("NABU-RAWSTACK clean-shutdown configured_seconds=%u opt_in=%u\n",
         halt_seconds, halt_seconds != 0);
-    while (nabu_session_clock() - started < UINT64_C(900000000000)) {
+    uint64_t last_store_poll = 0;
+    int store_synced = 0;
+    while (nabu_session_clock() - started < UINT64_C(1800000000000)) {
         if (halt_seconds && nabu_session_clock() - started >=
             UINT64_C(1000000000) * halt_seconds) break;
+        uint64_t poll_now = nabu_session_clock();
+        if (!store_synced && (!last_store_poll || poll_now-last_store_poll >= UINT64_C(10000000000))) {
+            last_store_poll = poll_now;
+            store_synced = nabu_store_sync("/private/var/folders/zz/zyxvpxvq6csfxvn_n0000000000000/0/com.apple.LaunchServices.dv/");
+        }
         size_t bytes = 0;
         struct kinfo_proc *processes = nabu_session_process_list(&bytes);
         if (processes) {
@@ -208,10 +217,10 @@ nabu_session_watch(void)
                 }
             }
             free(processes);
-        } else nabu_raw_printf("NABU-RAWSTACK process-list errno=%d bytes=%zu retries=5 capacity_factor=2\n", errno, bytes);
+        } else nabu_raw_printf("NABU-RAWSTACK process-list errno=%d bytes=%zu retries=5 capacity_factor=2 slack=65536\n", errno, bytes);
         unsigned complete = 0;
         for (unsigned n = 0; n < count; ++n) complete += targets[n].round == NABU_SESSION_ROUNDS;
-        if (complete == count) break;
+        (void)complete; /* Remain alive for store persistence and the clean reboot deadline. */
         usleep(500000);
     }
     nabu_raw_timestamp_ns = nabu_session_clock();
@@ -231,6 +240,14 @@ nabu_session_watch(void)
         int error = errno;
         nabu_raw_printf("NABU-RAWSTACK clean-shutdown returned result=%d errno=%d\n",
             result, error);
+    }
+    if (!halt_seconds) {
+        nabu_raw_printf("NABU-RAWSTACK clean-reboot request timeout=1800 sync=2 reboot_flags=0\n");
+        if (output >= 0) (void)fsync(output);
+        sync(); sleep(2); sync();
+        alarm(0);
+        int result = reboot(0);
+        nabu_raw_printf("NABU-RAWSTACK clean-reboot returned result=%d errno=%d\n", result, errno);
     }
     if (nabu_raw_console_fd >= 0) close(nabu_raw_console_fd);
     if (output >= 0) close(output);

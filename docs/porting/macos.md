@@ -1,5 +1,34 @@
 # macOS profile
 
+The P0/P1/P2 NABU update adds bounded RGB stage bars to the top eight GOP
+rows (red mapping, yellow successful power-on, cyan black frame). They stop at
+the first nonblack software frame. Mapping time is hardware-dependent; there
+is no promised 50-second checkpoint. The full submitted descriptor is mapped
+into kernel_task and its entire length checked; no first-segment shortcut or
+substitution with the default surface is used. Output uses write-combine plus
+a completion barrier. Source and final RGB/alpha counts are logged each frame.
+UFS takeover leaves global sCR0 and unrelated display stream mappings untouched.
+
+The NABU commpage explicitly suppresses SHA3, SHA512 and FCMA capability
+publication; SHA256 remains available. Hardware feature discovery already
+checks CPU registers, so this does not prove prior false advertising. Successful
+crypto emulation no longer prints. Pure register PAC operations update their
+destination directly instead of copying all 31 registers twice, and successful
+emulation clears SPSR.SS. Authenticated memory loads retain the fault-aware
+original path. This is a C dispatch optimization: the assembly SIMD context
+spill has not been removed, and no device speedup is claimed.
+
+Observer v32 allocates twice the process probe plus 64 KiB, bounded at 8 MiB,
+with five ENOMEM attempts. Every ten seconds it inspects the system LS-store
+directory without following symlinks. An actual regular .csstore >=4 MiB triggers
+file fsync and two sync calls separated by two seconds, once per boot. The size
+trigger does not mean initialization finished. The watch remains alive through
+1800 seconds and by default performs sync/sleep/sync and reboot(0), never
+RB_NOSYNC. The existing explicit 600..1800-second halt argument overrides this
+reboot. This deliberately changes ordinary observer-enabled boots to restart
+after 30 minutes. Only clean shutdown/unmount, not sync alone, can close the
+filesystem lifecycle. No machine-bound store is imported into a Data seed.
+
 The coldstart capture extends to 933 seconds. WindowServer 159 aborts in
 `CompositorSW -> CGLayerKitFetch -> CARenderOGLRender -> prepare_layers_roi`
 on `r.update()->_backdrop_invalidations_finalized`. `CGLayerKitFetch` passes

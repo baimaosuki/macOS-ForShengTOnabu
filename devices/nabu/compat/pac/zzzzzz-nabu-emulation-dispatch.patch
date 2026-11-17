@@ -1,0 +1,149 @@
+--- a/osfmk/arm64/nabu_v82_emul.c
++++ b/osfmk/arm64/nabu_v82_emul.c
+@@ -88,6 +88,7 @@
+ #include <arm64/proc_reg.h>             /* ESR_EC(), PSR64_IS_USER()        */
+ #include <arm64/nabu_v82_emul.h>
+ #include <arm64/nabu_nopac.h>
++#include <arm64/nabu_gpr_fast.h>
+ #include <arm64/nabu_el0_sysreg.h>
+ 
+ #if defined(ARM64_BOARD_CONFIG_NABU)
+@@ -531,7 +532,7 @@
+  * and the fault path agree on the answer.
+  */
+ static int nabu_v82_emul_enable_state;          /* 0 unresolved, 1 on, -1 off */
+-static bool nabu_v82_emul_reported_emulated;    /* one-shot diagnostics        */
++    /* one-shot diagnostics        */
+ static bool nabu_v82_emul_reported_unsupported;
+ 
+ static bool
+@@ -649,20 +650,24 @@
+ 			else if (write && rt == 29) ss->fp = value;
+ 			else if (write && rt == 30) ss->lr = value;
+ 			set_saved_state_pc(state, pc + 4);
++            ss->cpsr &= ~(1U << 21);
+ 			return true;
+ 		}
+ 	}
+ 	/* PAC preserves Xd; authentication strips its address bits. This must
+ 	 * run before vector crypto and must not fall back for invalid PAC forms. */
+ 	if (nabu_nopac_opcode(insn)) {
+-		struct nabu_nopac_frame frame;
+-		for (unsigned int i = 0; i < 29; i++) frame.x[i] = ss->x[i];
+-		frame.x[29] = ss->fp; frame.x[30] = ss->lr;
+-		frame.sp = ss->sp; frame.pc = pc;
+-		if (!nabu_nopac_step(&frame, insn, from_user, nabu_v82_read_pointer, &from_user)) return false;
+-		for (unsigned int i = 0; i < 29; i++) ss->x[i] = frame.x[i];
+-		ss->fp = frame.x[29]; ss->lr = frame.x[30]; ss->sp = frame.sp;
+-		set_saved_state_pc(state, frame.pc);
++        if (nabu_gpr_fast_step(ss, insn, from_user)) return true;
++        /* Memory-authenticating loads stay on the fault-aware original path. */
++        struct nabu_nopac_frame frame;
++        for (unsigned int i = 0; i < 29; i++) frame.x[i] = ss->x[i];
++        frame.x[29] = ss->fp; frame.x[30] = ss->lr;
++        frame.sp = ss->sp; frame.pc = pc;
++        if (!nabu_nopac_step(&frame, insn, from_user, nabu_v82_read_pointer, &from_user)) return false;
++        for (unsigned int i = 0; i < 29; i++) ss->x[i] = frame.x[i];
++        ss->fp = frame.x[29]; ss->lr = frame.x[30]; ss->sp = frame.sp;
++        set_saved_state_pc(state, frame.pc);
++        ss->cpsr &= ~(1U << 21);
+ 		return true;
+ 	}
+ 	/* PACGA has no memory/control-flow effect and retains the existing
+@@ -677,6 +682,7 @@
+ 		else if (dst == 29) ss->fp = result_value;
+ 		else if (dst == 30) ss->lr = result_value;
+ 		set_saved_state_pc(state, pc + 4);
++            ss->cpsr &= ~(1U << 21);
+ 		return true;
+ 	}
+ 	{
+@@ -691,13 +697,9 @@
+ 		status = nabu_v82_core(&op, &dst, &result);
+ 		if (status == NABU_V82_EMULATED) {
+ 			nabu_v82_write_vec(ns, dst, &result);
+-			if (__improbable(!nabu_v82_emul_reported_emulated)) {
+-				nabu_v82_emul_reported_emulated = true;
+-				printf("nabu: v82 emul: %s at pc 0x%llx in %s mode, "
+-				    "esr 0x%llx\n", nabu_v82_mnemonic(insn), pc,
+-				    from_user ? "user" : "kernel", esr);
+-			}
++
+ 			set_saved_state_pc(state, pc + NABU_V82_INSN_SIZE);
++            ss->cpsr &= ~(1U << 21);
+ 			return true;
+ 		}
+ 		if (status == NABU_V82_UNSUPPORTED) {
+--- a/osfmk/arm/commpage/commpage.c
++++ b/osfmk/arm/commpage/commpage.c
+@@ -404,6 +404,13 @@
+ {
+ 	uint64_t bits = 0;
+ 	uint64_t isar0 = __builtin_arm_rsr64("ID_AA64ISAR0_EL1");
++#if defined(ARM64_BOARD_CONFIG_NABU)
++    /* Emulation is compatibility, never hardware dispatch capability. Keep
++     * SHA256 (field 1) but do not advertise SHA512 (field 2) or SHA3. */
++    isar0 &= ~ID_AA64ISAR0_EL1_SHA3_MASK;
++    if ((isar0 & ID_AA64ISAR0_EL1_SHA2_MASK) >= ID_AA64ISAR0_EL1_SHA2_512_EN)
++        isar0 = (isar0 & ~ID_AA64ISAR0_EL1_SHA2_MASK) | (UINT64_C(1) << 12);
++#endif
+ 
+ 	if ((isar0 & ID_AA64ISAR0_EL1_TS_MASK) >= ID_AA64ISAR0_EL1_TS_FLAGM_EN) {
+ 		gARM_FEAT_FlagM = 1;
+@@ -467,6 +474,9 @@
+ {
+ 	uint64_t bits = 0;
+ 	uint64_t isar1 = __builtin_arm_rsr64("ID_AA64ISAR1_EL1");
++#if defined(ARM64_BOARD_CONFIG_NABU)
++    isar1 &= ~ID_AA64ISAR1_EL1_FCMA_MASK;
++#endif
+ 	uint64_t sctlr = __builtin_arm_rsr64("SCTLR_EL1");
+ 
+ 	if ((isar1 & ID_AA64ISAR1_EL1_SPECRES_MASK) >= ID_AA64ISAR1_EL1_SPECRES_EN &&
+--- a/osfmk/arm64/nabu_gpr_fast.h
++++ b/osfmk/arm64/nabu_gpr_fast.h
+@@ -0,0 +1,34 @@
++/* SPDX-License-Identifier: BSD-2-Clause-Patent */
++#ifndef NABU_GPR_FAST_H
++#define NABU_GPR_FAST_H
++/* Included after arm_saved_state64_t and nabu_nopac.h. No SIMD, logging,
++ * allocation or lock; unsupported/memory opcodes retain the full slow path.
++ * This optimizes C dispatch, not the assembly vector context spill. */
++static inline uint64_t nabu_gpr_get(const arm_saved_state64_t *s, unsigned r) {
++    return r < 29 ? s->x[r] : r == 29 ? s->fp : r == 30 ? s->lr : 0;
++}
++static inline void nabu_gpr_put(arm_saved_state64_t *s, unsigned r, uint64_t v) {
++    if (r < 29) s->x[r] = v; else if (r == 29) s->fp = v; else if (r == 30) s->lr = v;
++}
++static inline bool nabu_gpr_fast_step(arm_saved_state64_t *s, uint32_t op, bool user) {
++    unsigned rd=op&31U, rn=(op>>5)&31U;
++    uint64_t next=s->pc+4;
++    if ((op&0xffff8000U)==0xdac10000U) {
++        unsigned opc=(op>>10)&31U;
++        if (opc>17U || (opc>=8U && rn!=31U)) return false;
++        if (rd!=31U && opc>=4U && (opc<8U || opc>=12U)) {
++            bool data=opc==6U || opc==7U || opc==14U || opc==15U || opc==17U;
++            nabu_gpr_put(s,rd,nabu_nopac_authenticate(nabu_gpr_get(s,rd),user,data));
++        }
++    } else if (op==0xd65f0bffU || op==0xd65f0fffU) {
++        next=nabu_nopac_canonical(s->lr,user);
++    } else if (nabu_nopac_opcode(op) && (op&0xff200400U)!=0xf8200400U) {
++        if (rn==31U) return false;
++        next=nabu_nopac_canonical(nabu_gpr_get(s,rn),user);
++        if (op&0x00200000U) s->lr=s->pc+4;
++    } else return false;
++    s->pc=next;
++    s->cpsr &= ~(1U<<21);
++    return true;
++}
++#endif
+--- a/osfmk/arm64/Makefile
++++ b/osfmk/arm64/Makefile
+@@ -49,6 +49,7 @@
+ 	cpc_arm64.h \
+ 	nabu_arm64e_compat.h \
+ 	nabu_nopac.h \
++	nabu_gpr_fast.h \
+ 	nabu_el0_sysreg.h \
+ 	hv_hvc.h \
+ 	lowglobals.h \

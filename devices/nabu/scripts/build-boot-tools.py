@@ -29,6 +29,8 @@ def main():
     if arch != 'arm64':
         raise SystemExit('Nabu owner boot tools require the standard arm64 ABI')
     subprocess.run([sys.executable, str(ROOT / 'devices/nabu/tests/test_session_observer27.py')], check=True)
+    subprocess.run([sys.executable, str(ROOT / 'devices/nabu/tests/test_process_list27.py')], check=True)
+    subprocess.run([sys.executable, str(ROOT / 'devices/nabu/tests/test_store_sync27.py')], check=True)
     spec = importlib.util.spec_from_file_location('boot_runtime', ROOT / 'scripts/build-boot-runtime.py')
     builder = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(builder)
@@ -58,11 +60,13 @@ def main():
               'scripts/macos-boot-shims/nabu_observer_output.h',
               'scripts/macos-boot-shims/nabu_clean_shutdown.h',
               'scripts/macos-boot-shims/nabu_process_list.h',
+              'scripts/macos-boot-shims/nabu_store_sync.h',
               'scripts/macos-boot-shims/observer-entitlements.plist',
               'scripts/absent-service/build.py', 'scripts/absent-service/absentd.c',
               'devices/nabu/board.toml', 'devices/nabu/scripts/build-boot-tools.py']
     inputs.extend(['devices/nabu/tests/test_session_observer27.py',
-                   'devices/nabu/tests/test_process_list27.py'])
+                   'devices/nabu/tests/test_process_list27.py',
+                   'devices/nabu/tests/test_store_sync27.py'])
     report = dict(host=platform.machine(), target=arch, build='26C5035r',
                   commit=subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
                   files=records, source_sha256={f: hashlib.sha256((ROOT / f).read_bytes()).hexdigest() for f in inputs},

@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   boot-tools:
-    if: inputs.stage == 'boot-tools'
+    if: inputs.stage == 'boot-tools' || inputs.stage == 'native'
     runs-on: macos-26-intel
     timeout-minutes: 20
     steps:

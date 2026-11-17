@@ -31,4 +31,18 @@ int main() {
     assert(nabuCpuCompose(scene, sizeof(scene), 4, 3, 0x123456, planes));
     for (auto p : scene) assert(p == 0xff123456);
     assert(!nabuCpuScanout(reinterpret_cast<volatile uint8_t *>(scanout), 4, 20, scene, 4, 3));
+
+    uint32_t diagnostic[48]{};
+    assert(nabuCpuStageBars(reinterpret_cast<volatile uint8_t *>(diagnostic), sizeof(diagnostic), 24, 4, 8, 7));
+    for (unsigned y=0;y<8;y++) {
+        assert(diagnostic[y*6]==0xffff0000U && diagnostic[y*6+1]==0xffffff00U && diagnostic[y*6+2]==0xff00ffffU);
+        assert(diagnostic[y*6+3]==0 && diagnostic[y*6+4]==0 && diagnostic[y*6+5]==0);
+    }
+    uint32_t saved[48]; memcpy(saved,diagnostic,sizeof saved);
+    assert(!nabuCpuStageBars(reinterpret_cast<volatile uint8_t *>(diagnostic), 4, 24, 4, 8, 7));
+    assert(!memcmp(saved,diagnostic,sizeof saved));
+    assert(!nabuCpuStageBars(reinterpret_cast<volatile uint8_t *>(diagnostic), sizeof(diagnostic), 24, 4, 7, 7));
+    const uint32_t samples[]={0,0xff000000U,0x00010203U,0x40000001U};
+    auto stats=nabuCpuPixelStats(samples,4);
+    assert(stats.rgb==2 && stats.alpha==2);
 }

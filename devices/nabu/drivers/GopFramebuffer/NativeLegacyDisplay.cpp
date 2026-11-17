@@ -558,7 +558,9 @@ public:
         if(ordinal>1 || !bootMapping){native_legacy_pm_observed(3,kIOReturnUnsupported,ordinal);return kIOReturnUnsupported;}
         native_legacy_pm_observed(3,kIOReturnSuccess,ordinal);
         IOReturn status=IOMobileFramebufferLegacy::setPowerState(ordinal,device);
-        native_legacy_pm_observed(4,status,ordinal);return status;
+        native_legacy_pm_observed(4,status,ordinal);
+        if(status==kIOReturnSuccess && ordinal==1)nabuStageProbe(2);
+        return status;
     }
     // The explicit offline system-client experiment publishes only the real
     // GOP mode. Unknown backend calls retain their stop-with-caller guards.
@@ -1025,7 +1027,7 @@ public:
            !video.v_width || !video.v_height || video.v_depth!=32 || video.v_rotate ||
            video.v_width>16384 || video.v_height>16384 || video.v_rowBytes<video.v_width*4 ||
            video.v_rowBytes>UINT64_MAX/video.v_height)return false;
-        IOMemoryMap *mapping=provider->mapDeviceMemoryWithIndex(0,kIOMapInhibitCache);
+        IOMemoryMap *mapping=provider->mapDeviceMemoryWithIndex(0,kIOMapWriteCombineCache);
         if(!mapping)return false;
         bool valid=mapping->getVirtualAddress() && mapping->getPhysicalAddress()==video.v_baseAddr &&
                    mapping->getLength()==video.v_rowBytes*video.v_height;
@@ -1036,6 +1038,7 @@ public:
             if(valid) {
                 OSSafeReleaseNULL(bootMapping);bootMapping=mapping;mapping=nullptr;primary=video.v_display==1;
                 valid=native_legacy_gop_mapping_observed(this,bootMapping,width,height);
+                if(valid)nabuStageProbe(1);
 #if defined(NATIVE_LEGACY_DEFAULT_SURFACE) && NATIVE_LEGACY_DEFAULT_SURFACE
                 // The family calls its void slot 316 after startHardware. Our backend supplies the client's default surface.
                 if(valid)valid=installDefaultSurface(width,height);

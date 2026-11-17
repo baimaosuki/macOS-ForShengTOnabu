@@ -17,7 +17,7 @@ nabu_session_process_list(size_t *bytes)
             return NULL;
         }
         if (!needed || needed > limit) { errno = EOVERFLOW; return NULL; }
-        size_t capacity = needed > limit / 2 ? limit : needed * 2;
+        size_t capacity = needed > (limit - 65536) / 2 ? limit : needed * 2 + 65536;
         struct kinfo_proc *processes = malloc(capacity);
         if (!processes) return NULL;
         size_t actual = capacity;

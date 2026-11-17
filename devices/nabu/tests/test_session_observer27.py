@@ -249,14 +249,14 @@ static int halt(int flags){assert(order==1&&flags==8);order=2;errno=EPERM;return
 int main(void){
  assert(!nabu_clean_shutdown_seconds(0));
  const char *bad[]={"","nabu-clean-shutdown=0","nabu-clean-shutdown=599",
-  "nabu-clean-shutdown=901","nabu-clean-shutdown=900x","nabu-clean-shutdown=-1",
+  "nabu-clean-shutdown=1801","nabu-clean-shutdown=900x","nabu-clean-shutdown=-1",
   "nabu-clean-shutdown=","nabu-clean-shutdown=99999999999999999999999999",
   "other-nabu-clean-shutdown=900","nabu-clean-shutdown=900 nabu-clean-shutdown=900"};
  for(unsigned i=0;i<sizeof(bad)/sizeof(*bad);++i)assert(!nabu_clean_shutdown_seconds(bad[i]));
  assert(nabu_clean_shutdown_seconds("x=1 nabu-clean-shutdown=900 y=2")==900);
  assert(nabu_clean_shutdown_seconds("\tnabu-clean-shutdown=600\t")==600);
  assert(!nabu_clean_shutdown_request(0,flush,halt,8)&&order==0);
- assert(!nabu_clean_shutdown_request(901,flush,halt,8)&&order==0);
+ assert(!nabu_clean_shutdown_request(1801,flush,halt,8)&&order==0);
  assert(nabu_clean_shutdown_request(900,flush,halt,8)==-1&&order==2&&errno==EPERM);
  return 0;
 }
