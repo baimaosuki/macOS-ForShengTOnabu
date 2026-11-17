@@ -47,7 +47,7 @@ def validate(container):
     return max(valid,key=lambda v:v[0])
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--output',required=True,type=Path);a=p.parse_args()
-    out=a.output.resolve();out.mkdir(parents=True,exist_ok=True);source=Path(__file__).resolve().parent
+    out=a.output.resolve();out.mkdir(parents=True,exist_ok=True);(out/'verification.json').unlink(missing_ok=True);source=Path(__file__).resolve().parent
     cc=shutil.which('g++') or shutil.which('clang++');assert cc
     env=dict(os.environ,ASAN_OPTIONS='abort_on_error=1')
     (out/'NabuLogBuild.h').write_text('/* test identity is supplied by the harness */\n')

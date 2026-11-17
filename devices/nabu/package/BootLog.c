@@ -2617,6 +2617,9 @@ static uint32_t copy_msgbuf(uint8_t *out) {
   return n;
 }
 
+// Used once before NABU UFS startup to seed its preallocated console ring.
+uint32_t nabu_log_copy_msgbuf(uint8_t *out) { return copy_msgbuf(out); }
+
 // The message stream (msg_mode 1). The kernel ring is read where the last round stopped: msg_bufx is the next byte the kernel writes,
 // so the bytes from the last round's index up to it are new. The first round, and any round that finds another ring (size or buffer
 // changed), appends the whole ring oldest first instead. More than a ring of messages between two rounds loses the older part.

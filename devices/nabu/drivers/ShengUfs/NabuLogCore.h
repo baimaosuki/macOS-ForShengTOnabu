@@ -10,6 +10,7 @@
 extern "C" {
 #endif
 struct nb_log_snapshot { uint64_t end, first, lost; uint32_t length; };
+int nabu_capture_init(uint8_t *);
 void nabu_capture_append(const char *,unsigned);
 int nabu_capture_snapshot(struct nb_log_snapshot *);
 int nabu_capture_copy(uint64_t,unsigned,uint8_t *);
@@ -21,7 +22,7 @@ extern void (*nabu_log_probe_process_snapshot)(uint32_t *);
 }
 #endif
 #ifdef NABU_LOG_IMPLEMENTATION
-static uint8_t nabu_capture_ring[NB_LOG_CAPACITY];
+static uint8_t *nabu_capture_ring;
 static unsigned nabu_capture_lock;
 static uint64_t nabu_capture_end, nabu_capture_lost;
 void (*nabu_log_probe_poll)(void)=0;
@@ -31,8 +32,14 @@ static int nb_capture_try(void) {
   return __atomic_compare_exchange_n(&nabu_capture_lock,&expected,1,0,__ATOMIC_ACQUIRE,__ATOMIC_RELAXED);
 }
 static void nb_capture_unlock(void) { __atomic_store_n(&nabu_capture_lock,0,__ATOMIC_RELEASE); }
+int nabu_capture_init(uint8_t *storage) {
+  if(!storage || !nb_capture_try()) return 0;
+  if(nabu_capture_ring) {nb_capture_unlock();return 0;}
+  __atomic_store_n(&nabu_capture_ring,storage,__ATOMIC_RELEASE);
+  nb_capture_unlock();return 1;
+}
 void nabu_capture_append(const char *p,unsigned n) {
-  if(!p) return;
+  if(!p || !__atomic_load_n(&nabu_capture_ring,__ATOMIC_ACQUIRE)) return;
   while(n) {
     unsigned chunk=n>256?256:n;
     if(!nb_capture_try()) { __atomic_fetch_add(&nabu_capture_lost,(uint64_t)n,__ATOMIC_RELAXED); return; }
@@ -42,7 +49,7 @@ void nabu_capture_append(const char *p,unsigned n) {
   }
 }
 int nabu_capture_snapshot(struct nb_log_snapshot *s) {
-  if(!nb_capture_try()) return 0;
+  if(!__atomic_load_n(&nabu_capture_ring,__ATOMIC_ACQUIRE) || !nb_capture_try()) return 0;
   s->end=nabu_capture_end;
   s->length=s->end<NB_LOG_CAPACITY?(uint32_t)s->end:NB_LOG_CAPACITY;
   s->first=s->end-s->length;
@@ -50,7 +57,7 @@ int nabu_capture_snapshot(struct nb_log_snapshot *s) {
   nb_capture_unlock(); return 1;
 }
 int nabu_capture_copy(uint64_t at,unsigned n,uint8_t *out) {
-  if(n>1024 || !nb_capture_try()) return 0;
+  if(!__atomic_load_n(&nabu_capture_ring,__ATOMIC_ACQUIRE) || n>1024 || !nb_capture_try()) return 0;
   uint64_t oldest=nabu_capture_end>NB_LOG_CAPACITY?nabu_capture_end-NB_LOG_CAPACITY:0;
   int ok=at>=oldest && at<=nabu_capture_end && n<=nabu_capture_end-at;
   if(ok) for(unsigned i=0;i<n;i++) out[i]=nabu_capture_ring[(at+i)&(NB_LOG_CAPACITY-1)];

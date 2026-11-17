@@ -57,7 +57,7 @@ jobs:
       - uses: actions/cache/restore@v4
         id: kernel-cache
         with:
-          key: nabu27-native-v1-${{ runner.arch }}-${{ hashFiles('patches/**', 'profiles/**', 'devices/nabu/patches/**', 'devices/nabu/compat/pac/**', 'devices/nabu/configs/**', 'soc/sm8150/patches/**') }}
+          key: nabu27-native-v1-${{ runner.arch }}-${{ hashFiles('patches/**', 'profiles/**', 'devices/nabu/patches/**', 'devices/nabu/compat/pac/**', 'devices/nabu/configs/**', 'soc/sm8150/patches/**') }}-${{ github.sha }}
           restore-keys: nabu27-native-v1-${{ runner.arch }}-
           path: |
             out/feeds/

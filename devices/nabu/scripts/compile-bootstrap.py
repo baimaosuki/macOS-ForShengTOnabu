@@ -49,8 +49,15 @@ def main():
     env.update(kernel.version_env(modules, ctx))
     env.update(UNIXNU_PATCH_LIST=str(order), XNU_BOOTSTRAP="1",
                XNU_BOOT_PROGRESS="0", JOBS="4", ZERO_AR_DATE="1")
-    result = subprocess.run(["bash", str(ctx.tree / "scripts/build-xnu-4k-baseline.sh")],
-                            cwd=ctx.tree, env=env)
+    if options.full:
+        # SHENG 27 kernel.build bootstraps only when compile records/private
+        # headers are missing. With a warm cache it compiles components first.
+        kernel.build(ctx, modules)
+        build_exit = 0
+    else:
+        result = subprocess.run(["bash", str(ctx.tree / "scripts/build-xnu-4k-baseline.sh")],
+                                cwd=ctx.tree, env=env)
+        build_exit = result.returncode
     obj = ctx.tree / "build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837"
     required = [obj / "osfmk/DEVELOPMENT/nabu_v82_emul.o",
                 obj / "bsd/DEVELOPMENT/kern_exec.o",
@@ -66,16 +73,13 @@ def main():
             if path.suffix in (".o", ".cpo") and not path.is_file():
                 missing.append(str(path))
     report = {"source_compile_passed": not missing, "missing_objects": missing,
-              "bootstrap_exit": result.returncode, "installable": False,
+              "bootstrap_exit": build_exit, "installable": False,
               "target": "arm64", "host": "x86_64", "os_build": "26C5035r"}
     (ctx.work / "bootstrap-verification.json").write_text(json.dumps(report, indent=2) + "\n")
     if missing:
         raise SystemExit("bootstrap file lists contain missing objects")
     if options.full:
-        # The bootstrap has left real compile records and private headers.
-        # The official recipe now builds every selected archive and requires
-        # a successful native link; no missing-symbol success is accepted.
-        kernel.build(ctx, modules)
+        # The official full recipe has already built and linked the kernel.
         native = obj / 'mach.development.bcm2837.unstripped.noctf'
         if not native.is_file():
             raise SystemExit('full build did not produce the linked native kernel')

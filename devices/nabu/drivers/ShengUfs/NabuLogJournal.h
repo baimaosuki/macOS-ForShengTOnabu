@@ -13,7 +13,7 @@ struct nb_log_journal {
   nb_log_write_fn write;
   nb_log_sync_fn sync;
   void *context;
-  uint8_t payload[NB_LOG_CAPACITY] __attribute__((aligned(4096)));
+  uint8_t *payload; // allocated once by the board, before the writer starts
   uint8_t headers[2][4096], header[4096], boot[16], build[32];
   uint64_t sequence, committed_end, committed_lost;
   unsigned newest, ready, lock, commits, failures;
@@ -37,7 +37,7 @@ static inline int nb_journal_open(struct nb_log_journal *j,struct nb_log_volume 
                                   nb_log_write_fn write,nb_log_sync_fn sync,void *ctx,
                                   const uint8_t boot[16],const uint8_t build[32]) {
   j->ready=0;
-  if(!v->validated) return 0;
+  if(!v->validated || !j->payload) return 0;
   j->volume=v;j->write=write;j->sync=sync;j->context=ctx;
   j->sequence=0;j->newest=1;j->commits=0;j->failures=0;j->lock=0;
   j->committed_end=j->committed_lost=~(uint64_t)0;

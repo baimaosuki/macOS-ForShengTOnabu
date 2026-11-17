@@ -3013,6 +3013,7 @@ bool NativeUfs::start (IOService *provider)
 // Boot the root image's windows as block devices. Soft-fails (logs, publishes nothing).
 bool NativeUfs::startRoot (IOService *provider)
 {
+  (void)nabuLogMemoryInit ();
   const char *why = "";
   native_ufs_root_step = 1;
   if (!hostBringUp (&why)) {

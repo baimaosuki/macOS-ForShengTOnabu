@@ -5,7 +5,7 @@
 #include "NabuLogJournal.h"
 #include "NabuLogBuild.h"
 #include <stdarg.h>
-static struct nb_log_volume nabu_esp_volume;
+static struct nb_log_volume *nabu_esp_volume;
 static struct nb_log_journal nabu_esp_journal;
 static unsigned nabu_esp_started, nabu_esp_panic_seen;
 static uint64_t nabu_esp_lun_blocks;
@@ -22,7 +22,7 @@ static int nabuEspIo (nb_esp_io_context *ctx, unsigned op, uint64_t lba,
   if (!ctx || !gHost.ready || gHost.poisoned || mach_absolute_time () >= ctx->deadline ||
       (!ctx->panic && __atomic_load_n (&nabu_esp_panic_seen, __ATOMIC_ACQUIRE))) return 0;
   if (op != 2 && (!blocks || blocks > 16 || !bytes || lba >= nabu_esp_lun_blocks || blocks > nabu_esp_lun_blocks-lba)) return 0;
-  if (op == 1 && (!nb_volume_write_allowed (&nabu_esp_volume,lba,blocks) ||
+  if (op == 1 && (!nb_volume_write_allowed (nabu_esp_volume,lba,blocks) ||
       !gEspLogOpen || lba < gEspLogFirst || lba-gEspLogFirst >= gEspLogBlocks ||
       blocks > gEspLogBlocks-(lba-gEspLogFirst))) return 0;
   if (op == 2 && !gEspLogOpen) return 0;
@@ -140,12 +140,43 @@ extern "C" void nabu_log_panic_stack (const char *format,const uint64_t *args,un
   nabu_log_panic_record (format,&ap,caller);
 }
 #endif
+extern "C" uint32_t nabu_log_copy_msgbuf (uint8_t *);
+static unsigned nabu_esp_memory_state;
+// Follow SHENG BootLog: allocate wired buffers from ordinary driver startup,
+// not the fixed prelinked __DATA gap. Panic never allocates or frees memory.
+static bool nabuLogMemoryInit (void) {
+  unsigned expected=0;
+  if (!__atomic_compare_exchange_n (&nabu_esp_memory_state,&expected,1,false,__ATOMIC_ACQ_REL,__ATOMIC_RELAXED))
+    return __atomic_load_n (&nabu_esp_memory_state,__ATOMIC_ACQUIRE)==2;
+  uint8_t token[16];
+  if (!nabuEspToken (token)) {nabu_esp_memory_state=3;return false;}
+  auto *volume=static_cast<nb_log_volume *>(IOMalloc (sizeof(nb_log_volume)));
+  auto *ring=static_cast<uint8_t *>(IOMallocAligned (NB_LOG_CAPACITY,4096));
+  auto *snapshot=static_cast<uint8_t *>(IOMallocAligned (NB_LOG_CAPACITY,4096));
+  if (!volume || !ring || !snapshot) {
+    if (volume) IOFree (volume,sizeof(nb_log_volume));
+    if (ring) IOFreeAligned (ring,NB_LOG_CAPACITY);
+    if (snapshot) IOFreeAligned (snapshot,NB_LOG_CAPACITY);
+    nabu_esp_memory_state=3;
+    IOLog ("NABULOG2: buffer allocation failed; ESP remains unchanged\n");
+    return false;
+  }
+  bzero (volume,sizeof(*volume));
+  uint32_t early=nabu_log_copy_msgbuf (snapshot); // existing SHENG bounded msgbuf copy
+  nabu_esp_volume=volume;nabu_esp_journal.payload=snapshot;
+  if (!nabu_capture_init (ring)) {nabu_esp_memory_state=3;return false;}
+  nabu_capture_append (reinterpret_cast<const char *>(snapshot),early);
+  __atomic_store_n (&nabu_esp_memory_state,2,__ATOMIC_RELEASE);
+  IOLog ("NABULOG2: buffers ready; console capture starts before UFS bring-up\n");
+  return true;
+}
 static void nabuEspThread (void *,wait_result_t) {
   uint8_t token[16],boot[16];
   if (!nabuEspToken (token)) {
     IOLog ("NABULOG2: disabled; require nabu-log=1 and matching allocation token\n");
     goto stopped;
   }
+  if (__atomic_load_n (&nabu_esp_memory_state,__ATOMIC_ACQUIRE)!=2) goto stopped;
   nabu_log_writer_state=1;
   {
     nb_esp_io_context ctx={false,0}; bool opened=false;
@@ -156,29 +187,29 @@ static void nabuEspThread (void *,wait_result_t) {
         if (!gHost.ready || gHost.poisoned) break;
         IOSleep (1000);continue;
       }
-      if (nb_volume_open (&nabu_esp_volume,nabuEspRead,&ctx,nabu_esp_lun_blocks,token)) {opened=true;break;}
+      if (nb_volume_open (nabu_esp_volume,nabuEspRead,&ctx,nabu_esp_lun_blocks,token)) {opened=true;break;}
       IOLog ("NABULOG2: volume refused reason=%s ready=%u poisoned=%u\n",
-             nb_volume_failure_name(nabu_esp_volume.failure),gHost.ready?1:0,gHost.poisoned?1:0);
+             nb_volume_failure_name(nabu_esp_volume->failure),gHost.ready?1:0,gHost.poisoned?1:0);
       if (!gHost.ready || gHost.poisoned) break;
       IOSleep (1000);
     }
     if (!opened) goto stopped;
     // The whole ESP must be disjoint from the already checked macosroot
     // partition, including its Data store and raw-log reserve.
-    if (!gStoreGeometry.valid || (nabu_esp_volume.esp_first <= gStoreGeometry.last &&
-        gStoreGeometry.first < nabu_esp_volume.esp_first+nabu_esp_volume.esp_blocks)) {
+    if (!gStoreGeometry.valid || (nabu_esp_volume->esp_first <= gStoreGeometry.last &&
+        gStoreGeometry.first < nabu_esp_volume->esp_first+nabu_esp_volume->esp_blocks)) {
       IOLog ("NABULOG2: ESP/root overlap or missing root geometry\n");goto stopped;
     }
-    if (!hostEspLogOpen (nabu_esp_volume.file_first+1,NB_LOG_FILE_BYTES/4096-1)) {
+    if (!hostEspLogOpen (nabu_esp_volume->file_first+1,NB_LOG_FILE_BYTES/4096-1)) {
       IOLog ("NABULOG2: ESP write window refused\n");goto stopped;
     }
     nb_put64 (boot,mach_absolute_time ());nb_put64 (boot+8,mach_absolute_time ()^nb_le64(nabu_log_build_id));
     clock_interval_to_deadline (5000,kMillisecondScale,&ctx.deadline);
-    if (!nb_journal_open (&nabu_esp_journal,&nabu_esp_volume,nabuEspWrite,nabuEspSync,&ctx,boot,nabu_log_build_id)) {
+    if (!nb_journal_open (&nabu_esp_journal,nabu_esp_volume,nabuEspWrite,nabuEspSync,&ctx,boot,nabu_log_build_id)) {
       IOLog ("NABULOG2: slot verification refused; preserving existing file\n");goto stopped;
     }
     // Volume reads are startup-only. Do not retain a pointer to a stack context.
-    nabu_esp_volume.context=nullptr;nabu_esp_journal.context=nullptr;
+    nabu_esp_volume->context=nullptr;nabu_esp_journal.context=nullptr;
   }
   nabu_log_writer_state=2;
   IOLog ("NABULOG2: ready file=XNU2LOG.BIN capacity=4194304 period_ms=2000 panic=bounded\n");

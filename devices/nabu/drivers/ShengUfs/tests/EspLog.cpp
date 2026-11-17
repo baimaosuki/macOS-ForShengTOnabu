@@ -8,6 +8,7 @@
 #include "../NabuLogJournal.h"
 static nb_log_volume volume;
 static nb_log_journal journal;
+static uint8_t ring_storage[NB_LOG_CAPACITY],snapshot_storage[NB_LOG_CAPACITY];
 static FILE *media;
 static unsigned writes,syncs,fail_op,operation;
 static bool tear_header;
@@ -31,6 +32,7 @@ static int syncMedia(void *) {
   return !fflush(media);
 }
 int main(int argc,char **argv) {
+  assert(nabu_capture_init(ring_storage));journal.payload=snapshot_storage;
   assert(argc==3);media=fopen(argv[1],"r+b");assert(media);
   uint8_t token[16];for(unsigned i=0;i<16;++i)token[i]=uint8_t(i+1);
   int mode=argv[2][0]-'0';

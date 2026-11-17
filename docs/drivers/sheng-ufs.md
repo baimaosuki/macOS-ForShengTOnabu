@@ -92,3 +92,8 @@ Physical ring overwrite and capture contention are counted.
 
 Host verification: `python3 devices/nabu/drivers/ShengUfs/tests/check_esp_log.py --output /tmp/nabu-esp-log-test`.
 These tests do not prove device write completion or resolve the PID 1 abort.
+
+Like SHENG `BootLog.c`, NABU allocates wired ring, snapshot and FAT-proof
+buffers during normal UFS startup. They stay allocated for panic use; the
+9 MiB buffers do not occupy the fixed native `__DATA` prelink gap. The ring
+starts before UFS bring-up and is seeded with SHENG's bounded kernel-msgbuf copy.

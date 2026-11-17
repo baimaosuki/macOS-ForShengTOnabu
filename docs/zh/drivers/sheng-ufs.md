@@ -72,3 +72,7 @@ GPT、FAT、目录和配置块。macosroot Data布局及1024 MiB保留区不变�
 UFS或文件验证完成前、控制器已隔离、写入器占用时的新尾部无法保证保存。
 环覆盖及竞争丢失均计数。主机故障注入和ASan/UBSan通过不代表已实机落盘，
 也不代表PID 1的abort已解决。
+
+缓冲分配沿用SHENG `BootLog.c`：在UFS驱动正常启动时分配固定的有线内存，
+保留给后续panic使用，9 MiB日志缓冲不占用预链接原生内核 `__DATA` 的固定空隙。
+在UFS bring-up前开启环记录，并用SHENG已有的有界内核msgbuf拷贝补入早期消息。
