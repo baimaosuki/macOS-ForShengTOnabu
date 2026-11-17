@@ -28,6 +28,26 @@
       "original": "08060037",
       "replacement": "1f2003d5",
       "page_sha256": "8870b41a6e8d2ee6fa7db01d83f8425afabfd42dc9b29743d275fc25581bb510"
+    },
+    {
+      "name": "SkyLight::Metal-capability-no-device",
+      "va": "0x1828dfd5c",
+      "file": "dyld_shared_cache_arm64e.01",
+      "offset": "0x24dfd5c",
+      "original": "ff4302d1f65706a9",
+      "replacement": "ff2303d5c0035fd6",
+      "page_sha256": "510a4ab095574afdfddfce5ef84e3d8a29a1c5a08f5dd65a96da21293b8a2879",
+      "patched_page_sha256": "2b3768a2c069f78907a158d67f580833b2081de4d1e2a95fa69e0cec607d3a8f"
+    },
+    {
+      "name": "SLCADisplay::software-pool-BGRA8",
+      "va": "0x182acde70",
+      "file": "dyld_shared_cache_arm64e.01",
+      "offset": "0x26cde70",
+      "original": "f40300aa",
+      "replacement": "140a80d2",
+      "page_sha256": "0f7866d7f0e47ecc4e2f7b277b35cf8a9089c27d0b4e4e7c17bf70c6d7b908a9",
+      "patched_page_sha256": "3c101c4bf8d9fe936dd59edd3e2ec69694983bcac1875e8d0a6ec547a2cd6f50"
     }
   ],
   "original_sw_renderer": "0x18e1869b8",
@@ -40,5 +60,20 @@
     "0x18df428bc",
     "0x18df4297c"
   ],
-  "fallback": "Original27.3 render_update tail-calls Server::render_update when renderer returns NULL. sw_renderer is unchanged."
+  "fallback": "SkyLight completes the Metal capability once callback with its static no-device state and selects its original activate_compositor_sw. QuartzCore render_update uses the existing Server::sw_renderer. BGRA8 is selected for the framebuffer and intermediate software pool.",
+  "skylight_cpu_selection": {
+    "capability_callback": "0x1828dfd58",
+    "metal_state": "0x1eb1b7638",
+    "once_token": "0x1eb1b7640",
+    "default_block": "0x1828382b0",
+    "software_flag": "0x1eb1b6fb0",
+    "activate_default": "0x182837070",
+    "activate_sw": "0x182836bd8",
+    "activate_metal": "0x182836b48",
+    "shadow_block": "0x182838240",
+    "shadow_state": "0x1eb1abad0",
+    "pool_format_site": "0x182acde70",
+    "pool_query": "0x18801ad70",
+    "pool_acquire": "0x182805a44"
+  }
 }

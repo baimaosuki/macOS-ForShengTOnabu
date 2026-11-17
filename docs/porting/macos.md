@@ -296,3 +296,5 @@ write the macOS configuration, findings and evidence into the same areas and
 name the profile and build in each entry. See [porting records](/porting/records).
 
 Nabu uses SHENG’s `no-lc=1` bring-up option so owner-trusted daemon stand-ins can satisfy launchd jobs. Its first three ordinary WindowServer SIGABRT exits record the aborting user stack and shared-cache slide to the existing ESP journal before corpse creation; service restart and signal handling retain their original behavior. This capture does not diagnose or suppress the abort.
+
+On the Nabu CPU path, the 26C5035r SkyLight Metal capability callback completes with its static no-device state. The original selector then calls `activate_compositor_sw`; original QuartzCore software rendering and CPU GOP presentation handle pixels. The software intermediate pool is BGRA8 before matching/allocation, consistent with the framebuffer. All five signed-text entries are pinned to original code and page hashes. These board CPU adaptations are separate from SHENG’s Metal backend; hardware display acceptance remains pending.

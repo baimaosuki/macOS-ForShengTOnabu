@@ -49,7 +49,10 @@ def main():
         patched = bytearray(original_page)
         at = offset & 4095
         patched[at:at + len(expected)] = bytes.fromhex(entry['replacement'])
-        checked.append(dict(entry, patched_page_sha256=hashlib.sha256(patched).hexdigest()))
+        actual=hashlib.sha256(patched).hexdigest()
+        if entry.get('patched_page_sha256'):
+            assert actual==entry['patched_page_sha256'],entry['name']
+        checked.append(dict(entry, patched_page_sha256=actual))
     with args.cache.with_name('dyld_shared_cache_arm64e.03').open('rb') as stream:
         # Both exact NULL branches still restore the caller's stack and jump
         # to the real Server::render_update, which calls sw_renderer itself.
@@ -63,7 +66,7 @@ def main():
     args.output.write_text(json.dumps(dict(build='26C5035r', cpu_null_fallback_verified=True,
         native_sw_renderer_unchanged=True, disk_cache_modified=False,
         patches=checked, device_tested=False), indent=2) + '\n')
-    print('26C5035r: exact CPU NULL fallback, native software renderer and three signed-text pages verified')
+    print('26C5035r: exact CPU NULL fallback, native software renderer and five signed-text pages verified')
 
 
 if __name__ == '__main__':

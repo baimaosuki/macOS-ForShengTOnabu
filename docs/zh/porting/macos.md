@@ -272,3 +272,5 @@ scripts/package.sh --os macos-27 --uefi ../uefi-<device>
 并在每一项中写明 profile 和构建号。见[移植记录](/zh/porting/records)。
 
 Nabu 沿用 SHENG 的 `no-lc=1` 调试选项，使自带可信 daemon 替身能承接 launchd 任务。WindowServer 前三次普通 SIGABRT 退出会在生成 corpse 前将实际退出线程的用户栈和共享缓存 slide 写入现有 ESP 日志；保留原信号与服务重启行为。抓栈本身不表示已定位或消除 abort。
+
+Nabu 的 CPU 路径使 26C5035r SkyLight 的 Metal 能力初始化保留静态无设备状态，原生选择器随后调用 `activate_compositor_sw`，由原生 QuartzCore 软件渲染与 CPU GOP 提交像素。软件中间缓冲在匹配和分配前选择 BGRA8，与帧缓冲一致。五处签名文本规则均固定原指令和原页哈希。这些是板级 CPU 适配，SHENG 仍使用其 Metal 后端；实机显示验收尚待完成。
