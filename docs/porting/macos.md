@@ -27,6 +27,9 @@ configuration and the patch series: the Darwin 26 system calls and kernel
 interfaces, the macOS machine options, the Data firmlinks, the VM and Hardware
 volumes on Data, and the application cryptex mount.
 
+The profile also exposes the read-only 64-bit `security.mac.lockdown_mode_state_public`
+query used by 27.3 user space, backed by the kernel's initialized Lockdown Mode state.
+
 Signed-text fixups retain their original bytes for verification. Code-signing checks use a bounded snapshot; APFS compressed-block checks use a private copy while resident executable pages keep the configured instructions.
 
 ## 1. Check the host and inputs {#inputs}

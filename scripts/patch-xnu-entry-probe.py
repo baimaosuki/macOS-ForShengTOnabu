@@ -303,10 +303,12 @@ def native_text_padding(kernel):
     outer = Image(raw)
     native = Image(raw, outer.entries['com.apple.kernel'][1]) if outer.entries else outer
     for segment in native.segments:
-        if segment['name'] != '__TEXT_EXEC' or not segment['filesize']:
+        if segment['name'] not in ('__TEXT_EXEC', '__KLD') or not segment['filesize']:
+            continue
+        if not struct.unpack_from('<I', raw, segment['command_offset'] + 60)[0] & 4:
             continue
         ends = [section['va'] + section['size'] for section in native.sections
-                if section['segment'] == '__TEXT_EXEC' and section['size']]
+                if section['segment'] == segment['name'] and section['size']]
         if ends:
             begin = (max(ends) + 15) & ~15
             end = segment['va'] + segment['filesize']

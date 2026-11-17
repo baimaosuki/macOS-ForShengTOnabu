@@ -42,6 +42,9 @@ def main():
     subprocess.run([sys.executable, str(ROOT / 'devices/nabu/tests/test_user_va.py'),
                     '--xnu', str(ctx.tree / '.cache/xnu-work'),
                     '--work', str(ctx.work / 'user-va-verification')], check=True)
+    subprocess.run([sys.executable, str(ROOT / 'devices/nabu/tests/test_lockdown_public.py'),
+                    '--xnu', str(ctx.tree / '.cache/xnu-work'),
+                    '--output', str(ctx.work / 'lockdown-public-verification')], check=True)
     subprocess.run([sys.executable, str(ROOT / 'devices/nabu/drivers/ShengUfs/tests/check_esp_log.py'),
                     '--output', str(ctx.work / 'esp-log-verification')], check=True)
     env = dict(os.environ)

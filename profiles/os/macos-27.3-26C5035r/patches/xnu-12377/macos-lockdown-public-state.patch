@@ -1,0 +1,31 @@
+macOS 27.3 libsystem_darwin asks for an eight-byte public Lockdown Mode state.
+Its dispatch_once initializer aborts when the query fails; xnu-12377 only
+registered the older integer name. Publish the existing kernel state through
+a read-only quad handler. Do not change NVRAM, enable/disable policy, or the
+original integer interface.
+diff --git a/bsd/kern/lockdown_mode.c b/bsd/kern/lockdown_mode.c
+--- a/bsd/kern/lockdown_mode.c
++++ b/bsd/kern/lockdown_mode.c
+@@ -40,6 +40,22 @@
+ SYSCTL_DECL(_security_mac);
+ SYSCTL_INT(_security_mac, OID_AUTO, lockdown_mode_state, CTLFLAG_RD | CTLFLAG_LOCKED, &lockdown_mode_state, 0, "Lockdown Mode state");
+ 
++/* Darwin 26 user space reads this name into a uint64_t and compares it to 1.
++ * Use the native initialized state, including later enable/disable updates. */
++static int
++sysctl_lockdown_mode_state_public SYSCTL_HANDLER_ARGS
++{
++	(void)oidp;
++	(void)arg1;
++	(void)arg2;
++	uint64_t state = get_lockdown_mode_state() != 0;
++	return SYSCTL_OUT(req, &state, sizeof(state));
++}
++
++SYSCTL_PROC(_security_mac, OID_AUTO, lockdown_mode_state_public,
++    CTLTYPE_QUAD | CTLFLAG_RD | CTLFLAG_LOCKED, 0, 0,
++    sysctl_lockdown_mode_state_public, "Q", "Public Lockdown Mode state");
++
+ __startup_func
+ void
+ lockdown_mode_init(void)
