@@ -133,7 +133,8 @@ def build_boot_shims(work, base=None, arch='arm64e'):
     sdk = subprocess.check_output(['xcrun', '--sdk', 'macosx', '--show-sdk-path'], text=True).strip()
     run('xcrun', '--sdk', 'macosx', 'clang', '-target', f'{arch}-apple-macos27.0', '-isysroot', sdk, '-O2', '-Wall', '-Werror',
         ROOT / 'scripts/macos-boot-shims/apfs_boot_util.c', '-o', exe)
-    run('codesign', '--force', '--sign', '-', '--pagesize', '4096', '--identifier', 'org.unixnu.apfs_boot_util', exe)
+    run('codesign', '--force', '--sign', '-', '--pagesize', '4096', '--identifier', 'org.unixnu.apfs_boot_util',
+        '--entitlements', ROOT / 'scripts/macos-boot-shims/observer-entitlements.plist', exe)
     if base is None:
         base = work / 'boot-shims-empty.bin'
         base.write_bytes(b'NGPUADD2' + struct.pack('<IIQ', 0, 0, 24))

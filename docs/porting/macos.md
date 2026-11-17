@@ -1,5 +1,14 @@
 # macOS profile
 
+For the Nabu CPU-only 26C5035r bring-up, `nabu-session-observer=1`
+starts a bounded read-only session observer from the signed phase-2 boot shim.
+It records native thread states, CPU times, raw frames and shared-cache slide
+at 0, 120, 240 and 320 seconds after each target is discovered. Full records
+are saved under `/private/var/log/nabu-session27/` and mirrored to the existing
+ESP console log. It does not suspend processes or change XPC/rendering policy;
+the mount boot task never waits for the observer. This diagnoses the remaining
+black-content case after the BGRA allocation fix; desktop display is unverified.
+
 `macos-27.3-26C5035r` builds a kernel for macOS 27.3 user space. It is an
 [arm64e profile](/porting/arm64e), so the device must pass the arm64e
 requirements. One device repository serves the iPadOS and macOS profiles: the

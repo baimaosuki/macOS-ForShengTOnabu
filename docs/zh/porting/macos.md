@@ -1,5 +1,12 @@
 # macOS 配置
 
+Nabu 的 26C5035r CPU 模式可用 `nabu-session-observer=1`，由已签名的第二阶段
+启动 shim 异步启动只读观察器。在发现目标进程后 0、120、240、320 秒，记录
+线程状态、CPU 时间、原始栈和共享缓存 slide；完整记录写入
+`/private/var/log/nabu-session27/`，同时镜像到现有 ESP 控制台日志。
+挂载任务不等待观察器，观察器不暂停目标或改变 XPC／渲染策略。
+这用于定位 BGRA 分配修复后仍然输出黑内容的现场，不能视作桌面已点亮。
+
 `macos-27.3-26C5035r` 构建面向 macOS 27.3 用户空间的内核。它属于
 [arm64e profile](/zh/porting/arm64e)，设备必须满足 arm64e 要求。同一个设备仓库同时服务
 iPadOS 和 macOS profile：macOS 的值放在 `board.toml` 的

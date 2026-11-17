@@ -28,6 +28,7 @@ def main():
     arch = board['payload']['runtime']['boot_tool_arch']
     if arch != 'arm64':
         raise SystemExit('Nabu owner boot tools require the standard arm64 ABI')
+    subprocess.run([sys.executable, str(ROOT / 'devices/nabu/tests/test_session_observer27.py')], check=True)
     spec = importlib.util.spec_from_file_location('boot_runtime', ROOT / 'scripts/build-boot-runtime.py')
     builder = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(builder)
@@ -52,8 +53,12 @@ def main():
                                  cpu_type=hex(cpu), cpu_subtype=hex(subtype), cdhash=cdhash,
                                  codesign_strict_verified=True)
     inputs = ['scripts/build-boot-runtime.py', 'scripts/macos-boot-shims/apfs_boot_util.c',
+              'scripts/macos-boot-shims/nabu_raw_stacks.h',
+              'scripts/macos-boot-shims/nabu_session_observer.h',
+              'scripts/macos-boot-shims/observer-entitlements.plist',
               'scripts/absent-service/build.py', 'scripts/absent-service/absentd.c',
               'devices/nabu/board.toml', 'devices/nabu/scripts/build-boot-tools.py']
+    inputs.append('devices/nabu/tests/test_session_observer27.py')
     report = dict(host=platform.machine(), target=arch, build='26C5035r',
                   commit=subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
                   files=records, source_sha256={f: hashlib.sha256((ROOT / f).read_bytes()).hexdigest() for f in inputs},
