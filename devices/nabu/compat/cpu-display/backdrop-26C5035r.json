@@ -1,0 +1,34 @@
+{
+  "build": "26C5035r",
+  "patches": [
+    {
+      "name": "CARenderOGLRender::native-backdrop-completion-1",
+      "va": "0x18e03685c",
+      "file": "dyld_shared_cache_arm64e.03",
+      "offset": "0x5c3685c",
+      "original": "a00180524039a672010080d2020080d2",
+      "replacement": "68ca42f9c800e037e00313aa010080d2",
+      "page_sha256": "f5a61945ee361010f4e61a57eb91442866f332a23cfc505bcf99f82f03a60f25",
+      "patched_page_sha256": "11a2d103679b39666c9ad43fd0762da6cea076bc95674eb7db47d3703816041d"
+    },
+    {
+      "name": "CARenderOGLRender::native-backdrop-completion-2",
+      "va": "0x18e03686c",
+      "file": "dyld_shared_cache_arm64e.03",
+      "offset": "0x5c3686c",
+      "original": "030080d2040080d28ffd8294",
+      "replacement": "e1a5ff971f2003d51f2003d5",
+      "page_sha256": "f5a61945ee361010f4e61a57eb91442866f332a23cfc505bcf99f82f03a60f25",
+      "patched_page_sha256": "11a2d103679b39666c9ad43fd0762da6cea076bc95674eb7db47d3703816041d"
+    }
+  ],
+  "scope": "Legacy CARenderOGLRender shared API used with software callbacks by CGLayerKitFetch; not Metal rendering",
+  "guard": "Skip when Update::_backdrop_invalidations_finalized (bit 28 at +0x590) is already true",
+  "native_completion": "CARenderUpdateClipBackdropInvalidations(Update*, NULL)",
+  "native_clip": "0x18e01fff0",
+  "native_finalizer": "0x18e01880c",
+  "continuation": "0x18e036878",
+  "assertion_retained": "0x18df6ce84 -> 0x18df6dd94",
+  "profiler_effect": "Opening kdebug trace replaced by guarded lifecycle completion; existing closing event retained",
+  "device_tested": false
+}

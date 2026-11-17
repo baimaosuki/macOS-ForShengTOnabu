@@ -50,6 +50,8 @@ text_fixups = [
     "dyld_shared_cache_arm64e.01,44793b8,301ac1daf10310aaf147c1da,f01f50b3f10310aaf11f50b3",
     "dyld_shared_cache_arm64e.01,4321070,301ac1daf10310aaf147c1da,f01f50b3f10310aaf11f50b3",
     "dyld_shared_cache_arm64e.01,432110c,301ec1daf10310aaf147c1da,f01f50b3f10310aaf11f50b3",
+    "dyld_shared_cache_arm64e.03,5c3685c,a00180524039a672010080d2020080d2,68ca42f9c800e037e00313aa010080d2",
+    "dyld_shared_cache_arm64e.03,5c3686c,030080d2040080d28ffd8294,e1a5ff971f2003d51f2003d5",
 ]
 # CPU display registration has its own offline-legacy-register switch. The
 # optional offline-mobile-graphics-client diagnostic calls the legacy five-arg

@@ -58,6 +58,7 @@ nabu_session_enabled(const char *arguments)
 #include <sys/reboot.h>
 #include "nabu_observer_output.h"
 #include "nabu_clean_shutdown.h"
+#include "nabu_process_list.h"
 
 extern char **environ;
 
@@ -91,7 +92,7 @@ nabu_session_watch(void)
         fprintf(stderr, "NABU27-SESSION: console open failed errno=%d\n", errno);
     nabu_raw_output_fd = -1;
     nabu_raw_timestamp_ns = nabu_session_clock();
-    nabu_raw_printf("NABU-RAWSTACK startup version=30 pid=%d console_errno=%d\n",
+    nabu_raw_printf("NABU-RAWSTACK startup version=31 pid=%d console_errno=%d\n",
         getpid(), nabu_raw_console_fd < 0 ? errno : 0);
     /* Lock the persistent inode, not a PID file: a reboot automatically
      * releases it and a repeated phase-2 invocation cannot start a second watch. */
@@ -147,7 +148,7 @@ nabu_session_watch(void)
         halt_seconds = nabu_clean_shutdown_seconds(bootargs);
     }
     nabu_raw_timestamp_ns = started;
-    nabu_raw_printf("NABU-RAWSTACK watch begin version=30 timeout=900 rounds=6 "
+    nabu_raw_printf("NABU-RAWSTACK watch begin version=31 timeout=900 rounds=6 "
         "after_discovery=0,120,240,320,480,660 auth_after_discovery=0,30,90,180,360,540 "
         "disk=/private/var/log/nabu-session27/%s "
         "disk_open_errno=%d mirror=/dev/console readonly=1\n", name, output_error);
@@ -156,66 +157,58 @@ nabu_session_watch(void)
     while (nabu_session_clock() - started < UINT64_C(900000000000)) {
         if (halt_seconds && nabu_session_clock() - started >=
             UINT64_C(1000000000) * halt_seconds) break;
-        int mib[] = {CTL_KERN, KERN_PROC, KERN_PROC_ALL, 0};
         size_t bytes = 0;
-        if (!sysctl(mib, 4, NULL, &bytes, NULL, 0) && bytes && bytes <= 8 * 1024 * 1024) {
-            size_t capacity = bytes + 16 * sizeof(struct kinfo_proc);
-            struct kinfo_proc *processes = malloc(capacity);
-            if (processes) {
-                bytes = capacity;
-                if (!sysctl(mib, 4, processes, &bytes, NULL, 0) && bytes <= capacity &&
-                    !(bytes % sizeof(*processes))) {
-                    for (size_t i = 0; i < bytes / sizeof(*processes); ++i) {
-                        pid_t pid = processes[i].kp_proc.p_pid;
-                        if (pid <= 1 || pid == getpid()) continue;
-                        for (unsigned n = 0; n < count; ++n) {
-                            uint64_t now = nabu_session_clock();
-                            if (!nabu_session_due(&targets[n], now)) continue;
-                            /* p_comm is truncated. Confirm the executable basename
-                             * so the long backgroundtaskmanagementd name works. */
-                            if (strncmp(processes[i].kp_proc.p_comm, targets[n].name,
-                                sizeof(processes[i].kp_proc.p_comm) - 1)) continue;
-                            char path[PROC_PIDPATHINFO_MAXSIZE];
-                            int size = proc_pidpath(pid, path, sizeof(path));
-                            if (size <= 0 || size >= (int)sizeof(path)) continue;
-                            path[size] = 0;
-                            const char *base = strrchr(path, '/');
-                            if (!base || strcmp(base + 1, targets[n].name)) continue;
-                            nabu_raw_pid = pid;
-                            nabu_raw_round = targets[n].round + 1;
-                            nabu_raw_timestamp_ns = now;
-                            nabu_raw_printf("NABU-RAWSTACK watch target=%s pid=%d path=%.160s\n",
-                                targets[n].name, pid, path);
-                            if (!targets[n].round)
-                                nabu_raw_printf("NABU-RAWSTACK schedule target=%s "
-                                    "after_discovery=%s\n", targets[n].name,
-                                    nabu_session_auth_target(targets[n].name) ?
-                                    "0,30,90,180,360,540" : "0,120,240,320,480,660");
-                            (void)fsync(output);
-                            pid_t child = fork();
-                            if (!child) {
-                                alarm(15);
-                                _exit(nabu_raw_target(pid));
-                            }
-                            if (child > 0) {
-                                int status = 0;
-                                pid_t waited;
-                                do { waited = waitpid(child, &status, 0); }
-                                while (waited < 0 && errno == EINTR);
-                                nabu_raw_printf("NABU-RAWSTACK watch result=%s pid=%d "
-                                    "wait=%d status_raw=%d truncated=%u\n",
-                                    targets[n].name, pid, waited, status,
-                                    waited < 0 || !WIFEXITED(status) || WEXITSTATUS(status));
-                                if (!targets[n].round) targets[n].discovered = now;
-                                ++targets[n].round;
-                                (void)fsync(output);
-                            } else nabu_raw_printf("NABU-RAWSTACK fork errno=%d\n", errno);
-                        }
+        struct kinfo_proc *processes = nabu_session_process_list(&bytes);
+        if (processes) {
+            for (size_t i = 0; i < bytes / sizeof(*processes); ++i) {
+                pid_t pid = processes[i].kp_proc.p_pid;
+                if (pid <= 1 || pid == getpid()) continue;
+                for (unsigned n = 0; n < count; ++n) {
+                    uint64_t now = nabu_session_clock();
+                    if (!nabu_session_due(&targets[n], now)) continue;
+                    /* p_comm is truncated. Confirm the executable basename
+                     * so the long backgroundtaskmanagementd name works. */
+                    if (strncmp(processes[i].kp_proc.p_comm, targets[n].name,
+                        sizeof(processes[i].kp_proc.p_comm) - 1)) continue;
+                    char path[PROC_PIDPATHINFO_MAXSIZE];
+                    int size = proc_pidpath(pid, path, sizeof(path));
+                    if (size <= 0 || size >= (int)sizeof(path)) continue;
+                    path[size] = 0;
+                    const char *base = strrchr(path, '/');
+                    if (!base || strcmp(base + 1, targets[n].name)) continue;
+                    nabu_raw_pid = pid;
+                    nabu_raw_round = targets[n].round + 1;
+                    nabu_raw_timestamp_ns = now;
+                    nabu_raw_printf("NABU-RAWSTACK watch target=%s pid=%d path=%.160s\n",
+                        targets[n].name, pid, path);
+                    if (!targets[n].round)
+                        nabu_raw_printf("NABU-RAWSTACK schedule target=%s "
+                            "after_discovery=%s\n", targets[n].name,
+                            nabu_session_auth_target(targets[n].name) ?
+                            "0,30,90,180,360,540" : "0,120,240,320,480,660");
+                    (void)fsync(output);
+                    pid_t child = fork();
+                    if (!child) {
+                        alarm(15);
+                        _exit(nabu_raw_target(pid));
                     }
-                } else nabu_raw_printf("NABU-RAWSTACK process-list errno=%d bytes=%zu\n", errno, bytes);
-                free(processes);
+                    if (child > 0) {
+                        int status = 0;
+                        pid_t waited;
+                        do { waited = waitpid(child, &status, 0); }
+                        while (waited < 0 && errno == EINTR);
+                        nabu_raw_printf("NABU-RAWSTACK watch result=%s pid=%d "
+                            "wait=%d status_raw=%d truncated=%u\n",
+                            targets[n].name, pid, waited, status,
+                            waited < 0 || !WIFEXITED(status) || WEXITSTATUS(status));
+                        if (!targets[n].round) targets[n].discovered = now;
+                        ++targets[n].round;
+                        (void)fsync(output);
+                    } else nabu_raw_printf("NABU-RAWSTACK fork errno=%d\n", errno);
+                }
             }
-        }
+            free(processes);
+        } else nabu_raw_printf("NABU-RAWSTACK process-list errno=%d bytes=%zu retries=5 capacity_factor=2\n", errno, bytes);
         unsigned complete = 0;
         for (unsigned n = 0; n < count; ++n) complete += targets[n].round == NABU_SESSION_ROUNDS;
         if (complete == count) break;

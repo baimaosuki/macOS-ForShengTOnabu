@@ -38,7 +38,8 @@ def main():
     magnify = json.loads((device / 'compat/cpu-display/magnify-26C5035r.json').read_text())
     disclosure = json.loads((device / 'compat/cpu-display/managed-tcc-26C5035r.json').read_text())
     hotpath = json.loads((device / 'compat/cpu-display/nopac-hotpath-26C5035r.json').read_text())
-    entries = fixture['patches'] + session['patches'] + magnify['patches'] + disclosure['patches'] + hotpath['patches']
+    backdrop = json.loads((device / 'compat/cpu-display/backdrop-26C5035r.json').read_text())
+    entries = fixture['patches'] + session['patches'] + magnify['patches'] + disclosure['patches'] + hotpath['patches'] + backdrop['patches']
     for entry in entries:
         path = args.cache.with_name(entry['file'])
         offset = int(entry['offset'], 16)

@@ -1,5 +1,24 @@
 # macOS 配置
 
+coldstart 完整日志到 933 秒。WindowServer 159 在
+`CompositorSW -> CGLayerKitFetch -> CARenderOGLRender -> prepare_layers_roi`
+因 `r.update()->_backdrop_invalidations_finalized` 断言退出。
+CGLayerKitFetch 传入的是 kCARenderSoftwareCallbacksRef，OGL 命名空间在此
+仍是软件绘制。两条精确规则在旧渲染包装函数绘制前，对尚未完成收尾的 Update
+调用原生 CARenderUpdateClipBackdropInvalidations(Update*, NULL)。原生 API 将
+空 region 解释为无限区域，执行 backdrop group 的裁剪，并在原生延期裁剪状态下
+以 false 调用原 finalizer；已完成的更新跳过调用。没有该延期状态的异常未完成
+更新仍会触发原断言。保留原断言、软件 callbacks、destination、绘制、回收及 PAC
+返回流程。此处占用开头 kdebug trace 块，末尾 trace 保留；影响范围为共享旧渲染
+API 及其他调用者。8 个指令回放用例执行真实 wrapper/clip/finalizer/ROI 检查，
+分配、锁、shape 运算及引用计数、PAC 传输为模型；未证明实机像素或桌面显示。
+lsd 187 在 887 秒已进入原生服务事件循环，不能把完整日志黑屏只归因于冷建库。
+16 MiB 缓冲区不能证明建库接近完成，也不能据此识别被回滚的未知 inode。
+v31 观察器以两倍容量（最高 8 MiB）读取进程表，ENOMEM 最多重试 5 次，并拒绝
+半份或异常长度记录。10 个 ASan/UBSan 用例覆盖增长和错误。该修改处理枚举竞争；
+逐进程抓栈的 15 秒子进程预算仍可能推迟轮次，单次 ENOMEM 不能证明整个 120 秒
+采样空窗的成因。
+
 Nabu 在不支持硬件 PAC 的 CPU 上将26C5035r CoreFoundation六处精确代码块降为
 原生指令：五处 `AUTD; MOV; XPACD` 改为 `BFC; MOV; BFC`，按现有模拟器保留
 数据顶字节、清除48..55位；签名检查的两个PACGA改为现有模拟语义的两个XOR。

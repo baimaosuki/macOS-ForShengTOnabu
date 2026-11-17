@@ -1,5 +1,30 @@
 # macOS profile
 
+The coldstart capture extends to 933 seconds. WindowServer 159 aborts in
+`CompositorSW -> CGLayerKitFetch -> CARenderOGLRender -> prepare_layers_roi`
+on `r.update()->_backdrop_invalidations_finalized`. `CGLayerKitFetch` passes
+`kCARenderSoftwareCallbacksRef`, so the OGL namespace here is software rendering.
+The two exact legacy-wrapper rules complete an unfinished Update through the
+original `CARenderUpdateClipBackdropInvalidations(Update*, NULL)` before drawing.
+The native API treats a null region as infinite, retains group clipping, and
+calls the original finalizer with false when deferred clipping was requested.
+Already-finalized updates bypass this call; an inconsistent unfinalized Update
+without that native deferred-clipping state still fails the original assertion.
+The assertion, software callbacks, destination, rendering, collection and PAC
+return flow remain. This replaces only the opening kdebug trace block; the
+closing trace remains. The rule affects the shared legacy render API, including
+other callers. Eight instruction-replay cases execute the original wrapper,
+clip, finalizer and ROI guard; allocation, locks, shape algebra/refcounts and PAC
+transport are modeled. Pixel rendering and device continuation remain untested.
+lsd 187 is in its normal server run loop by 887 seconds, so cold construction
+alone cannot explain the complete capture. Buffer size does not establish
+construction progress percentage or identify an unknown rolled-back inode.
+Observer version 31 doubles process snapshot capacity (bounded to 8 MiB), retries
+ENOMEM up to five attempts and rejects partial/malformed snapshots. Ten ASan/
+UBSan cases cover growth and errors. This fixes the enumeration race; sequential
+15-second child budgets can still delay scheduled rounds. It does not establish
+that one ENOMEM caused the entire observed 120-second gap.
+
 Nabu lowers six exact 26C5035r CoreFoundation blocks to native instructions on
 its no-PAuth CPU. Five `AUTD; MOV; XPACD` blocks become `BFC; MOV; BFC`, preserving
 the top data tag and clearing bits 48..55 exactly as the board's emulator does.

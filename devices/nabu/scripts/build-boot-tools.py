@@ -57,10 +57,12 @@ def main():
               'scripts/macos-boot-shims/nabu_session_observer.h',
               'scripts/macos-boot-shims/nabu_observer_output.h',
               'scripts/macos-boot-shims/nabu_clean_shutdown.h',
+              'scripts/macos-boot-shims/nabu_process_list.h',
               'scripts/macos-boot-shims/observer-entitlements.plist',
               'scripts/absent-service/build.py', 'scripts/absent-service/absentd.c',
               'devices/nabu/board.toml', 'devices/nabu/scripts/build-boot-tools.py']
-    inputs.append('devices/nabu/tests/test_session_observer27.py')
+    inputs.extend(['devices/nabu/tests/test_session_observer27.py',
+                   'devices/nabu/tests/test_process_list27.py'])
     report = dict(host=platform.machine(), target=arch, build='26C5035r',
                   commit=subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip(),
                   files=records, source_sha256={f: hashlib.sha256((ROOT / f).read_bytes()).hexdigest() for f in inputs},
