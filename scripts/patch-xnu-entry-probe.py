@@ -230,6 +230,20 @@ def assemble_c(source, va, workdir, symbols):
         if not any(base <= panic_log < base + size for base, size, _, _ in SEGMENTS):
             raise SystemExit('Invalid _nabu_log_panic_stack')
         definitions.append(f'-DPANIC_ESP_LOG={panic_log:#x}UL')
+    diagnostic_symbols = [('PANIC_MSGBUFP', '_msgbufp')]
+    nabu_diagnostics = [('PANIC_NABU_STATE', '_nabu_log_writer_state'),
+                        ('PANIC_NABU_ROUNDS', '_nabu_log_writer_rounds'),
+                        ('PANIC_NABU_FAILURES', '_nabu_log_writer_failures'),
+                        ('PANIC_NABU_MEMORY', '__ZL21nabu_esp_memory_state')]
+    if all(name in symbols for _, name in nabu_diagnostics):
+        diagnostic_symbols += nabu_diagnostics
+    for macro, name in diagnostic_symbols:
+        address = symbols.get(name)
+        if address is None:
+            continue
+        if not any(base <= address and address + 8 <= base + size for base, size, _, _ in SEGMENTS):
+            raise SystemExit(f'Invalid panic diagnostic symbol {name}')
+        definitions.append(f'-D{macro}={address:#x}UL')
     subprocess.run([clang, '--target=aarch64-none-elf', '-ffreestanding', '-fno-builtin', '-fno-stack-protector',
                     '-mgeneral-regs-only', '-fno-pic', '-mcmodel=tiny', '-Oz', f'-DVINFO={VINFO_VA:#x}UL',
                     *definitions, f'-I{font_dir}', '-c', source, '-o', obj], check=True)
@@ -275,6 +289,29 @@ def panic_common_entry(workdir, code, load):
     if code[at:at + 8] != struct.pack('<II', 0xf9400021, branch(entry + 4, main)):
         raise SystemExit('Common panic entry does not dereference the Darwin va_list pointer and branch to the renderer')
     return entry
+
+
+def native_text_padding(kernel):
+    """Unused file-backed executable tail after every native text section.
+
+    This never borrows retained kext space or extends a segment mapping.
+    The caller separately requires that every byte being filled is zero.
+    """
+    sys.path.insert(0, str(ROOT / 'kits/XnuPrelink'))
+    from kc_image import Image
+    raw = kernel.read_bytes()
+    outer = Image(raw)
+    native = Image(raw, outer.entries['com.apple.kernel'][1]) if outer.entries else outer
+    for segment in native.segments:
+        if segment['name'] != '__TEXT_EXEC' or not segment['filesize']:
+            continue
+        ends = [section['va'] + section['size'] for section in native.sections
+                if section['segment'] == '__TEXT_EXEC' and section['size']]
+        if ends:
+            begin = (max(ends) + 15) & ~15
+            end = segment['va'] + segment['filesize']
+            if begin < end:
+                yield begin, end
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -483,13 +520,22 @@ _start:
     if args.panic_screen:
         # Right after the last probe cave in use, so the padding is shared as tightly as possible.
         PANIC_CAVE = max(CAVES[stage] for _, stage, _ in sites) + CAVE_SIZE
-        if word(PANIC_VA) in (0, 0xFFFFFFFF) or any(data[file_offset(PANIC_CAVE):file_offset(PANIC_CAVE_END)]):
+        panic_cave_end = PANIC_CAVE_END
+        if word(PANIC_VA) in (0, 0xFFFFFFFF) or any(data[file_offset(PANIC_CAVE):file_offset(panic_cave_end)]):
             raise SystemExit('panic() or the panic screen padding is not as expected')
         with tempfile.TemporaryDirectory() as tmp:
             code, load, entry = assemble_c(ROOT / 'scripts/xnu-panic-screen.c', PANIC_CAVE, Path(tmp), kernel_names)
+            if load + len(code) > panic_cave_end:
+                for begin, end in native_text_padding(args.kernel):
+                    if any(data[file_offset(begin):file_offset(begin) + end - begin]):
+                        continue
+                    candidate, at, target = assemble_c(ROOT / 'scripts/xnu-panic-screen.c', begin, Path(tmp), kernel_names)
+                    if at + len(candidate) <= end:
+                        code, load, entry, panic_cave_end = candidate, at, target, end
+                        break
             common_entry = panic_common_entry(Path(tmp), code, load)
-        if load + len(code) > PANIC_CAVE_END:
-            raise SystemExit(f'panic screen is {len(code):#x} bytes at {load:#x}, the padding ends at {PANIC_CAVE_END:#x}')
+        if load + len(code) > panic_cave_end:
+            raise SystemExit(f'panic screen is {len(code):#x} bytes at {load:#x}, the padding ends at {panic_cave_end:#x}')
         if any(data[file_offset(load):file_offset(load) + len(code)]):
             raise SystemExit(f'Padding at {load:#x} is not empty')
         data[file_offset(load):file_offset(load) + len(code)] = code

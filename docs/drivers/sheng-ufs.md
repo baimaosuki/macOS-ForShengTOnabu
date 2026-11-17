@@ -97,3 +97,8 @@ Like SHENG `BootLog.c`, NABU allocates wired ring, snapshot and FAT-proof
 buffers during normal UFS startup. They stay allocated for panic use; the
 9 MiB buffers do not occupy the fixed native `__DATA` prelink gap. The ring
 starts before UFS bring-up and is seeded with SHENG's bounded kernel-msgbuf copy.
+
+The panic screen also reads the existing kernel msgbuf without allocating or
+writing storage. It shows the latest critical process registers, up to 12
+user frames, dyld slide, the last journal startup message and writer counters.
+This preserves the abort evidence on screen when the ESP journal is unavailable.
