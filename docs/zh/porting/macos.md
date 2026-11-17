@@ -90,6 +90,7 @@ boot_shims = true
 | `payload.runtime.data_gib` | Data 卷大小。持久化 Data 存储不能与 `userdata` 中的根镜像重叠 |
 | `payload.runtime.skip_setup` | `true` 时在 seed 命令中加入 `--skip-setup` |
 | `payload.runtime.boot_shims` | 把 owner `apfs_boot_util` 加入 addon，配合 `apfs-boot-shim=1` |
+| `payload.runtime.boot_tool_arch` | 自带工具的 ABI，默认 `arm64e`。Nabu 使用 `arm64`：其无 PAuth 加载器接受 Apple 的 arm64e ABI v0，而 SDK 的 arm64e 目标生成预览 ABI v1。此设置同时用于 APFS 启动工具和 absent-service 工具 |
 | `payload.runtime.gpu_addon` | `true` 时构建 macOS 的 Metal 插件。带 `gpu-addon=1` 时内核把它写入 Data 上的 `/Library/GPUBundles` |
 | `remove` | 仅适用于 iPadOS 的板级键，例如安装入口、`payload.skip_setup_tool` 和 `payload.runtime.appsync` |
 

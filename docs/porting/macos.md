@@ -95,6 +95,7 @@ boot_shims = true
 | `payload.runtime.data_gib` | Size of the Data volume. The persistent Data store must not overlap the root image in `userdata` |
 | `payload.runtime.skip_setup` | `true` adds `--skip-setup` to the seed command |
 | `payload.runtime.boot_shims` | Adds the owner `apfs_boot_util` to the addon, for `apfs-boot-shim=1` |
+| `payload.runtime.boot_tool_arch` | Owner tool ABI, `arm64e` by default. Nabu uses `arm64`: its no-PAuth loader accepts Apple's arm64e ABI v0, while the SDK's arm64e target emits preview ABI v1. This applies to the APFS boot shim and absent-service tool |
 | `payload.runtime.gpu_addon` | `true` builds the Metal plugin for macOS. With `gpu-addon=1` the kernel writes it to `/Library/GPUBundles` on Data |
 | `remove` | Board keys that apply to iPadOS only, such as the install entry, `payload.skip_setup_tool` and `payload.runtime.appsync` |
 

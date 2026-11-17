@@ -62,6 +62,9 @@ data_seed_tool = "scripts/make-macos-data-seed.py"
 data_gib = 8
 skip_setup = true
 boot_shims = true
+# The no-PAuth loader accepts Apple's arm64e ABI v0, while Xcode emits
+# preview ABI v1 for -target arm64e. Owner C tools use the stable arm64 ABI.
+boot_tool_arch = "arm64"
 gpu_addon = false
 trust_components = ["StaticTrustCache", "Cryptex1,SystemTrustCache", "Cryptex1,AppTrustCache"]
 

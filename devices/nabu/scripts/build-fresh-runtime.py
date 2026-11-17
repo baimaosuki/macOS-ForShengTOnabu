@@ -50,7 +50,8 @@ def main():
     request = dict(tree=str(ROOT), device=str(ROOT / 'devices/nabu'), output=str(private),
                    target='macos27', build='26C5035r', data_ramdisk=str(seed),
                    init_data=False, gpu_addon_enabled=False, gpu_addon=None,
-                   trust_cache=None, boot_shims=True, trust_modules=trust)
+                   trust_cache=None, boot_shims=True, trust_modules=trust,
+                   boot_tool_arch=ctx.board['payload']['runtime']['boot_tool_arch'])
     request_file = output / 'request.json'
     request_file.write_text(json.dumps(request, indent=2) + '\n')
     subprocess.run([sys.executable, str(ROOT / 'scripts/build-boot-runtime.py'), '--request', str(request_file)], check=True)

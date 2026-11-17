@@ -122,14 +122,16 @@ def build_plugin(target):
     return ROOT / 'build' / {'ios27': 'adreno-metal-plugin27', 'macos27': 'adreno-metal-plugin-macos27'}.get(target, 'adreno-metal-plugin')
 
 
-def build_boot_shims(work, base=None):
+def build_boot_shims(work, base=None, arch='arm64e'):
     """macOS on a read-only root container: the owner apfs_boot_util (scripts/macos-boot-shims) below bootshim/ of the addon
     (BASE, or one of its own), which the kernel shows over apfs.fs/Contents/Resources with apfs-boot-shim=1."""
+    if arch not in ('arm64', 'arm64e'):
+        raise ValueError('unsupported boot tool architecture: ' + arch)
     tree = work / 'boot-shims'
     (tree / 'bootshim').mkdir(parents=True)
     exe = tree / 'bootshim/apfs_boot_util'
     sdk = subprocess.check_output(['xcrun', '--sdk', 'macosx', '--show-sdk-path'], text=True).strip()
-    run('xcrun', '--sdk', 'macosx', 'clang', '-target', 'arm64e-apple-macos27.0', '-isysroot', sdk, '-O2', '-Wall', '-Werror',
+    run('xcrun', '--sdk', 'macosx', 'clang', '-target', f'{arch}-apple-macos27.0', '-isysroot', sdk, '-O2', '-Wall', '-Werror',
         ROOT / 'scripts/macos-boot-shims/apfs_boot_util.c', '-o', exe)
     run('codesign', '--force', '--sign', '-', '--pagesize', '4096', '--identifier', 'org.unixnu.apfs_boot_util', exe)
     if base is None:
@@ -293,7 +295,7 @@ def main():
                     script('make-gpu-addon.py', '--publish', '--no-daemon', *extra, candidate,
                            env=dict(os.environ, ADRENO_PLUGIN_DIR=str(plugin)))
                     if request.get('boot_shims'):
-                        candidate = build_boot_shims(work, candidate)
+                        candidate = build_boot_shims(work, candidate, request.get('boot_tool_arch', 'arm64e'))
                     if request.get('audio_tool'):
                         audio = work / 'audio'
                         run(sys.executable, Path(request['device']) / request['audio_tool'], audio, request['audio_target'])
@@ -311,7 +313,7 @@ def main():
                     candidate.replace(addon)
         if addon is None and not want_addon and request.get('boot_shims'):
             addon = out / 'boot-shims.bin'
-            build_boot_shims(work).replace(addon)
+            build_boot_shims(work, arch=request.get('boot_tool_arch', 'arm64e')).replace(addon)
         bluetooth_report = None
         if request.get('bluetooth_tool'):
             bluetooth = work / 'bluetooth'
@@ -411,7 +413,7 @@ def main():
             # macOS: the stand-in the kernel runs in place of a daemon on its deny-exec list (scripts/absent-service), at
             # /private/var/ngpu/bin/unixnu-absentd; its hash joins the owner trust with the addon's other executables.
             absent = work / 'absent'
-            script('absent-service/build.py', absent, 'macos27')
+            script('absent-service/build.py', absent, 'macos27', '--arch', request.get('boot_tool_arch', 'arm64e'))
             absent_report = json.loads((absent / 'report.json').read_text())
             candidate = work / 'absent-addon.bin'
             script('addon-add-dir.py', addon, candidate, 'bin', absent / 'bin')
