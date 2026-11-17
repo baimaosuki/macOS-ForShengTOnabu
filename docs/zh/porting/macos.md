@@ -1,5 +1,17 @@
 # macOS 配置
 
+最新 Nabu 实机观察器已正常输出。294、414、494 秒的 loginwindow 主线程
+寄存器、已捕获栈和 CPU 时间相同，停在 `NSApplication init+0x734 →
+TCCAccessLaunchDisclosurePromptIfNeeded → _tccd_send_message →
+xpc_connection_send_message_with_reply_sync`。AppKit 的
+`_showLaunchDisclosurePromptForManagedMacs` 首先查询 `TCC/managedTCC`。
+第八条签名文本规则仅在 `0x18a79d0ec` 将此特性查询返回值设为 false，执行
+原生关闭分支和函数退出。该共享 AppKit 方法会影响使用此启动披露的应用；
+不授予 TCC 权限，不改变通用访问检查。原指令重放覆盖实际 init 调用点和关闭
+分支；实机继续推进及桌面显示尚待验证。同期 lsd 继续建库注册及文件系统工作；
+稍后 usermanagerd 出现 persona-manager 断言。内核已编译 persona 函数，
+此特性开关不修复这两个后端。
+
 Nabu 观察器每次启动都以排他创建方式保留新的带序号日志；早期系统秒数和 PID
 可能重复，已有日志不能导致抓栈停止或被覆盖。落盘准备前先报告启动状态，磁盘
 写入和 ESP 控制台镜像互不阻断，磁盘满也继续镜像。用户栈上限为 64 帧。

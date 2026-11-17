@@ -1,5 +1,21 @@
 # macOS profile
 
+The next Nabu capture has working observer output. At 294, 414 and 494
+seconds, `loginwindow` has identical registers, captured frames and CPU times
+in `NSApplication init+0x734 -> TCCAccessLaunchDisclosurePromptIfNeeded ->
+_tccd_send_message -> xpc_connection_send_message_with_reply_sync`.
+AppKit's `_showLaunchDisclosurePromptForManagedMacs` first asks for
+`TCC/managedTCC`. The eighth signed-text rule changes only this feature query
+at `0x18a79d0ec` to false, taking the original disabled branch and epilogue.
+This shared AppKit method affects applications using managed-Mac launch
+disclosure. It does not grant TCC permissions or alter general access checks.
+Original-instruction replay covers the captured init callsite and disabled
+branch; hardware continuation and desktop display are still unverified.
+The same capture shows `lsd` progressing through database registration and
+filesystem work, and a later independent `usermanagerd` persona-manager
+assertion. The kernel's persona functions are compiled; neither backend is
+repaired by this feature gate.
+
 The Nabu observer reserves a new suffixed log file with exclusive creation on
 every boot. Its early wall-clock second and PID may repeat; an existing log
 must never stop observation or be overwritten. Startup reports precede disk

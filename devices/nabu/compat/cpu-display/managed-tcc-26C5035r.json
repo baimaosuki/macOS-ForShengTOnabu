@@ -1,0 +1,24 @@
+{
+  "build": "26C5035r",
+  "captured_chain": "loginwindow151/tid896 NSApplication init+0x734 -> _showLaunchDisclosurePromptForManagedMacs -> TCCAccessLaunchDisclosurePromptIfNeeded -> synchronous tccd reply;293.998/413.903/494.031seconds",
+  "feature_domain": "TCC",
+  "feature_name": "managedTCC",
+  "method": "0x18a79d0d0",
+  "native_feature_query": "0x190107f70",
+  "native_disabled_return": "0x18a79d128",
+  "original_tcc_function": "0x187700800",
+  "patches": [
+    {
+      "name": "AppKit::managedTCC-launch-disclosure-feature-disabled",
+      "va": "0x18a79d0ec",
+      "file": "dyld_shared_cache_arm64e.03",
+      "offset": "0x239d0ec",
+      "original": "a1ab6595",
+      "replacement": "00008052",
+      "page_sha256": "835cc3f910af7264a212b1fa64d88e2a6cb018d8d932091c80439fa1c7257535",
+      "patched_page_sha256": "a5b292e7e1c68896b76d9069bb372be7d33214856c5ef01f7bc15a4ecc4e7aa7"
+    }
+  ],
+  "scope": "Only AppKit managed-Mac launch-disclosure feature selection returns false; native cbz and epilogue execute. Shared method affects AppKit applications using this launch disclosure. Does not change TCC access checks, grant authorization, alter tccd, or repair LaunchServices/persona backend.",
+  "hardware_tested": false
+}
