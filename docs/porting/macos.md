@@ -1,5 +1,15 @@
 # macOS profile
 
+The Nabu 26C5035r session capture found `loginwindow` blocked in
+`NSApplication init -> SafeAperture -> getResourceValue:forKey:error: ->
+_LSCopyServerStore` at three snapshots between 374 and 499 seconds. The board's
+signed-text rule at `0x18acbb658` makes only this optional SafeAperture URL query
+report unavailable. Its pre-cleared result follows the original failure path,
+keeping the caller's mode bits and object cleanup. It does not disable
+LaunchServices, repair its database bootstrap, or establish that a desktop is
+visible. The concurrent `lsd` snapshots show active CPU work in database
+cleanup/extension-point registration, rather than one demonstrated blocked loop.
+
 For the Nabu CPU-only 26C5035r bring-up, `nabu-session-observer=1`
 starts a bounded read-only session observer from the signed phase-2 boot shim.
 It records native thread states, CPU times, raw frames and shared-cache slide

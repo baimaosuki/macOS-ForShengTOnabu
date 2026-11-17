@@ -34,7 +34,8 @@ def main():
     fixture = json.loads((device / 'compat/cpu-display/userland-26C5035r.json').read_text())
     configured = tomllib.loads((device / 'board.toml').read_text())['payload']['text_fixups']
     checked = []
-    for entry in fixture['patches']:
+    session = json.loads((device / 'compat/cpu-display/safe-aperture-26C5035r.json').read_text())
+    for entry in fixture['patches'] + session['patches']:
         path = args.cache.with_name(entry['file'])
         offset = int(entry['offset'], 16)
         expected = bytes.fromhex(entry['original'])
@@ -76,7 +77,7 @@ def main():
         superseded_partial_format_branch_removed=True,
         destination_guard_not_patched=True,
         patches=checked, device_tested=False), indent=2) + '\n')
-    print('26C5035r: exact CPU NULL fallback, native software renderer and five signed-text pages verified')
+    print(f'26C5035r: exact CPU NULL fallback, native software renderer and {len(checked)} signed-text rules verified')
 
 
 if __name__ == '__main__':

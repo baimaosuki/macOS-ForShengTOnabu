@@ -1,0 +1,19 @@
+{
+  "build": "26C5035r",
+  "captured_chain": "NSApplication init -> SafeAperture URL query -> _LSCopyServerStore; loginwindow143/tid884 rounds2,3,4",
+  "patches": [
+    {
+      "name": "AppKit::SafeAperture-optional-URL-unavailable",
+      "va": "0x18acbb658",
+      "file": "dyld_shared_cache_arm64e.03",
+      "offset": "0x28bb658",
+      "original": "ce674e95",
+      "replacement": "00008052",
+      "page_sha256": "66e688edac5e79a59c00ba592dee56ccf5ac389c100ea8a00d944427ece00875",
+      "patched_page_sha256": "e52e48d905eca5d9803da4a4ef86f8d78bf5957f1fbbf4a719623fb3d8dba0e3"
+    }
+  ],
+  "scope": "Only the optional SafeAperture getter skips its Foundation URL query; its pre-zeroed result takes the original false path. Existing mode bits and native releases remain. Does not repair lsd bootstrap or promise a desktop.",
+  "getter": "0x18acbb5e8",
+  "caller": "0x18acbaeec"
+}

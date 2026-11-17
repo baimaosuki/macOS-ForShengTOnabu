@@ -1,5 +1,12 @@
 # macOS 配置
 
+Nabu 的 26C5035r 实机栈在 374 至 499 秒三次捕获 loginwindow 卡在
+`NSApplication init → SafeAperture → URL 属性查询 → _LSCopyServerStore`。
+设备签名文本规则在 `0x18acbb658` 仅将这处可选 SafeAperture URL 查询转为
+“不可用”，由预先清零的结果走原生失败分支，保留调用者模式位与对象清理。
+该规则不禁用 LaunchServices、不修复其数据库后端，也不代表桌面已经显示。
+同期 lsd 栈显示数据库清理／扩展点注册的持续 CPU 工作，不能称为已证实的单点死循环。
+
 Nabu 的 26C5035r CPU 模式可用 `nabu-session-observer=1`，由已签名的第二阶段
 启动 shim 异步启动只读观察器。在发现目标进程后 0、120、240、320 秒，记录
 线程状态、CPU 时间、原始栈和共享缓存 slide；完整记录写入
