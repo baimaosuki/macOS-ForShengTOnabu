@@ -180,34 +180,51 @@ static void nabuEspThread (void *,wait_result_t) {
   nabu_log_writer_state=1;
   {
     nb_esp_io_context ctx={false,0}; bool opened=false;
-    for (unsigned attempt=0;attempt<10 && !nabu_esp_panic_seen;++attempt) {
-      clock_interval_to_deadline (5000,kMillisecondScale,&ctx.deadline);
-      if (!nabu_esp_lun_blocks && !nabuEspCapacity (&ctx)) {
-        IOLog ("NABULOG2: LUN capacity unavailable or not 4K; preserving ESP\n");
-        if (!gHost.ready || gHost.poisoned) break;
-        IOSleep (1000);continue;
+    unsigned attempts=0;
+    // Root/data initialization can keep all diagnostic slots occupied. Retry
+    // on this worker for the entire boot; failed metadata/slot verification
+    // never grants writes and never consumes a finite startup-attempt quota.
+    while (!__atomic_load_n (&nabu_esp_panic_seen,__ATOMIC_ACQUIRE)) {
+      if (attempts != ~0U) ++attempts;
+      const char *reason="host-not-ready";
+      if (gHost.poisoned) {
+        IOLog ("NABULOG2: writer stopped reason=transport-quarantined attempts=%u\n",attempts);
+        goto stopped;
       }
-      if (nb_volume_open (nabu_esp_volume,nabuEspRead,&ctx,nabu_esp_lun_blocks,token)) {opened=true;break;}
-      IOLog ("NABULOG2: volume refused reason=%s ready=%u poisoned=%u\n",
-             nb_volume_failure_name(nabu_esp_volume->failure),gHost.ready?1:0,gHost.poisoned?1:0);
-      if (!gHost.ready || gHost.poisoned) break;
-      IOSleep (1000);
+      clock_interval_to_deadline (5000,kMillisecondScale,&ctx.deadline);
+      if (!gHost.ready) {
+        // The normal storage lifecycle may not have published readiness yet.
+      } else if (!nabu_esp_lun_blocks && !nabuEspCapacity (&ctx)) {
+        reason="lun-capacity";
+      } else if (!nb_volume_open (nabu_esp_volume,nabuEspRead,&ctx,nabu_esp_lun_blocks,token)) {
+        reason=nb_volume_failure_name(nabu_esp_volume->failure);
+      } else {
+        // Every retry proves GPT/FAT/token again. An already-open window can
+        // only be reused for exactly the same verified extent.
+        if (!gStoreGeometry.valid || (nabu_esp_volume->esp_first <= gStoreGeometry.last &&
+            gStoreGeometry.first < nabu_esp_volume->esp_first+nabu_esp_volume->esp_blocks)) {
+          IOLog ("NABULOG2: ESP/root overlap or missing root geometry\n");goto stopped;
+        }
+        const uint64_t first=nabu_esp_volume->file_first+1, blocks=NB_LOG_FILE_BYTES/4096-1;
+        if (gEspLogOpen ? (gEspLogFirst != first || gEspLogBlocks != blocks) : !hostEspLogOpen (first,blocks)) {
+          IOLog ("NABULOG2: ESP write window refused\n");goto stopped;
+        }
+        nb_put64 (boot,mach_absolute_time ());nb_put64 (boot+8,mach_absolute_time ()^nb_le64(nabu_log_build_id));
+        clock_interval_to_deadline (5000,kMillisecondScale,&ctx.deadline);
+        if (nb_journal_open (&nabu_esp_journal,nabu_esp_volume,nabuEspWrite,nabuEspSync,&ctx,boot,nabu_log_build_id)) {
+          opened=true;
+          IOLog ("NABULOG2: startup verified attempts=%u retry_limit=none\n",attempts);
+          break;
+        }
+        reason="slot-verification";
+      }
+      // Report the first refusal and then at most once per fifteen attempts.
+      // A corrupt or mismatched file stays read-only for all these retries.
+      if (attempts == 1 || attempts % 15 == 0)
+        IOLog ("NABULOG2: startup retry reason=%s attempt=%u next_ms=2000 retry_limit=none\n",reason,attempts);
+      IOSleep (2000);
     }
     if (!opened) goto stopped;
-    // The whole ESP must be disjoint from the already checked macosroot
-    // partition, including its Data store and raw-log reserve.
-    if (!gStoreGeometry.valid || (nabu_esp_volume->esp_first <= gStoreGeometry.last &&
-        gStoreGeometry.first < nabu_esp_volume->esp_first+nabu_esp_volume->esp_blocks)) {
-      IOLog ("NABULOG2: ESP/root overlap or missing root geometry\n");goto stopped;
-    }
-    if (!hostEspLogOpen (nabu_esp_volume->file_first+1,NB_LOG_FILE_BYTES/4096-1)) {
-      IOLog ("NABULOG2: ESP write window refused\n");goto stopped;
-    }
-    nb_put64 (boot,mach_absolute_time ());nb_put64 (boot+8,mach_absolute_time ()^nb_le64(nabu_log_build_id));
-    clock_interval_to_deadline (5000,kMillisecondScale,&ctx.deadline);
-    if (!nb_journal_open (&nabu_esp_journal,nabu_esp_volume,nabuEspWrite,nabuEspSync,&ctx,boot,nabu_log_build_id)) {
-      IOLog ("NABULOG2: slot verification refused; preserving existing file\n");goto stopped;
-    }
     // Volume reads are startup-only. Do not retain a pointer to a stack context.
     nabu_esp_volume->context=nullptr;nabu_esp_journal.context=nullptr;
   }

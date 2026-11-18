@@ -51,7 +51,7 @@ def main():
     cc=shutil.which('g++') or shutil.which('clang++');assert cc
     env=dict(os.environ,ASAN_OPTIONS='abort_on_error=1')
     (out/'NabuLogBuild.h').write_text('/* test identity is supplied by the harness */\n')
-    for name in ('EspLog','RootCommands','EspLogTransport'):
+    for name in ('EspLog','RootCommands','EspLogTransport','EspLogStartup'):
         cmd=[cc,'-std=c++17','-g','-Wall','-Wextra','-Werror','-fsanitize=address,undefined','-I'+str(out),str(source/(name+'.cpp')),'-o',str(out/name)]
         subprocess.run(cmd,check=True)
     results=[]
@@ -90,6 +90,25 @@ def main():
     if r.returncode:
         print(r.stdout+r.stderr,flush=True);r.check_returncode()
     results.append(dict(name='production ESP adapter',passed=True,output=r.stdout.strip()))
+    for mode in range(7):
+        path=out/f'startup-{mode}.img'
+        first=disk(path,5 if mode==2 else 6 if mode==3 else 0)
+        if mode==4:
+            with path.open('r+b') as f:
+                for slot in range(2):
+                    f.seek((first+1+slot*(SLOT//BLOCK))*BLOCK);f.write(b'INVALID!')
+        before=hashlib.sha256(path.read_bytes()).hexdigest()
+        r=subprocess.run([str(out/'EspLogStartup'),str(path),str(mode)],capture_output=True,text=True,env=env)
+        (out/f'EspLogStartup-{mode}.log').write_text(r.stdout+r.stderr)
+        if r.returncode:
+            print(r.stdout+r.stderr,flush=True);r.check_returncode()
+        if mode>=2:
+            assert hashlib.sha256(path.read_bytes()).hexdigest()==before
+        else:
+            with path.open('rb') as f:f.seek(first*BLOCK);container=f.read(FILE)
+            assert validate(container)[2]==b'EARLY\n'
+        path.unlink()
+        results.append(dict(name='production startup retry',mode=mode,passed=True,output=r.stdout.strip()))
     (out/'verification.json').write_text(json.dumps(dict(passed=True,sanitizers=['address','undefined'],cases=results),indent=2)+'\n')
     print(json.dumps(dict(passed=True,cases=len(results),sanitizers=['address','undefined'])))
 if __name__=='__main__':main()

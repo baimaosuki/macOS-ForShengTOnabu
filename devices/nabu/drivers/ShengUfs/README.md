@@ -191,3 +191,11 @@ Like SHENG `BootLog.c`, NABU allocates wired ring, snapshot and FAT-proof
 buffers during normal UFS startup. They stay allocated for panic use; the
 9 MiB buffers do not occupy the fixed native `__DATA` prelink gap. The ring
 starts before UFS bring-up and is seeded with SHENG's bounded kernel-msgbuf copy.
+
+The ESP logger retries startup verification on its own worker every two seconds
+without an attempt limit. Each attempt revalidates GPT/FAT/token and both journal
+slots. A window already opened for an earlier slot read may only be reused for
+the exact same extent. Invalid media remain read-only; root/ESP overlap, window
+change or host quarantine still stop the writer. Refusals are reported on the
+first and every fifteenth attempt. This repairs finite-retry exhaustion, not
+a proven cause of a hardware reboot.

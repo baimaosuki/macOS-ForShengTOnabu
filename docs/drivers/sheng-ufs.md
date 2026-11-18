@@ -102,3 +102,10 @@ The panic screen also reads the existing kernel msgbuf without allocating or
 writing storage. It shows the latest critical process registers, up to 12
 user frames, dyld slide, the last journal startup message and writer counters.
 This preserves the abort evidence on screen when the ESP journal is unavailable.
+
+NABU ESP journal startup no longer stops after ten metadata-read failures.
+An ordinary worker retries full verification every two seconds while the host
+remains healthy. Slot-read retries reuse only the exact verified write window.
+All GPT/FAT/token, alias, overlap and A/B checks remain mandatory; invalid input
+stays read-only. Host quarantine and changed/overlapping write extents stop
+startup. Refusal logs are rate-limited to the first and every fifteenth attempt.
