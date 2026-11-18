@@ -23,6 +23,7 @@ def main():
     parser.add_argument('--full', action='store_true', help='also compile archives and link the native kernel')
     options = parser.parse_args()
     subprocess.run([sys.executable, str(ROOT / 'devices/nabu/tests/test_cpu_trace27.py')], check=True)
+    subprocess.run([sys.executable, str(ROOT / 'devices/nabu/tests/test_power_hold27.py')], check=True)
     args = cli.parser().parse_args([
         "build", "kernel", "-D", str(ROOT / "devices/nabu"), "--os", "macos-27"
     ])

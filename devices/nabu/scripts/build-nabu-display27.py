@@ -105,6 +105,7 @@ leaves = ' '.join(f'LEAF({i})' for i in abi['leaves'])
 MACOS_CONSTANTS = ('#define NATIVE_LEGACY_MACOS 1\n'
     f"static constexpr unsigned kLegacyCurrentSwap={D['current']};\n"
     f"static constexpr unsigned kRequestDropReasons={R.get('drop_reasons', 0)},kRequestSwapInfoA={R.get('swap_info_a', 0)},kRequestSwapInfoB={R.get('swap_info_b', 0)};\n"
+    f"static constexpr unsigned kRequestCompleted={R.get('completed', R['masks'] + 4)};\n"
     f"static constexpr unsigned kLegacySwapInfoTime={D.get('swap_info_time', 0)},kLegacySwapInfoHeld={D.get('swap_info_held', 0)};\n"
     f"static constexpr unsigned kNotifyAsyncReference={N.get('async_reference', 0)},kNotifyMask={N.get('mask', 0)},kNotifyLastTime={N.get('last_time', 0)};\n"
     ) if MACOS else ''

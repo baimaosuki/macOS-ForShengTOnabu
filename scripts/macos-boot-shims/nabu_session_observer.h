@@ -78,7 +78,7 @@ nabu_session_enabled(const char *arguments)
 
 extern char **environ;
 
-#include "nabu_display_awake.h"
+/* Display sleep hold is owned by the NABU framebuffer, not caffeinate. */
 
 static uint64_t
 nabu_session_clock(void)
@@ -110,7 +110,7 @@ nabu_session_watch(void)
         fprintf(stderr, "NABU27-SESSION: console open failed errno=%d\n", errno);
     nabu_raw_output_fd = -1;
     nabu_raw_timestamp_ns = nabu_session_clock();
-    nabu_raw_printf("NABU-RAWSTACK startup version=35 pid=%d console_errno=%d\n",
+    nabu_raw_printf("NABU-RAWSTACK startup version=36 pid=%d console_errno=%d\n",
         getpid(), nabu_raw_console_fd < 0 ? errno : 0);
     /* Lock the persistent inode, not a PID file: a reboot automatically
      * releases it and a repeated phase-2 invocation cannot start a second watch. */
@@ -166,7 +166,7 @@ nabu_session_watch(void)
         halt_seconds = nabu_clean_shutdown_seconds(bootargs);
     }
     nabu_raw_timestamp_ns = started;
-    nabu_raw_printf("NABU-RAWSTACK watch begin version=35 timeout=1800 rounds=6 late_after_discovery=1000,1250 "
+    nabu_raw_printf("NABU-RAWSTACK watch begin version=36 timeout=1800 rounds=6 late_after_discovery=1000,1250 "
         "after_discovery=0,120,240,320,480,660 auth_after_discovery=0,30,90,180,360,540 "
         "disk=/private/var/log/nabu-session27/%s "
         "disk_open_errno=%d mirror=/dev/console readonly=1\n", name, output_error);
@@ -180,8 +180,7 @@ nabu_session_watch(void)
     for (;;) {
         uint64_t poll_now = nabu_session_clock();
         if (!poll_now || poll_now < started || poll_now - started >= duration) break;
-        nabu_session_hold_display(&display_helper, &display_attempts, &last_display_attempt, poll_now, "-d");
-        nabu_session_hold_display(&system_helper, &system_attempts, &last_system_attempt, poll_now, "-i");
+
         if (!store_synced && (!last_store_poll || poll_now-last_store_poll >= UINT64_C(10000000000))) {
             last_store_poll = poll_now;
             store_synced = nabu_store_sync("/private/var/folders/zz/zyxvpxvq6csfxvn_n0000000000000/0/com.apple.LaunchServices.dv/");

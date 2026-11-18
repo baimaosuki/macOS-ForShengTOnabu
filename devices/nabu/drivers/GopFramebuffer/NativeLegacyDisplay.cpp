@@ -193,6 +193,7 @@ extern "C" void native_legacy_direct_snapshot(void);
 class NativeLegacyDisplay : public IOMobileFramebufferLegacy {
     OSDeclareDefaultStructors(NativeLegacyDisplay)
     IOMemoryMap *bootMapping=nullptr;
+bool nabuSleepRejected = false;
 #include "nabu_cpu_scene.inc"
     void *shadow=nullptr;uint64_t shadowBytes=0;bool shadowValid=false;
     bool primary=false;
@@ -554,7 +555,23 @@ public:
         if(status!=kIOReturnSuccess){PMstop();logicalPM=false;IOMobileFramebufferLegacy::stop(provider);return false;}
         return true;
     }
+    // The native user client's request_power_change dispatches slot 345.
+    // Reject API-off before the original family changes requested power state.
+    IOReturn requestApiPower(unsigned long ordinal,IOService *device) override {
+        if (ordinal == 0 && primary && bootMapping) {
+            if (!nabuSleepRejected) IOLog("NABU27-CPU: sleep_rejected origin=request_power_change powerstate=0 policy=keep-scanout\n");
+            nabuSleepRejected = true;
+            return kIOReturnUnsupported;
+        }
+        if (ordinal) nabuSleepRejected = false;
+        return IOMobileFramebufferLegacy::requestApiPower(ordinal,device);
+    }
     IOReturn setPowerState(unsigned long ordinal,IOService *device) override {
+        if (ordinal == 0 && primary && bootMapping) {
+            if (!nabuSleepRejected) IOLog("NABU27-CPU: sleep_rejected origin=IOKit-PM powerstate=0 policy=keep-scanout\n");
+            nabuSleepRejected = true;
+            return IOPMAckImplied; // PM callbacks return an acknowledgement, not an IOReturn error.
+        }
         if(!logicalPM)return IOMobileFramebufferLegacy::setPowerState(ordinal,device);
         if(ordinal>1 || !bootMapping){native_legacy_pm_observed(3,kIOReturnUnsupported,ordinal);return kIOReturnUnsupported;}
         native_legacy_pm_observed(3,kIOReturnSuccess,ordinal);

@@ -29,7 +29,6 @@ def main():
     if arch != 'arm64':
         raise SystemExit('Nabu owner boot tools require the standard arm64 ABI')
     subprocess.run([sys.executable, str(ROOT / 'devices/nabu/tests/test_session_observer27.py')], check=True)
-    subprocess.run([sys.executable, str(ROOT / 'devices/nabu/tests/test_display_awake27.py')], check=True)
     subprocess.run([sys.executable, str(ROOT / 'devices/nabu/tests/test_process_list27.py')], check=True)
     subprocess.run([sys.executable, str(ROOT / 'devices/nabu/tests/test_store_sync27.py')], check=True)
     spec = importlib.util.spec_from_file_location('boot_runtime', ROOT / 'scripts/build-boot-runtime.py')
@@ -58,7 +57,6 @@ def main():
     inputs = ['scripts/build-boot-runtime.py', 'scripts/macos-boot-shims/apfs_boot_util.c',
               'scripts/macos-boot-shims/nabu_raw_stacks.h',
               'scripts/macos-boot-shims/nabu_session_observer.h',
-              'scripts/macos-boot-shims/nabu_display_awake.h',
               'scripts/macos-boot-shims/nabu_observer_output.h',
               'scripts/macos-boot-shims/nabu_clean_shutdown.h',
               'scripts/macos-boot-shims/nabu_process_list.h',
@@ -67,7 +65,6 @@ def main():
               'scripts/absent-service/build.py', 'scripts/absent-service/absentd.c',
               'devices/nabu/board.toml', 'devices/nabu/scripts/build-boot-tools.py']
     inputs.extend(['devices/nabu/tests/test_session_observer27.py',
-                   'devices/nabu/tests/test_display_awake27.py',
                    'devices/nabu/tests/test_process_list27.py',
                    'devices/nabu/tests/test_store_sync27.py'])
     report = dict(host=platform.machine(), target=arch, build='26C5035r',

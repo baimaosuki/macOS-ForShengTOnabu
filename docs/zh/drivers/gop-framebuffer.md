@@ -32,3 +32,18 @@ NABU 的 macOS 26C5035r 显示容器子节点使用原生具体类 `AppleDisplay
 NABU CPU 日志记录前十帧、每五十帧、状态变化及首个非黑帧。请求掩码与槽位和
 保留的活动图层分别记录。源采样覆盖 BGRA 与 RGhA；FP16 同时记录原始位模式
 非零及转换后的采样值。不支持的十位格式继续拒绝，并输出原因。
+
+NABU macOS 26C5035r: native `isSwapLayerEnabled_gated` reads the bit at
+request +0x478. +0x47c is accumulated by
+`update_swap_completed_state_gated`; it is not a disable mask. Updated nonnull
+IOSurface slots enter CPU composition; updated null slots clear the plane.
+The CPU source log names the latter word `completed`, including independent
+sampling of mapped incoming sources that are not selected for scanout.
+
+For this firmware-owned primary panel, the owned override of native slot 345
+(`setAPIPowerState`) rejects API power-off. The PM callback acknowledges while
+keeping scanout. An all-null swap following rejected sleep keeps an existing
+nonblack scene; ordinary explicit clears remain supported. This hold does not
+claim support for physical panel power cycling. The v36 observer no longer
+starts repeatedly failing caffeinate helpers. These source/replay checks still
+require hardware validation of visible desktop content.

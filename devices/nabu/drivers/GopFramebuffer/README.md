@@ -36,3 +36,18 @@ null. The child is attached without starting or registering another display
 driver. Original allocator replay verifies the class selection. Host replay covers
 dynamic surface selection, disabled layers, BGRA/FP16 sampling and log throttling;
 device presentation remains unverified.
+
+NABU macOS 26C5035r: native `isSwapLayerEnabled_gated` reads the bit at
+request +0x478. +0x47c is accumulated by
+`update_swap_completed_state_gated`; it is not a disable mask. Updated nonnull
+IOSurface slots enter CPU composition; updated null slots clear the plane.
+The CPU source log names the latter word `completed`, including independent
+sampling of mapped incoming sources that are not selected for scanout.
+
+For this firmware-owned primary panel, the owned override of native slot 345
+(`setAPIPowerState`) rejects API power-off. The PM callback acknowledges while
+keeping scanout. An all-null swap following rejected sleep keeps an existing
+nonblack scene; ordinary explicit clears remain supported. This hold does not
+claim support for physical panel power cycling. The v36 observer no longer
+starts repeatedly failing caffeinate helpers. These source/replay checks still
+require hardware validation of visible desktop content.

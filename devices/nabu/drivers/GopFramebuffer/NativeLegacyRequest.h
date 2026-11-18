@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: BSD-2-Clause-Patent
 #pragma once
 #include <stdint.h>
-// Original SwapSetLayer sets the update bit and clears the disable bit for
-// a nonnull surface; a null surface sets both. SwapSetBackgroundColor sets
-// bit 31 in both masks and writes opaque RGB. These are masks, not counts.
-// This backend only copies one complete premultiplied BGRA layer over black.
-// Other layers, unknown bits and nonblack backgrounds require composition.
+// Older single-layer fallback record helpers. These are NOT the macOS
+// IOMFBSwapIORequest +0x478/+0x47c field decoder: the latter are the native
+// layer mask and accumulated completion state. The production NABU macOS CPU
+// path uses nabu_cpu_scene.inc, selects nonnull request objects and never
+// interprets +0x47c as a disabled mask.
 static inline int native_legacy_single_layer_state(uint32_t updated,
     uint32_t disabled, uint32_t background) {
     const uint32_t known = 0x8000000fU;

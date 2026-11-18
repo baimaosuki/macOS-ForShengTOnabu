@@ -35,3 +35,18 @@ Request masks and slots are separate from retained active layers. Source samples
 cover BGRA and RGhA; raw half-float nonzero counts distinguish quantization from
 an already black source. Unsupported formats, including unimplemented 10-bit
 layouts, retain validation failure and now report its cause.
+
+NABU macOS 26C5035r: native `isSwapLayerEnabled_gated` reads the bit at
+request +0x478. +0x47c is accumulated by
+`update_swap_completed_state_gated`; it is not a disable mask. Updated nonnull
+IOSurface slots enter CPU composition; updated null slots clear the plane.
+The CPU source log names the latter word `completed`, including independent
+sampling of mapped incoming sources that are not selected for scanout.
+
+For this firmware-owned primary panel, the owned override of native slot 345
+(`setAPIPowerState`) rejects API power-off. The PM callback acknowledges while
+keeping scanout. An all-null swap following rejected sleep keeps an existing
+nonblack scene; ordinary explicit clears remain supported. This hold does not
+claim support for physical panel power cycling. The v36 observer no longer
+starts repeatedly failing caffeinate helpers. These source/replay checks still
+require hardware validation of visible desktop content.
