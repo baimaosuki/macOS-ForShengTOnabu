@@ -170,11 +170,10 @@ nabu_session_watch(void)
         "after_discovery=0,120,240,320,480,660 auth_after_discovery=0,30,90,180,360,540 "
         "disk=/private/var/log/nabu-session27/%s "
         "disk_open_errno=%d mirror=/dev/console readonly=1\n", name, output_error);
+    nabu_raw_printf("NABU-RAWSTACK display-awake owner=kernel policy=keep-scanout caffeinate=disabled\n");
     nabu_raw_printf("NABU-RAWSTACK clean-shutdown configured_seconds=%u opt_in=%u\n",
         halt_seconds, halt_seconds != 0);
-    uint64_t last_store_poll = 0, last_display_attempt = 0, last_system_attempt = 0;
-    pid_t display_helper = 0, system_helper = 0;
-    unsigned display_attempts = 0, system_attempts = 0;
+    uint64_t last_store_poll = 0;
     int store_synced = 0;
     const uint64_t duration = UINT64_C(1000000000) * (halt_seconds ? halt_seconds : 1800u);
     for (;;) {

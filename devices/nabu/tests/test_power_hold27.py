@@ -22,7 +22,7 @@ def test_native_power_slot_and_owned_hold(tmp_path):
     exec(compile(ast.Module(body=[fn],type_ignores=[]),'discriminator','exec'),ns)
     mangled=f'_ZN25IOMobileFramebufferLegacy{len(name)}{name}{suffix}'
     assert ns['discriminator'](mangled)==0x9852
-    assert fixture['bindings'][mangled]=='0xfffffe000ac2efbc'
+    assert fixture['bindings']['_'+mangled]=='0xfffffe000ac2efbc'
     (tmp_path/'power-methods.inc').write_text(methods)
     path=tmp_path/'power.cpp'
     path.write_text(r'''

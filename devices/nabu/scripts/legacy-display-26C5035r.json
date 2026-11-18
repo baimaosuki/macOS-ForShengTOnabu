@@ -2020,7 +2020,7 @@
     "_native_legacy_ioav_timing_colors": "0xfffffe000a7ea2ac",
     "_native_legacy_ioav_color": "0xfffffe000a7e80c0",
     "_native_legacy_hotplug_notify": "0xfffffe000ac2e954",
-    "_ZN25IOMobileFramebufferLegacy18nabuApiPower_52295EmP9IOService": "0xfffffe000ac2efbc"
+    "__ZN25IOMobileFramebufferLegacy18nabuApiPower_52295EmP9IOService": "0xfffffe000ac2efbc"
   },
   "checks": [
     [
