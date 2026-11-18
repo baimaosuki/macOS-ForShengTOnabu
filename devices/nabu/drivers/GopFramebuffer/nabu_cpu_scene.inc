@@ -13,16 +13,19 @@ uint32_t nabuBackground = 0xff000000U;
 uint8_t *nabuHalf = nullptr;
 bool nabuSeenRgb = false;
 unsigned nabuProbeStages = 0;
+uint64_t nabuLastTraceState = 0, nabuRejectCount = 0, nabuLastRejectState = 0;
+bool nabuTraceSeen = false, nabuLastBlack = true;
 void nabuStageProbe(unsigned stage) {
     if (nabuSeenRgb || !bootMapping || !primary || stage < 1 || stage > 3) return;
     PE_Video video{};
     if (PE_current_console(&video) || video.v_depth != 32 ||
         video.v_baseAddr != bootMapping->getPhysicalAddress()) return;
+    const bool firstStage = !(nabuProbeStages & (1U << (stage - 1)));
     nabuProbeStages |= 1U << (stage - 1);
     if (!nabuCpuStageBars(reinterpret_cast<volatile uint8_t *>(bootMapping->getVirtualAddress()),
         bootMapping->getLength(), video.v_rowBytes, video.v_width, video.v_height, nabuProbeStages)) return;
     __asm__ volatile("dsb sy" ::: "memory");
-    IOLog("NABU27-CPU: probe_stage=%u phys=%llx stride=%lu cache=write-combine first_rgb=%u\n",
+    if (firstStage) IOLog("NABU27-CPU: probe_stage=%u phys=%llx stride=%lu cache=write-combine first_rgb=%u\n",
         stage, bootMapping->getPhysicalAddress(), (unsigned long)video.v_rowBytes, nabuSeenRgb);
 }
 
@@ -45,33 +48,70 @@ void nabuFreeScene() {
     if (nabuHalf) IOFree(nabuHalf, 65536);
     nabuHalf = nullptr;
 }
+uint64_t nabuCpuRequestState(const OriginalLegacySwapRequest *request) {
+    uint64_t state = UINT64_C(1469598103934665603);
+    if (!request) return state;
+    for (unsigned at = kRequestMasks; at <= kRequestDims + 4; at += 4)
+        state = nabuCpuTraceMix(state, nabuField<uint32_t>(request, at));
+    for (unsigned i = 0; i < 4; ++i) {
+        OSObject *p = nabuField<OSObject *>(request, kRequestSurfaces + i * sizeof(void *));
+        state = nabuCpuTraceMix(state, reinterpret_cast<uintptr_t>(p));
+        if (p && p->metaCast("IOSurface")) {
+            state = nabuCpuTraceMix(state, native_legacy_surface_format(p));
+            state = nabuCpuTraceMix(state, native_legacy_surface_width(p));
+            state = nabuCpuTraceMix(state, native_legacy_surface_height(p));
+            state = nabuCpuTraceMix(state, native_legacy_surface_stride(p));
+        }
+        for (unsigned rect = 0; rect < 2; ++rect)
+            for (unsigned word = 0; word < 16; word += 4)
+                state = nabuCpuTraceMix(state, nabuField<uint32_t>(request, (rect ? kRequestRect1 : kRequestRect0) + i * 16 + word));
+    }
+    return state;
+}
+bool nabuRejectCpu(const OriginalLegacySwapRequest *request, unsigned reason, int plane = -1) {
+    const uint64_t state = nabuCpuTraceMix(nabuCpuRequestState(request), reason);
+    ++nabuRejectCount;
+    if (nabuRejectCount <= 10 || nabuRejectCount % 50 == 0 || state != nabuLastRejectState) {
+        IOLog("NABU27-CPU: rejected=%llu reason=%u plane=%d updated=%x disabled=%x\n",
+            nabuRejectCount, reason, plane, request ? nabuField<uint32_t>(request,kRequestMasks) : 0,
+            request ? nabuField<uint32_t>(request,kRequestMasks+4) : 0);
+        if (request && plane >= 0) {
+            OSObject *p = nabuField<OSObject *>(request,kRequestSurfaces+plane*sizeof(void *));
+            if (p && p->metaCast("IOSurface"))
+                IOLog("NABU27-CPU: rejected_surface=%p fmt=%08x width=%llu height=%llu stride=%llu\n",
+                    p,native_legacy_surface_format(p),native_legacy_surface_width(p),
+                    native_legacy_surface_height(p),native_legacy_surface_stride(p));
+        }
+    }
+    nabuLastRejectState = state;
+    return false;
+}
 bool nabuValidateCpu(const OriginalLegacySwapRequest *request) {
-    if (!request || !logicalPM || !primary || !bootMapping) return false;
+    if (!request || !logicalPM || !primary || !bootMapping) return nabuRejectCpu(request,1);
     const uint32_t updated = nabuField<uint32_t>(request, kRequestMasks);
     const uint32_t disabled = nabuField<uint32_t>(request, kRequestMasks + 4);
-    if (((updated | disabled) & ~0x8000000fU) || (disabled & ~updated)) return false;
-    // Preserve the upstream mode/no-op admission when no plane is updated.
-    if (!(updated & 15)) return false;
+    if (((updated | disabled) & ~0x8000000fU) || (disabled & ~updated)) return nabuRejectCpu(request,2);
+    if (!(updated & 15)) return nabuRejectCpu(request,3);
     uint32_t width = 0, height = 0; getDisplayDimensions(&width, &height);
-    if (!width || !height || nabuField<uint32_t>(request, kRequestDims) != width ||
-        nabuField<uint32_t>(request, kRequestDims + 4) != height) return false;
-    for (unsigned at = kRequestOptions; at <= kRequestOptions + 8; at += 4)
-        if (nabuField<uint32_t>(request, at)) return false;
+    if (!width || !height || nabuField<uint32_t>(request,kRequestDims) != width ||
+        nabuField<uint32_t>(request,kRequestDims+4) != height) return nabuRejectCpu(request,4);
+    for (unsigned at = kRequestOptions; at <= kRequestOptions+8; at += 4)
+        if (nabuField<uint32_t>(request,at)) return nabuRejectCpu(request,5);
     for (unsigned i = 0; i != 4; ++i) {
         if (!(updated & (1U << i)) || (disabled & (1U << i))) continue;
-        OSObject *surface = nabuField<OSObject *>(request, kRequestSurfaces + i * sizeof(void *));
-        if (!surface || !surface->metaCast("IOSurface")) return false;
-        IOMemoryDescriptor *memory = native_legacy_surface_descriptor(surface);
+        OSObject *surface = nabuField<OSObject *>(request,kRequestSurfaces+i*sizeof(void *));
+        if (!surface || !surface->metaCast("IOSurface")) return nabuRejectCpu(request,6,i);
         const uint32_t format = native_legacy_surface_format(surface);
+        if (format != 0x42475241 && format != 0x52476841) return nabuRejectCpu(request,7,i);
+        if (native_legacy_surface_planes(surface)) return nabuRejectCpu(request,8,i);
+        IOMemoryDescriptor *memory = native_legacy_surface_descriptor(surface);
         const uint64_t sw = native_legacy_surface_width(surface), sh = native_legacy_surface_height(surface);
         const uint64_t stride = native_legacy_surface_stride(surface), element = format == 0x52476841 ? 8 : 4;
+        if (!memory || !sw || !sh || sw > 16384 || sh > 16384 || stride < sw*element ||
+            stride > UINT64_MAX/sh || stride*sh > memory->getLength()) return nabuRejectCpu(request,9,i);
         NabuGopClip clip{};
-        if ((format != 0x42475241 && format != 0x52476841) || native_legacy_surface_planes(surface) ||
-            !memory || !sw || !sh || sw > 16384 || sh > 16384 || stride < sw * element ||
-            stride > UINT64_MAX / sh || stride * sh > memory->getLength() ||
-            !nabuGopClip(nabuField<NabuGopRect>(request, kRequestRect0 + 16 * i),
-                         nabuField<NabuGopRect>(request, kRequestRect1 + 16 * i), sw, sh, width, height, clip))
-            return false;
+        if (!nabuGopClip(nabuField<NabuGopRect>(request,kRequestRect0+16*i),
+            nabuField<NabuGopRect>(request,kRequestRect1+16*i),sw,sh,width,height,clip)) return nabuRejectCpu(request,10,i);
     }
     return true;
 }
@@ -104,17 +144,14 @@ bool nabuPresentCpu(const OriginalLegacySwapRequest *request) {
                 p->surface->retain();
                 p->memory = native_legacy_surface_descriptor(p->surface); p->memory->retain();
                 if (p->memory->prepare() != kIOReturnSuccess) {
-                    OSSafeReleaseNULL(p->memory); ready = false; break;
+                    OSSafeReleaseNULL(p->memory); nabuRejectCpu(request,11,i); ready = false; break;
                 }
                 p->mapping = p->memory->createMappingInTask(kernel_task, 0, kIOMapAnywhere | kIOMapReadOnly | kIOMapCopybackCache);
                 p->source = nabuField<NabuGopRect>(request, kRequestRect0 + 16 * i);
                 p->destination = nabuField<NabuGopRect>(request, kRequestRect1 + 16 * i);
                 if (!p->mapping || !p->mapping->getVirtualAddress() ||
-                    p->mapping->getLength() < p->memory->getLength()) { ready = false; break; }
-                IOLog("NABU27-CPU: submitted_plane=%u surface=%p fmt=%x width=%llu height=%llu stride=%llu descriptor_bytes=%llu mapped_bytes=%llu full_mapping=1\n",
-                    i, p->surface, native_legacy_surface_format(p->surface),
-                    native_legacy_surface_width(p->surface), native_legacy_surface_height(p->surface),
-                    native_legacy_surface_stride(p->surface), p->memory->getLength(), p->mapping->getLength());
+                    p->mapping->getLength() < p->memory->getLength()) { nabuRejectCpu(request,12,i); ready = false; break; }
+
             }
         }
         if (!p->surface) continue;
@@ -122,20 +159,10 @@ bool nabuPresentCpu(const OriginalLegacySwapRequest *request) {
         if (half && !nabuHalf) {
             const uint8_t *positive = halfTable();
             nabuHalf = positive ? static_cast<uint8_t *>(IOMalloc(65536)) : nullptr;
-            if (!nabuHalf) { ready = false; break; }
+            if (!nabuHalf) { nabuRejectCpu(request,13,i); ready = false; break; }
             memcpy(nabuHalf, positive, 32768); bzero(nabuHalf + 32768, 32768);
         }
         flush_dcache64(p->mapping->getVirtualAddress(), unsigned(p->mapping->getLength()), false);
-        if (!half) {
-            uint64_t rgb = 0, alpha = 0;
-            const uint64_t sw = native_legacy_surface_width(p->surface), sh = native_legacy_surface_height(p->surface);
-            const uint64_t pitch = native_legacy_surface_stride(p->surface);
-            for (uint64_t y = 0; y < sh; ++y) {
-                const uint32_t *row = reinterpret_cast<const uint32_t *>(p->mapping->getVirtualAddress() + y * pitch);
-                auto stats = nabuCpuPixelStats(row, sw); rgb += stats.rgb; alpha += stats.alpha;
-            }
-            IOLog("NABU27-CPU: source_plane=%u surface=%p rgb_nonzero=%llu alpha_nonzero=%llu\n", i, p->surface, rgb, alpha);
-        }
         views[i] = {reinterpret_cast<const uint8_t *>(p->mapping->getVirtualAddress()),
                     p->mapping->getLength(), native_legacy_surface_stride(p->surface),
                     native_legacy_surface_width(p->surface), native_legacy_surface_height(p->surface),
@@ -157,9 +184,44 @@ bool nabuPresentCpu(const OriginalLegacySwapRequest *request) {
         NabuCpuPixelStats pixels = nabuCpuPixelStats(nabuScene, uint64_t(width) * height);
         const bool firstRgb = pixels.rgb && !nabuSeenRgb;
         if (pixels.rgb) nabuSeenRgb = true;
-        IOLog("NABU27-CPU: copied=%llu update=%x rgb_nonzero=%llu alpha_nonzero=%llu first_rgb=%u centre=%08x destination_bytes=%llu\n",
-            nabuFrames, updated, pixels.rgb, pixels.alpha, firstRgb,
-            nabuScene[uint64_t(height / 2) * width + width / 2], bootMapping->getLength());
+        uint32_t active = 0, nonnull = 0, layers = 0;
+        uint64_t state = nabuCpuRequestState(request);
+        for (unsigned i = 0; i < 4; ++i) {
+            if (nabuField<OSObject *>(request,kRequestSurfaces+i*sizeof(void *))) nonnull |= 1U<<i;
+            const auto &p = nabuPlanes[i];
+            state = nabuCpuTraceMix(state,reinterpret_cast<uintptr_t>(p.surface));
+            if (p.surface) { active |= 1U<<i; ++layers; }
+        }
+        const bool changed = !nabuTraceSeen || state != nabuLastTraceState;
+        const bool black = !pixels.rgb;
+        if (nabuCpuTraceDue(nabuFrames,changed,firstRgb,nabuTraceSeen && black != nabuLastBlack)) {
+            IOLog("NABU27-CPU: copied=%llu update=%x disabled=%x request_active=%x active_mask=%x layer_count=%u count_from=active_mask slots_nonnull=%x rgb_nonzero=%llu alpha_nonzero=%llu first_rgb=%u centre=%08x destination_bytes=%llu\n",
+                nabuFrames,updated,disabled,(updated & ~disabled)&15U,active,layers,nonnull,
+                pixels.rgb,pixels.alpha,firstRgb,nabuScene[uint64_t(height/2)*width+width/2],bootMapping->getLength());
+            for (unsigned i = 0; i < 4; ++i) {
+                const auto &p = nabuPlanes[i];
+                OSObject *incoming = nabuField<OSObject *>(request,kRequestSurfaces+i*sizeof(void *));
+                if (!p.surface) {
+                    const bool typed = incoming && incoming->metaCast("IOSurface");
+                    IOLog("NABU27-CPU: source_plane=%u active=0 request_surface=%p request_fmt=%08x request_width=%llu request_height=%llu samples=0\n",
+                        i,incoming,typed ? native_legacy_surface_format(incoming) : 0,
+                        typed ? native_legacy_surface_width(incoming) : 0,typed ? native_legacy_surface_height(incoming) : 0);
+                    continue;
+                }
+                const uint32_t format = native_legacy_surface_format(p.surface);
+                const uint64_t sw = native_legacy_surface_width(p.surface),sh = native_legacy_surface_height(p.surface);
+                const auto sample = nabuCpuSampleSource(reinterpret_cast<const uint8_t *>(p.mapping->getVirtualAddress()),
+                    p.mapping->getLength(),native_legacy_surface_stride(p.surface),sw,sh,p.source,
+                    format == 0x52476841 ? nabuHalf : nullptr);
+                IOLog("NABU27-CPU: source_plane=%u active=1 request_surface=%p surface=%p source_va=%llx fmt=%08x fourcc=%c%c%c%c width=%llu height=%llu stride=%llu descriptor_bytes=%llu mapped_bytes=%llu src=%d,%d,%d,%d dst=%d,%d,%d,%d samples=%llu sampled_rgb_nonzero=%llu sampled_alpha_nonzero=%llu raw_rgb_nonzero=%llu first_raw=%016llx full_mapping=1\n",
+                    i,incoming,p.surface,p.mapping->getVirtualAddress(),format,
+                    (format>>24)&255,(format>>16)&255,(format>>8)&255,format&255,sw,sh,
+                    native_legacy_surface_stride(p.surface),p.memory->getLength(),p.mapping->getLength(),
+                    p.source.x,p.source.y,p.source.width,p.source.height,p.destination.x,p.destination.y,p.destination.width,p.destination.height,
+                    sample.count,sample.rgb,sample.alpha,sample.rawRgb,sample.firstRaw);
+            }
+        }
+        nabuTraceSeen = true; nabuLastTraceState = state; nabuLastBlack = black;
         if (!nabuSeenRgb) nabuStageProbe(3);
     }
     for (auto &p : candidate) nabuDropPlane(p);

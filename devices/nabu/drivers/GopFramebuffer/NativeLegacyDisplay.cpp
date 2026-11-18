@@ -2,6 +2,7 @@
 #include "NativeGpuTrace.h"
 #include "NativeLegacyRequest.h"
 #include "nabu_cpu_frame.h"
+#include "nabu_cpu_trace.h"
 #include "nabu_refresh_clock.h"
 // SPDX-License-Identifier: BSD-2-Clause-Patent
 // Reuse the unchanged original generic framebuffer implementation. Unknown
@@ -1212,11 +1213,13 @@ public:
         if(kernel_thread_start(attachDisplayObject,this,&thread)==KERN_SUCCESS)thread_deallocate(thread);
         else release();
     }
-    // The IODisplay class is IOGraphicsFamily's, loaded here if nothing has loaded it yet (outside the framebuffer's start).
+    // IODisplay is abstract in 26C5035r: its MetaClass::alloc returns null.
+    // Allocate its concrete AppleDisplay subclass for the EDID/container child;
+    // it remains unstarted and unregistered, as before.
     static void attachDisplayObject(void *context,wait_result_t) {
         NativeLegacyDisplay *self=static_cast<NativeLegacyDisplay *>(context);
         const OSReturn loaded=OSKextLoadKextWithIdentifier("com.apple.iokit.IOGraphicsFamily");
-        OSObject *object=(loaded==kOSReturnSuccess || loaded==kOSKextReturnStartStopError)?OSMetaClass::allocClassWithName("IODisplay"):nullptr;
+        OSObject *object=(loaded==kOSReturnSuccess || loaded==kOSKextReturnStartStopError)?OSMetaClass::allocClassWithName("AppleDisplay"):nullptr;
         IOService *display=OSDynamicCast(IOService,object);
         OSData *edid=OSDynamicCast(OSData,self->getProperty("NativeDisplayEDID"));
         bool attached=false;

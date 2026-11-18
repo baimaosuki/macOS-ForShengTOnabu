@@ -78,33 +78,7 @@ nabu_session_enabled(const char *arguments)
 
 extern char **environ;
 
-static void
-nabu_session_hold_display(pid_t *helper, unsigned *attempts, uint64_t *last, uint64_t now)
-{
-    if (*helper > 0) {
-        int status = 0;
-        pid_t result = waitpid(*helper, &status, WNOHANG);
-        if (result == 0 || (result < 0 && errno != ECHILD)) return;
-        nabu_raw_timestamp_ns = now;
-        nabu_raw_printf("NABU-RAWSTACK display-awake helper exit pid=%d status_raw=%d result=%d\n",
-            *helper, status, result);
-        *helper = 0;
-    }
-    if (*attempts >= 8 || (*last && now - *last < UINT64_C(15000000000))) return;
-    *last = now;
-    ++*attempts;
-    char parent[24];
-    snprintf(parent, sizeof(parent), "%d", getpid());
-    const char *path = "/usr/bin/caffeinate";
-    /* The original system tool releases its assertions when this watch exits. */
-    char *argv[] = {(char *)path, "-d", "-i", "-w", parent, NULL};
-    pid_t child;
-    int error = posix_spawn(&child, path, NULL, NULL, argv, environ);
-    if (!error) *helper = child;
-    nabu_raw_timestamp_ns = now;
-    nabu_raw_printf("NABU-RAWSTACK display-awake spawn attempt=%u error=%d pid=%d\n",
-        *attempts, error, error ? -1 : child);
-}
+#include "nabu_display_awake.h"
 
 static uint64_t
 nabu_session_clock(void)
@@ -136,7 +110,7 @@ nabu_session_watch(void)
         fprintf(stderr, "NABU27-SESSION: console open failed errno=%d\n", errno);
     nabu_raw_output_fd = -1;
     nabu_raw_timestamp_ns = nabu_session_clock();
-    nabu_raw_printf("NABU-RAWSTACK startup version=34 pid=%d console_errno=%d\n",
+    nabu_raw_printf("NABU-RAWSTACK startup version=35 pid=%d console_errno=%d\n",
         getpid(), nabu_raw_console_fd < 0 ? errno : 0);
     /* Lock the persistent inode, not a PID file: a reboot automatically
      * releases it and a repeated phase-2 invocation cannot start a second watch. */
@@ -192,21 +166,22 @@ nabu_session_watch(void)
         halt_seconds = nabu_clean_shutdown_seconds(bootargs);
     }
     nabu_raw_timestamp_ns = started;
-    nabu_raw_printf("NABU-RAWSTACK watch begin version=34 timeout=1800 rounds=6 late_after_discovery=1000,1250 "
+    nabu_raw_printf("NABU-RAWSTACK watch begin version=35 timeout=1800 rounds=6 late_after_discovery=1000,1250 "
         "after_discovery=0,120,240,320,480,660 auth_after_discovery=0,30,90,180,360,540 "
         "disk=/private/var/log/nabu-session27/%s "
         "disk_open_errno=%d mirror=/dev/console readonly=1\n", name, output_error);
     nabu_raw_printf("NABU-RAWSTACK clean-shutdown configured_seconds=%u opt_in=%u\n",
         halt_seconds, halt_seconds != 0);
-    uint64_t last_store_poll = 0, last_display_attempt = 0;
-    pid_t display_helper = 0;
-    unsigned display_attempts = 0;
+    uint64_t last_store_poll = 0, last_display_attempt = 0, last_system_attempt = 0;
+    pid_t display_helper = 0, system_helper = 0;
+    unsigned display_attempts = 0, system_attempts = 0;
     int store_synced = 0;
     const uint64_t duration = UINT64_C(1000000000) * (halt_seconds ? halt_seconds : 1800u);
     for (;;) {
         uint64_t poll_now = nabu_session_clock();
         if (!poll_now || poll_now < started || poll_now - started >= duration) break;
-        nabu_session_hold_display(&display_helper, &display_attempts, &last_display_attempt, poll_now);
+        nabu_session_hold_display(&display_helper, &display_attempts, &last_display_attempt, poll_now, "-d");
+        nabu_session_hold_display(&system_helper, &system_attempts, &last_system_attempt, poll_now, "-i");
         if (!store_synced && (!last_store_poll || poll_now-last_store_poll >= UINT64_C(10000000000))) {
             last_store_poll = poll_now;
             store_synced = nabu_store_sync("/private/var/folders/zz/zyxvpxvq6csfxvn_n0000000000000/0/com.apple.LaunchServices.dv/");

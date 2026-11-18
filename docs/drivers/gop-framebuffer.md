@@ -23,3 +23,15 @@ The catalog records implementation scope, hardware and OS requirements, board de
 Frame diagnostics retain allocation, command, completion and GPU/display timing. Pixel capture is disabled. See [GPU frame diagnostics](/porting/gpu-diagnostics).
 
 Frame diagnostics read physical addresses from prepared direct-display slots. Validation reports zero until mapping, and the flip records the mapped address. Diagnostic observers do not prepare descriptors or query their physical segments.
+
+The NABU macOS 26C5035r EDID/container child uses the native concrete
+`AppleDisplay` class. `IODisplay` is abstract and its metaclass allocator returns
+null. The child is attached without starting or registering another display
+driver. Original allocator replay verifies the class selection; compilation and
+device presentation of this change remain unverified.
+
+NABU CPU records the first ten frames, every fiftieth frame and state changes.
+Request masks and slots are separate from retained active layers. Source samples
+cover BGRA and RGhA; raw half-float nonzero counts distinguish quantization from
+an already black source. Unsupported formats, including unimplemented 10-bit
+layouts, retain validation failure and now report its cause.

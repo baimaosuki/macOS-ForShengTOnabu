@@ -1,7 +1,11 @@
 # GopFramebuffer
 
-NABU CPU bring-up logs each submitted plane's full descriptor mapping, source
-RGB/alpha and composed RGB/alpha. The boot framebuffer is write-combined.
+NABU CPU bring-up logs request/active masks, four surface slots, full descriptor
+mappings and bounded 16x16 source samples for BGRA and RGhA. Raw half-float
+nonzero samples are separate from converted 8-bit counts. Copied-frame RGB/alpha
+counts describe the composed scene. The first ten copies, each fiftieth copy,
+request/plane state changes and first nonblack copy are logged. Rejections have
+numbered causes and the same bounded repeat policy. The boot framebuffer is write-combined.
 Bounded eight-row red/yellow/cyan probes mark mapping/power/black-frame stages;
 the first nonblack CPU frame permanently stops probe writes for that boot.
 Probe visibility and desktop output still require device validation.
@@ -25,3 +29,10 @@ Build and interface details: [documentation](https://unixnu.com/drivers/gop-fram
 Display traces obtain physical addresses from prepared direct-display slots. Validation records use address zero until a slot is mapped; the flip record supplies the mapped address. Observers do not prepare memory or query unwired descriptors.
 
 The macOS display attributes, the timing and color elements and the hot plug state follow the display driver of [macOS-DroidVM](https://github.com/Droid-VM/macOS-DroidVM), the DroidVM port booted with UniXNU.
+
+The NABU macOS 26C5035r EDID/container child uses the native concrete
+`AppleDisplay` class. `IODisplay` is abstract and its metaclass allocator returns
+null. The child is attached without starting or registering another display
+driver. Original allocator replay verifies the class selection. Host replay covers
+dynamic surface selection, disabled layers, BGRA/FP16 sampling and log throttling;
+device presentation remains unverified.
