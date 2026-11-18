@@ -45,7 +45,9 @@ int main(void){uint64_t real=3000000;struct policy p={&real,0};
 #define NABU 1
 #define TRUE true
 #define FALSE false
+#ifndef __unused
 #define __unused
+#endif
 #define VCPUTC_LOCK_LOCK() do{lockdepth++;}while(0)
 #define VCPUTC_LOCK_UNLOCK() do{lockdepth--;}while(0)
 #define LCK_GRP_NULL 0
