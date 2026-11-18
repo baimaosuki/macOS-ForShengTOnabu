@@ -1,29 +1,12 @@
 --- a/osfmk/console/video_console.c
 +++ b/osfmk/console/video_console.c
-@@ -1 +1,2 @@
+@@ -1,4 +1,5 @@
  #include <kern/boot_progress.h>
 +#include <arm64/nabu_arm64e_compat.h>
---- a/osfmk/arm/arm_init.c
-+++ b/osfmk/arm/arm_init.c
-@@ -131,7 +131,15 @@
- TUNABLE_DT_WRITEABLE(sched_hygiene_mode_t, interrupt_masked_debug_mode,
-     "machine-timeouts", "interrupt-masked-debug-mode",
-     "interrupt-masked-debug-mode",
-+#if defined(NABU)
-+    /* Software instruction fallback is not an Apple latency-qualified CPU.
-+     * Retain 500us diagnostic tracing, but do not reduce real ticket-lock
-+     * protection (125ms) to that debug latency budget. Boot override remains.
-+     */
-+    SCHED_HYGIENE_MODE_TRACE,
-+#else
-     SCHED_HYGIENE_MODE_PANIC,
-+#endif
-     TUNABLE_DT_CHECK_CHOSEN);
- 
- MACHINE_TIMEOUT_DEV_WRITEABLE(interrupt_masked_timeout, "interrupt-masked",
---- a/osfmk/console/video_console.c
-+++ b/osfmk/console/video_console.c
-@@ -123,6 +123,9 @@
+ /*
+  * Copyright (c) 2000-2020 Apple Inc. All rights reserved.
+  *
+@@ -123,6 +124,9 @@
  
  extern int       disableConsoleOutput;
  static boolean_t gc_enabled     = FALSE;
@@ -33,7 +16,7 @@
  static boolean_t gc_initialized = FALSE;
  static boolean_t vm_initialized = FALSE;
  
-@@ -1231,6 +1234,9 @@
+@@ -1231,6 +1235,9 @@
  void
  vcputc_options(char c, __unused bool poll)
  {
@@ -43,7 +26,7 @@
  	if (boot_progress_active()) { boot_progress_putc(c); return; }
  	if (gc_initialized && gc_enabled) {
  		VCPUTC_LOCK_LOCK();
-@@ -1904,6 +1910,35 @@
+@@ -1904,6 +1911,35 @@
  static void vc_progressmeter_task( void * arg0, void * arg );
  #endif  /* defined(XNU_TARGET_OS_OSX) */
  
@@ -79,7 +62,7 @@
  static void
  vc_blit_rect(int x, int y, int bx,
      int width, int height,
-@@ -1913,6 +1948,10 @@
+@@ -1913,6 +1949,10 @@
      void * backBuffer,
      unsigned int flags)
  {
@@ -90,6 +73,24 @@
  	if (!vinfo.v_depth) {
  		return;
  	}
+--- a/osfmk/arm/arm_init.c
++++ b/osfmk/arm/arm_init.c
+@@ -131,7 +131,15 @@
+ TUNABLE_DT_WRITEABLE(sched_hygiene_mode_t, interrupt_masked_debug_mode,
+     "machine-timeouts", "interrupt-masked-debug-mode",
+     "interrupt-masked-debug-mode",
++#if defined(NABU)
++    /* Software instruction fallback is not an Apple latency-qualified CPU.
++     * Retain 500us diagnostic tracing, but do not reduce real ticket-lock
++     * protection (125ms) to that debug latency budget. Boot override remains.
++     */
++    SCHED_HYGIENE_MODE_TRACE,
++#else
+     SCHED_HYGIENE_MODE_PANIC,
++#endif
+     TUNABLE_DT_CHECK_CHOSEN);
+ 
+ MACHINE_TIMEOUT_DEV_WRITEABLE(interrupt_masked_timeout, "interrupt-masked",
 --- a/osfmk/arm64/nabu_v82_emul.c
 +++ b/osfmk/arm64/nabu_v82_emul.c
 @@ -702,7 +702,7 @@
