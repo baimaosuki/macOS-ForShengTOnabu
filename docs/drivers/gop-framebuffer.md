@@ -50,3 +50,17 @@ nonblack scene; ordinary explicit clears remain supported. This hold does not
 claim support for physical panel power cycling. The v36 observer no longer
 starts repeatedly failing caffeinate helpers. These source/replay checks still
 require hardware validation of visible desktop content.
+
+NABU P019: the 500us interrupt-masked debug budget formerly clamped ticket-lock
+waits to 12,000 ticks at the virtual 24MHz timebase. The board now defaults that
+diagnostic to TRACE; real ticket-lock protection remains 3,000,000 ticks
+(125ms), and explicit debug overrides remain available. This does not establish
+the owner CPU's complete critical-section stack.
+
+The first successful CPU scanout takes the physical console from text/progress
+drawing while retaining console-input RAM/ESP capture; panic can take it back.
+An ordinary-RAM shadow skips unchanged scanout rows. No separate full-frame
+RGB/alpha statistics pass runs: diagnostics use at most 256 samples for the
+first ten frames and every 300th frame, with short geometry/sample lines.
+The phase-2 owner tool installs a one-time Aqua static PNG configuration through
+NSWorkspace, with URL readback; visible wallpaper still requires device testing.

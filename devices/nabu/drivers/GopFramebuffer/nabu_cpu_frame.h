@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 #include "nabu_cpu_present.h"
+#include <string.h>
 
 struct NabuCpuPlaneView {
     const uint8_t *pixels = nullptr;
@@ -48,28 +49,28 @@ static inline bool nabuCpuCompose(uint32_t *output, uint64_t capacity,
 
 static inline bool nabuCpuScanout(volatile uint8_t *output, uint64_t capacity,
                                  uint64_t stride, const uint32_t *scene,
-                                 uint32_t width, uint32_t height)
+                                 uint32_t width, uint32_t height,
+                                 uint32_t *previous = nullptr, bool previousValid = false,
+                                 uint64_t *writtenBytes = nullptr, bool *seenRgb = nullptr)
 {
+    if (writtenBytes) *writtenBytes = 0;
     if (!output || !scene || !width || !height || (uintptr_t(output) & 3) || (stride & 3) ||
         stride < uint64_t(width) * 4 || stride > UINT64_MAX / height || stride * height > capacity)
         return false;
+    uint32_t anyRgb = 0;
     for (uint32_t y = 0; y != height; ++y) {
+        const uint32_t *source = scene + uint64_t(y) * width;
+        uint32_t *old = previous ? previous + uint64_t(y) * width : nullptr;
+        if (old && previousValid && !memcmp(old, source, size_t(width) * 4)) continue;
         auto row = reinterpret_cast<volatile uint32_t *>(output + y * stride);
-        for (uint32_t x = 0; x != width; ++x) row[x] = scene[uint64_t(y) * width + x];
+        for (uint32_t x = 0; x != width; ++x) { const uint32_t pixel = source[x]; row[x] = pixel; anyRgb |= pixel; }
+        if (old) memcpy(old, source, size_t(width) * 4);
+        if (writtenBytes) *writtenBytes += uint64_t(width) * 4;
     }
+    if (seenRgb && (anyRgb & 0xffffffU)) *seenRgb = true;
     return true;
 }
 
-// Diagnostic writes use the same bounded/strided destination as scanout.
-struct NabuCpuPixelStats { uint64_t rgb = 0, alpha = 0; };
-static inline NabuCpuPixelStats nabuCpuPixelStats(const uint32_t *pixels, uint64_t count) {
-    NabuCpuPixelStats result{};
-    if (pixels) for (uint64_t i=0; i<count; ++i) {
-        result.rgb += (pixels[i] & 0x00ffffffU) != 0;
-        result.alpha += (pixels[i] & 0xff000000U) != 0;
-    }
-    return result;
-}
 static inline bool nabuCpuStageBars(volatile uint8_t *destination, uint64_t bytes,
     uint64_t stride, uint64_t width, uint64_t height, unsigned stages) {
     if (!destination || !width || height<8 || width>UINT64_MAX/4 || stride<width*4 ||

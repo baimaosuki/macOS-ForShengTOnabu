@@ -42,7 +42,13 @@ int main() {
     assert(!nabuCpuStageBars(reinterpret_cast<volatile uint8_t *>(diagnostic), 4, 24, 4, 8, 7));
     assert(!memcmp(saved,diagnostic,sizeof saved));
     assert(!nabuCpuStageBars(reinterpret_cast<volatile uint8_t *>(diagnostic), sizeof(diagnostic), 24, 4, 7, 7));
-    const uint32_t samples[]={0,0xff000000U,0x00010203U,0x40000001U};
-    auto stats=nabuCpuPixelStats(samples,4);
-    assert(stats.rgb==2 && stats.alpha==2);
+    uint32_t shadow[12]{}; uint64_t written=0; bool seen=false;
+    assert(nabuCpuScanout(reinterpret_cast<volatile uint8_t *>(scanout),sizeof(scanout),20,scene,4,3,shadow,false,&written,&seen));
+    assert(written==48 && seen);
+    assert(nabuCpuScanout(reinterpret_cast<volatile uint8_t *>(scanout),sizeof(scanout),20,scene,4,3,shadow,true,&written,&seen));
+    assert(written==0);
+    scene[5]=0xff112233;
+    assert(nabuCpuScanout(reinterpret_cast<volatile uint8_t *>(scanout),sizeof(scanout),20,scene,4,3,shadow,true,&written,&seen));
+    assert(written==16 && scanout[6]==0xff112233);
+    for(unsigned y=0;y<3;y++)assert(scanout[y*5+4]==0);
 }

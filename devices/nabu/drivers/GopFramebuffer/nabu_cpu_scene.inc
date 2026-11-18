@@ -9,7 +9,9 @@ struct NabuCpuKeptPlane {
     NabuGopRect source{}, destination{};
 };
 NabuCpuKeptPlane nabuPlanes[4]{};
-uint32_t *nabuScene = nullptr;
+uint32_t *nabuScene = nullptr, *nabuLastScene = nullptr;
+bool nabuLastSceneValid = false, nabuConsoleClaimed = false;
+uint64_t nabuWrittenBytes = 0;
 uint64_t nabuSceneBytes = 0, nabuFrames = 0;
 uint32_t nabuBackground = 0xff000000U;
 uint8_t *nabuHalf = nullptr;
@@ -18,7 +20,7 @@ unsigned nabuProbeStages = 0;
 uint64_t nabuLastTraceState = 0, nabuRejectCount = 0, nabuLastRejectState = 0;
 bool nabuTraceSeen = false, nabuLastBlack = true;
 void nabuStageProbe(unsigned stage) {
-    if (nabuSeenRgb || !bootMapping || !primary || stage < 1 || stage > 3) return;
+    if (nabuFrames || nabuSeenRgb || !bootMapping || !primary || stage < 1 || stage > 3) return;
     PE_Video video{};
     if (PE_current_console(&video) || video.v_depth != 32 ||
         video.v_baseAddr != bootMapping->getPhysicalAddress()) return;
@@ -46,6 +48,8 @@ static void nabuDropPlane(NabuCpuKeptPlane &p) {
 void nabuFreeScene() {
     for (auto &p : nabuPlanes) nabuDropPlane(p);
     if (nabuScene) IOFree(nabuScene, nabuSceneBytes);
+    if (nabuLastScene) IOFree(nabuLastScene, nabuSceneBytes);
+    nabuLastScene = nullptr; nabuLastSceneValid = false;
     nabuScene = nullptr; nabuSceneBytes = 0;
     if (nabuHalf) IOFree(nabuHalf, 65536);
     nabuHalf = nullptr;
@@ -159,7 +163,8 @@ bool nabuPresentCpu(const OriginalLegacySwapRequest *request) {
         if (!nabuScene) return false;
         nabuSceneBytes = bytes;
     }
-    if (nabuSceneBytes != bytes) return false;
+    if (!nabuLastScene) nabuLastScene = static_cast<uint32_t *>(IOMalloc(bytes));
+    if (!nabuLastScene || nabuSceneBytes != bytes) return false;
     const uint32_t updated = nabuField<uint32_t>(request, kRequestMasks);
     const uint32_t completed = nabuField<uint32_t>(request, kRequestCompleted);
     NabuCpuKeptPlane candidate[4]{};
@@ -206,9 +211,16 @@ bool nabuPresentCpu(const OriginalLegacySwapRequest *request) {
     const uint32_t background = (updated & 0x80000000U) && !heldBlank ?
         nabuField<uint32_t>(request, kRequestMasks + 8) | 0xff000000U : nabuBackground;
     if (ready) ready = nabuCpuCompose(nabuScene, bytes, width, height, background, views);
+    if (ready && !nabuConsoleClaimed) {
+        nabu_console_claim_framebuffer();
+        nabuConsoleClaimed = true;
+        IOLog("NABU27-CPU: console_owner=WindowServer text=off ram_esp_log=on panic_takeover=on\n");
+    }
+    const bool hadRgb = nabuSeenRgb;
     if (ready) ready = native_legacy_prepare_scanout() &&
         nabuCpuScanout(reinterpret_cast<volatile uint8_t *>(bootMapping->getVirtualAddress()),
-                       bootMapping->getLength(), video.v_rowBytes, nabuScene, width, height);
+                       bootMapping->getLength(), video.v_rowBytes, nabuScene, width, height,
+                       nabuLastScene, nabuLastSceneValid, &nabuWrittenBytes, &nabuSeenRgb);
     if (ready) {
         __asm__ volatile("dsb sy" ::: "memory");
         for (unsigned i = 0; i != 4; ++i) if (changed[i]) {
@@ -216,8 +228,12 @@ bool nabuPresentCpu(const OriginalLegacySwapRequest *request) {
         }
         nabuBackground = background;
         ++nabuFrames;
-        NabuCpuPixelStats pixels = nabuCpuPixelStats(nabuScene, uint64_t(width) * height);
-        const bool firstRgb = pixels.rgb && !nabuSeenRgb;
+        nabuLastSceneValid = true;
+        const bool trace = nabuCpuTraceDue(nabuFrames,false,false,false);
+        NabuCpuSourceSample pixels{};
+        if (trace) pixels = nabuCpuSampleSource(reinterpret_cast<const uint8_t *>(nabuScene),
+            bytes, uint64_t(width)*4, width, height, {0,0,int(width),int(height)}, nullptr);
+        const bool firstRgb = nabuSeenRgb && !hadRgb;
         if (pixels.rgb) nabuSeenRgb = true;
         uint32_t active = 0, nonnull = 0, layers = 0;
         uint64_t state = nabuCpuRequestState(request);
@@ -230,9 +246,10 @@ bool nabuPresentCpu(const OriginalLegacySwapRequest *request) {
         const bool changed = !nabuTraceSeen || state != nabuLastTraceState;
         const bool black = !pixels.rgb;
         if (nabuCpuTraceDue(nabuFrames,changed,firstRgb,nabuTraceSeen && black != nabuLastBlack)) {
-            IOLog("NABU27-CPU: copied=%llu update=%x completed=%x request_active=%x active_mask=%x layer_count=%u count_from=active_mask slots_nonnull=%x held_sleep_blank=%u rgb_nonzero=%llu alpha_nonzero=%llu first_rgb=%u centre=%08x destination_bytes=%llu\n",
-                nabuFrames,updated,completed,updated&nonnull&15U,active,layers,nonnull,heldBlank,
-                pixels.rgb,pixels.alpha,firstRgb,nabuScene[uint64_t(height/2)*width+width/2],bootMapping->getLength());
+            IOLog("NABU27-CPU: copied=%llu update=%x completed=%x active_mask=%x layer_count=%u slots_nonnull=%x written_bytes=%llu\n",
+                nabuFrames,updated,completed,active,layers,nonnull,nabuWrittenBytes);
+            IOLog("NABU27-CPU: frame_sample=%llu sampled_rgb_nonzero=%llu sampled_alpha_nonzero=%llu first_rgb=%u centre=%08x held_sleep_blank=%u\n",
+                pixels.count,pixels.rgb,pixels.alpha,firstRgb,nabuScene[uint64_t(height/2)*width+width/2],heldBlank);
             for (unsigned i = 0; i < 4; ++i) {
                 const auto &p = nabuPlanes[i];
                 OSObject *incoming = nabuField<OSObject *>(request,kRequestSurfaces+i*sizeof(void *));
@@ -250,16 +267,17 @@ bool nabuPresentCpu(const OriginalLegacySwapRequest *request) {
                 const auto sample = nabuCpuSampleSource(reinterpret_cast<const uint8_t *>(p.mapping->getVirtualAddress()),
                     p.mapping->getLength(),native_legacy_surface_stride(p.surface),sw,sh,p.source,
                     format == 0x52476841 ? nabuHalf : nullptr);
-                IOLog("NABU27-CPU: source_plane=%u active=1 request_surface=%p surface=%p source_va=%llx fmt=%08x fourcc=%c%c%c%c width=%llu height=%llu stride=%llu descriptor_bytes=%llu mapped_bytes=%llu src=%d,%d,%d,%d dst=%d,%d,%d,%d samples=%llu sampled_rgb_nonzero=%llu sampled_alpha_nonzero=%llu raw_rgb_nonzero=%llu first_raw=%016llx full_mapping=1\n",
-                    i,incoming,p.surface,p.mapping->getVirtualAddress(),format,
-                    (format>>24)&255,(format>>16)&255,(format>>8)&255,format&255,sw,sh,
-                    native_legacy_surface_stride(p.surface),p.memory->getLength(),p.mapping->getLength(),
-                    p.source.x,p.source.y,p.source.width,p.source.height,p.destination.x,p.destination.y,p.destination.width,p.destination.height,
-                    sample.count,sample.rgb,sample.alpha,sample.rawRgb,sample.firstRaw);
+                IOLog("NABU27-CPU: source_plane=%u active=1 request_surface=%p surface=%p source_va=%llx fmt=%08x width=%llu height=%llu\n",
+                    i,incoming,p.surface,p.mapping->getVirtualAddress(),format,sw,sh);
+                IOLog("NABU27-CPU: plane_geometry=%u stride=%llu descriptor_bytes=%llu mapped_bytes=%llu src=%d,%d,%d,%d dst=%d,%d,%d,%d\n",
+                    i,native_legacy_surface_stride(p.surface),p.memory->getLength(),p.mapping->getLength(),
+                    p.source.x,p.source.y,p.source.width,p.source.height,p.destination.x,p.destination.y,p.destination.width,p.destination.height);
+                IOLog("NABU27-CPU: plane_sample=%u samples=%llu sampled_rgb_nonzero=%llu sampled_alpha_nonzero=%llu raw_rgb_nonzero=%llu first_raw=%016llx full_mapping=1\n",
+                    i,sample.count,sample.rgb,sample.alpha,sample.rawRgb,sample.firstRaw);
             }
         }
         nabuTraceSeen = true; nabuLastTraceState = state; nabuLastBlack = black;
-        if (!nabuSeenRgb) nabuStageProbe(3);
+        // Probe bars never write over a frame owned by WindowServer.
     }
     for (auto &p : candidate) nabuDropPlane(p);
     return ready;

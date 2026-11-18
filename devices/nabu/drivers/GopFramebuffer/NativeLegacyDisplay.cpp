@@ -46,6 +46,9 @@ extern "C" void native_legacy_swap_validation_observed(bool,unsigned,const void 
 // The surface of a rejected swap, as the validator read it: width, height, format, planes, stride, allocation, descriptor length.
 extern "C" void native_legacy_surface_rejected(uint64_t,uint64_t,uint32_t,uint32_t,uint64_t,uint64_t,uint64_t);
 extern "C" bool native_legacy_prepare_scanout(void);
+#if defined(NATIVE_LEGACY_MACOS) && NATIVE_LEGACY_MACOS
+extern "C" void nabu_console_claim_framebuffer(void);
+#endif
 extern "C" void native_legacy_transfer_observed(IOReturn,const void *,uint64_t);
 extern "C" void native_legacy_copy_timing_observed(uint64_t ticks,uint64_t bytes);
 extern "C" void native_legacy_retirement_observed(IOService *);

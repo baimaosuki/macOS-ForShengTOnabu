@@ -31,6 +31,9 @@ def main():
     subprocess.run([sys.executable, str(ROOT / 'devices/nabu/tests/test_session_observer27.py')], check=True)
     subprocess.run([sys.executable, str(ROOT / 'devices/nabu/tests/test_process_list27.py')], check=True)
     subprocess.run([sys.executable, str(ROOT / 'devices/nabu/tests/test_store_sync27.py')], check=True)
+    # Check AppKit API availability without changing the CI machine's desktop.
+    subprocess.run(['osascript', '-l', 'JavaScript', '-e',
+                    'ObjC.import("AppKit"); if (!$.NSWorkspace.sharedWorkspace.respondsToSelector("setDesktopImageURL:forScreen:options:error:")) throw new Error("missing desktop API");'], check=True)
     spec = importlib.util.spec_from_file_location('boot_runtime', ROOT / 'scripts/build-boot-runtime.py')
     builder = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(builder)
@@ -61,6 +64,7 @@ def main():
               'scripts/macos-boot-shims/nabu_clean_shutdown.h',
               'scripts/macos-boot-shims/nabu_process_list.h',
               'scripts/macos-boot-shims/nabu_store_sync.h',
+              'scripts/macos-boot-shims/nabu_static_desktop.h',
               'scripts/macos-boot-shims/observer-entitlements.plist',
               'scripts/absent-service/build.py', 'scripts/absent-service/absentd.c',
               'devices/nabu/board.toml', 'devices/nabu/scripts/build-boot-tools.py']

@@ -42,6 +42,8 @@ def main():
                                    (m.kind != "refer" or m.name in wanted)})
     tree.assemble(ctx, modules)
     order = patches.prepare(ctx, modules)
+    subprocess.run([sys.executable, str(ROOT / 'devices/nabu/tests/test_desktop_stability27.py'),
+                    '--xnu', str(ctx.tree / '.cache/xnu-work')], check=True)
     subprocess.run([sys.executable, str(ROOT / 'devices/nabu/tests/test_zeta_pac27.py'),
                     '--xnu', str(ctx.tree / '.cache/xnu-work'),
                     '--output', str(ctx.work / 'zeta-pac-verification')], check=True)

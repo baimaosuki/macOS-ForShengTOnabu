@@ -116,8 +116,10 @@ extern "C" void nabu_log_checkpoint (void) {
   int result=nabuEspCommit (false);
   printf ("NABULOG2: critical-exit checkpoint result=%d commits=%u\n",result,nabu_log_writer_rounds);
 }
+extern "C" void nabu_console_panic_takeover(void);
 extern "C" void nabu_log_panic_record (const char *format,va_list *args,unsigned long caller) {
   if (__atomic_exchange_n (&nabu_esp_panic_seen,1,__ATOMIC_ACQ_REL)) return;
+  nabu_console_panic_takeover();
   char message[2048]; va_list copy;
   va_copy (copy,*args);
   int length=vsnprintf (message,sizeof message,format,copy);

@@ -48,5 +48,6 @@ static inline uint64_t nabuCpuTraceMix(uint64_t state, uint64_t value)
 }
 static inline bool nabuCpuTraceDue(uint64_t frame, bool changed, bool firstRgb, bool blackChanged)
 {
-    return frame <= 10 || frame % 50 == 0 || changed || firstRgb || blackChanged;
+    (void)changed; (void)firstRgb; (void)blackChanged;
+    return frame <= 10 || frame % 300 == 0;
 }

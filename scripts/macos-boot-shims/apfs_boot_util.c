@@ -10,6 +10,7 @@
 // has nothing to mount and succeeds. The kernel shows this file over the original only with apfs-boot-shim=1.
 #include <stdio.h>
 #include "nabu_session_observer.h"
+#include "nabu_static_desktop.h"
 
 int
 main(int argc, char **argv)
@@ -18,6 +19,8 @@ main(int argc, char **argv)
 		return nabu_session_watch();
 	fprintf(stderr, "apfs_boot_util (owner): phase %s: Data is mounted by the kernel; the read-only root container "
 	    "has no other role volumes\n", argc > 1 ? argv[1] : "?");
+	if (argc == 2 && !strcmp(argv[1], "2") && nabu_install_static_desktop())
+        fprintf(stderr,"NABU-DESKTOP: install failed errno=%d; retaining existing desktop configuration\n",errno);
 	if (argc == 2) nabu_session_start(argv[1]);
 	return 0;
 }
