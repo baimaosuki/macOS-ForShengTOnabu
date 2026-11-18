@@ -51,7 +51,10 @@ jobs:
           xcrun --sdk iphoneos --show-sdk-version
           xcrun --sdk macosx --show-sdk-version
       - name: Install upstream build tools
-        run: brew install cmake ninja unifdef llvm lld dtc
+        run: |
+          brew install cmake ninja unifdef llvm lld dtc
+          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
+          python3 -m pip install numpy==2.2.6 capstone==5.0.7 unicorn==2.1.4
       - name: Select the fresh NABU profile
         run: ./unixnu defconfig nabu_macos27_defconfig -D devices/nabu --os macos-27
       - uses: actions/cache/restore@v4
@@ -85,6 +88,7 @@ jobs:
             out/nabu/**/logs/
             out/nabu/**/bootstrap-verification.json
             out/nabu/**/native-verification.json
+            out/nabu/**/zeta-pac-verification/verification.json
             out/nabu/**/esp-log-verification/*.log
             out/nabu/**/esp-log-verification/verification.json
             out/nabu/**/lockdown-public-verification/verification.json

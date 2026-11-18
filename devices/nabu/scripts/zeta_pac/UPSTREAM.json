@@ -1,0 +1,22 @@
+{
+  "repository": "https://github.com/none24smu/UniXNU-zeta",
+  "commit": "eb489285a1d9153872f00c93ebb519a269b249b5",
+  "license": "BSD-2-Clause-Patent",
+  "files": {
+    "zeta_userland_pauth.py": "d30ff6a688f08be2342895a9c1feaff26d857610d57444c4e6d061047fed55be",
+    "zeta_userland_code.py": "ad6267b39db76c1295f2aa4a481153ab187152617bba4fb95d45744f3c966875",
+    "zeta_dyld_cache.py": "ca21e5f4b1e5181b3fa57927ba1d0405fec7ad8fecd5ab94b69bb7423ad813f7",
+    "zeta_pauth_plan.py": "add718abba62d4bf039b58a998548d51418700bb30499192e01a2a1580a3dd80",
+    "rewrite-zeta-userland.py": "21b4f9d01ac052b1af1df9872cc7d89ee2bd1c4b3ec9df717aa8f5df9f8b68b0",
+    "rewrite-zeta-dyld-cache.py": "4c161caefedb119a962e8da5a2ac3036337316a54876c5025447e77f96c02371",
+    "prove-zeta-dyld-cache.py": "1d720fac8bdf5b7d52386145b475d3550dd22129d81190a6a5355b2d1cacdf76",
+    "rewrite-zeta-userland-tree.py": "80973e61d00f74e1fe08f339899c46b1dea19acd6db92e0ecd97566d8f9330b1",
+    "check-zeta-pauth.py": "958cd23174ab6434c96c875e1c9757096dd6e9e0a8de4c6d94c16718dcbe821c",
+    "audit-zeta-apfs-pauth.py": "4a81ad173f2b94e750b4d88b8b01ae25e249ce7959656860a34343e67b66d219",
+    "tests/test_zeta_userland_pauth.py": "43eecf0d1d9e57e84a7314b91f843ed85ded4579ea2dce116a2ae0c3797cdd5f",
+    "tests/test_zeta_pauth_plan.py": "9a4c3e74ff8b48070de497c5cf0a8f0c36a0c01b99800b75238800fb41c524b2",
+    "tests/test_zeta_userland_rewrite.py": "94ffef2c3cd4e5f813237c69d5df4f3b29d4086d4b7041571d4285ee9cc5a96a",
+    "tests/test_zeta_dyld_cache_rewrite.py": "63dba957555e075360e8ebb95a92974df7800e651c425dc2fb49c3ef4b6bea5d",
+    "audit-zeta-apfs.py": "2ce7310c0ca929b1390e957aa39369ae787224b27b8aee749ba305d9e634dc24"
+  }
+}

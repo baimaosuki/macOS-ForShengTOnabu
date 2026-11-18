@@ -1,0 +1,79 @@
+zeta ordinary-pointer ABI, pinned to UniXNU-zeta eb489285a1d9153872f00c93ebb519a269b249b5.
+All producers/consumers must use the same ABI; no hardware PAC protection is claimed.
+
+--- a/osfmk/arm64/nabu_nopac.h
++++ b/osfmk/arm64/nabu_nopac.h
+@@ -3,8 +3,9 @@
+ #define NABU_NOPAC_H
+ #include <stdint.h>
+ #include <stdbool.h>
+-/* No keys or signed-pointer ABI are claimed. PAC leaves Xd intact, AUT/XPAC
+- * restore address bits, authenticated control flow uses that plain address.
++/* zeta-ordinary-v1: every pointer producer and consumer uses unsigned
++ * ordinary pointers. PAC/AUT/XPAC are identity; PACGA is constant zero.
++ * Authentication never repairs a signed pointer in this ABI.
+  * The caller copies this frame back only on success, including successful loads.
+  */
+ struct nabu_nopac_frame { uint64_t x[31], sp, pc; };
+@@ -12,18 +13,14 @@
+ static inline uint64_t
+ nabu_nopac_canonical(uint64_t value, bool user)
+ {
+-    uint64_t plain = value & UINT64_C(0x0000ffffffffffff);
+-    return !user && (plain & (UINT64_C(1) << 47)) ? plain | UINT64_C(0xffff000000000000) : plain;
++    (void)user;
++    return value;
+ }
+ static inline uint64_t
+ nabu_nopac_authenticate(uint64_t value, bool user, bool data)
+ {
+-    uint64_t plain = nabu_nopac_canonical(value, user);
+-    /* TCR.TBI0 ignores the top byte for data. AUTD/XPACD must preserve
+-     * it: libobjc stores FAST_IS_RW_POINTER (bit 63) in class data bits.
+-     * Address translation for branches/loads still uses canonical(). */
+-    if (user && data) plain |= value & UINT64_C(0xff00000000000000);
+-    return plain;
++    (void)user; (void)data;
++    return value;
+ }
+ static inline bool
+ nabu_nopac_opcode(uint32_t op)
+--- a/osfmk/arm64/nabu_v82_emul.c
++++ b/osfmk/arm64/nabu_v82_emul.c
+@@ -486,7 +486,7 @@
+  *   - XPACI/XPACD Xd                  ->  Xd = Xd
+  * and the value of AUT* on a correctly signed pointer equals the pointer.
+  * PACGA is a keyed MAC with no architectural value on such a core; a
+- * deterministic keyless mix keeps sign/verify pairs self-consistent.
++ * constant zero matches zeta's offline PACGA -> MOVZ lowering.
+  *
+  * `gpr` must provide X0..X30 with index 31 reading as XZR (0).
+  */
+@@ -499,7 +499,7 @@
+ 
+ 	if (NABU_V82_MATCH(insn, NABU_V82_PACGA_MASK, NABU_V82_PACGA_BASE)) {
+ 		*dst = NABU_V82_RD(insn);
+-		*result = gpr[NABU_V82_RN(insn)] ^ gpr[NABU_V82_RM(insn)];
++		*result = 0; /* zeta ordinary-pointer ABI: MOVZ Xd, #0 */
+ 		return true;
+ 	}
+ 	if (!NABU_V82_MATCH(insn, NABU_V82_PAC_MASK, NABU_V82_PAC_BASE)) {
+@@ -654,7 +654,7 @@
+ 			return true;
+ 		}
+ 	}
+-	/* PAC preserves Xd; authentication strips its address bits. This must
++	/* zeta ABI: PAC/AUT/XPAC preserve the ordinary pointer. This must
+ 	 * run before vector crypto and must not fall back for invalid PAC forms. */
+ 	if (nabu_nopac_opcode(insn)) {
+         if (nabu_gpr_fast_step(ss, insn, from_user)) return true;
+@@ -670,8 +670,7 @@
+         ss->cpsr &= ~(1U << 21);
+ 		return true;
+ 	}
+-	/* PACGA has no memory/control-flow effect and retains the existing
+-	 * deterministic no-key convention used by this board. */
++	/* Match offline zeta PACGA -> MOVZ Xd, #0, including fallback code. */
+ 	if (NABU_V82_MATCH(insn, NABU_V82_PACGA_MASK, NABU_V82_PACGA_BASE)) {
+ 		uint64_t gpr[32];
+ 		for (unsigned int i = 0; i < 29; i++) gpr[i] = ss->x[i];
