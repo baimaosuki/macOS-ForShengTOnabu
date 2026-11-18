@@ -109,3 +109,22 @@ remains healthy. Slot-read retries reuse only the exact verified write window.
 All GPT/FAT/token, alias, overlap and A/B checks remain mandatory; invalid input
 stays read-only. Host quarantine and changed/overlapping write extents stop
 startup. Refusal logs are rate-limited to the first and every fifteenth attempt.
+
+## NABU persistent Data identity and session observation
+
+NABU uses `data-persist=2` with `[payload.adt] persistent_data = true`. The
+installation RAM-disk seed remains available, while `/chosen/ephemeral-storage`
+is absent from the normal production ADT. Native usermanagerd uses this state
+to select its persona-manager initialization; LaunchServices uses it for its
+persona configuration. This fixes the incorrect platform input; desktop output
+still requires hardware validation.
+
+The v34 signed boot observer keeps the existing native caffeinate request during
+observation and leaves normal boot running when its 1800-second watch ends.
+Late samples at 1000 and 1250 seconds after discovery already include `lsd` and
+`backgroundtaskmanagementd`. The existing LaunchServices store directory probe
+logs each detected `.csstore` file's creation time, modification time, size and
+observation time when first seen or changed, before the existing 4 MiB flush
+threshold. File size and successful sync are not a database-completion signal.
+The CPU presenter already records the first nonblack copied frame with
+`first_rgb=1`; it does not require a new kernel for that marker.
