@@ -7,6 +7,7 @@ with an ad-hoc SHA-256/4K signature, retaining signed entitlement metadata.
 Inputs are read-only; original trust-cache membership is mandatory.
 """
 import argparse
+from collections import Counter
 import hashlib
 import importlib.util
 import json
@@ -143,6 +144,50 @@ def rebuilt_signature(code, signature, page_shift=12):
     return output, hashlib.sha256(new_cd).hexdigest()[:40]
 
 
+def lower_proven(data, info):
+    """Use zeta's code proof; retain unproven words just as its cache tool does.
+
+    Retained real PAC code uses the matching identity/zero kernel fallback,
+    never the previous canonicalization/XOR ABI. Unsupported load offsets
+    stay on the fault-aware fallback instead of changing their semantics.
+    """
+    sections = upstream.instruction_sections(info)
+    if not sections:
+        return [], dict(proven_instructions=0, unproven_pac_words=0, fallback_instructions=[])
+    decoder, proven, table_data, tables, anomalies, roots = upstream.code_proof.prove(
+        data, info, sections, upstream.va_to_off(info), upstream.code_proof.llvm_oracle, gaps=True)
+    dice = {at for off, size, _ in info['dice'] for at in range(off, off + size, 4)}
+    edits, fallback, unproven, kept = [], [], 0, Counter()
+    for section in sections:
+        for address in range(section['addr'], section['addr'] + section['size'], 4):
+            off = section['offset'] + address - section['addr']
+            word = struct.unpack_from('<I', data, off)[0]
+            try:
+                lowered = upstream.pauth.lower(word)
+            except ValueError as error:
+                if address in proven and off not in dice:
+                    # Only authenticated loads can need more than one ordinary
+                    # word at EL0. ERET and invalid encodings remain errors.
+                    require(word & 0xff200400 == 0xf8200400, str(error))
+                    fallback.append(dict(va=hex(address), word=hex(word), reason=str(error)))
+                continue
+            if lowered is None:
+                continue
+            name, replacement = lowered
+            if address in proven and off not in dice:
+                require(decoder[address][0] == name, f'PAC decoder mismatch at {address:#x}')
+                edits.append(dict(fileoff=off, original_word=hex(word), ordinary_word=hex(replacement),
+                                  mnemonic=name, evidence=proven[address]))
+            elif address in table_data or off in dice:
+                kept[name] += 1
+            else:
+                unproven += 1
+    return edits, dict(proven_instructions=len(proven), roots=roots, tables=len(tables),
+                       anomalies=len(anomalies), unproven_pac_words=unproven,
+                       fallback_instructions=fallback, kept=dict(kept),
+                       remaining_words_policy='zeta-ordinary-v1 kernel fallback')
+
+
 def rewrite(original, trusted):
     thin, container = arm64e_slice(original)
     info = upstream.parse(thin)
@@ -150,7 +195,7 @@ def rewrite(original, trusted):
     signature = thin[off:off + size]
     old_hash, old_cd, old_blobs = validate_original(thin[:off], signature)
     require(old_hash in trusted, 'original CodeDirectory absent from supplied Apple trust caches')
-    edits, proof = upstream.lower(thin, info)
+    edits, proof = lower_proven(thin, info)
     data = bytearray(thin[:off])
     for edit in edits:
         at = edit['fileoff']

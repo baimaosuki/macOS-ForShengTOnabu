@@ -40,6 +40,22 @@ def inventory(root):
                 with path.open('rb') as f:
                     header = f.read(8 + 64 * 32)
                 if candidate(header):
+                    # Universal containers also carry MH_KEXT_BUNDLE slices.
+                    # Those are kernel resources, handled by the fileset path.
+                    if header[:4] != b'\xcf\xfa\xed\xfe':
+                        magic, count = struct.unpack_from('>II', header)
+                        width = 32 if magic == 0xcafebabf else 20
+                        matches = [i for i in range(count)
+                                   if struct.unpack_from('>II', header, 8 + width * i)[0] == 0x100000c
+                                   and struct.unpack_from('>II', header, 8 + width * i)[1] & 0xffffff == 2]
+                        require(len(matches) == 1, 'ambiguous arm64e universal slice')
+                        offset = struct.unpack_from('>Q' if width == 32 else '>I', header, 16 + width * matches[0])[0]
+                        with path.open('rb') as stream:
+                            stream.seek(offset)
+                            thin_head = stream.read(32)
+                        require(len(thin_head) == 32, 'truncated arm64e universal slice')
+                        if struct.unpack_from('<I', thin_head, 12)[0] not in (2, 6, 7, 8):
+                            continue
                     key = (status.st_dev, status.st_ino)
                     files.setdefault(key, []).append('/' + path.relative_to(root).as_posix())
             except (OSError, ValueError) as err:
@@ -60,6 +76,7 @@ def main(argv=None):
     trusted = load_trust(a.apple_trust_cache)
     paths, errors = inventory(a.root)
     a.output.mkdir(parents=True)
+    a.report.with_suffix('.inventory.json').write_text(json.dumps(dict(paths=paths, errors=errors), indent=2) + '\n')
     def one(names):
         source = a.root / names[0].lstrip('/')
         try:
@@ -73,6 +90,7 @@ def main(argv=None):
                           mode=f'{stat.S_IMODE(status.st_mode):o}')
             return report
         except (OSError, ValueError, KeyError, IndexError, struct.error) as err:
+            print(f'rewrite failed: {names[0]}: {type(err).__name__}: {err}', flush=True)
             return dict(paths=names, error=f'{type(err).__name__}: {err}')
     results = []
     with concurrent.futures.ThreadPoolExecutor(max_workers=a.jobs) as pool:

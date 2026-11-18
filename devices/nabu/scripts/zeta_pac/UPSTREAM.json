@@ -17,6 +17,7 @@
     "tests/test_zeta_pauth_plan.py": "9a4c3e74ff8b48070de497c5cf0a8f0c36a0c01b99800b75238800fb41c524b2",
     "tests/test_zeta_userland_rewrite.py": "94ffef2c3cd4e5f813237c69d5df4f3b29d4086d4b7041571d4285ee9cc5a96a",
     "tests/test_zeta_dyld_cache_rewrite.py": "63dba957555e075360e8ebb95a92974df7800e651c425dc2fb49c3ef4b6bea5d",
-    "audit-zeta-apfs.py": "2ce7310c0ca929b1390e957aa39369ae787224b27b8aee749ba305d9e634dc24"
+    "audit-zeta-apfs.py": "2ce7310c0ca929b1390e957aa39369ae787224b27b8aee749ba305d9e634dc24",
+    "zeta_apfs_image.py": "735231bab78d771de8543f8593b97922ee95fdc4ddad65573940eb35bd46c24d"
   }
 }

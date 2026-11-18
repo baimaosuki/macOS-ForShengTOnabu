@@ -1,0 +1,64 @@
+--- a/inode.c
++++ b/inode.c
+@@ -2671,11 +2671,49 @@
+ 
+ #endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0) */
+ 
++/* Host image builder only: preserve native BSD metadata in an isolated VM.
++ * This interface is not compiled into the device XNU kernel. */
++#ifdef NABU_GUEST_BSD_FLAGS
++#define NABU_SET_BSD_FLAGS _IOW('N', 0xe1, __u32)
++#define NABU_GET_BSD_FLAGS _IOR('N', 0xe2, __u32)
++static long nabu_guest_bsd_flags(struct file *file, unsigned int cmd, void __user *arg)
++{
++    struct inode *inode = file_inode(file);
++    struct super_block *sb = inode->i_sb;
++    __u32 flags;
++    int err;
++    if (!capable(CAP_SYS_ADMIN)) return -EPERM;
++    if (cmd == NABU_GET_BSD_FLAGS)
++        return put_user(APFS_I(inode)->i_bsd_flags, (__u32 __user *)arg);
++    if (get_user(flags, (__u32 __user *)arg)) return -EFAULT;
++    /* The builder writes decompressed file bytes, never decmpfs metadata. */
++    if (flags & APFS_INOBSD_COMPRESSED) return -EINVAL;
++    err = mnt_want_write_file(file);
++    if (err) return err;
++    inode_lock(inode);
++    err = apfs_transaction_start(sb, APFS_TRANS_REG);
++    if (!err) {
++        apfs_inode_join_transaction(sb, inode);
++        APFS_I(inode)->i_bsd_flags = flags;
++        err = apfs_transaction_commit(sb);
++        if (err) apfs_transaction_abort(sb);
++    }
++    inode_unlock(inode);
++    mnt_drop_write_file(file);
++    return err;
++}
++#endif
++
+ long apfs_dir_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
+ {
+ 	void __user *argp = (void __user *)arg;
+ 
+ 	switch (cmd) {
++#ifdef NABU_GUEST_BSD_FLAGS
++    case NABU_SET_BSD_FLAGS:
++    case NABU_GET_BSD_FLAGS:
++        return nabu_guest_bsd_flags(file, cmd, argp);
++#endif
+ #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 13, 0) && LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0)
+ 	case FS_IOC_GETFLAGS:
+ 		return apfs_ioc_getflags(file, argp);
+@@ -2700,6 +2738,11 @@
+ 	void __user *argp = (void __user *)arg;
+ 
+ 	switch (cmd) {
++#ifdef NABU_GUEST_BSD_FLAGS
++    case NABU_SET_BSD_FLAGS:
++    case NABU_GET_BSD_FLAGS:
++        return nabu_guest_bsd_flags(file, cmd, argp);
++#endif
+ #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 13, 0) && LINUX_VERSION_CODE >= KERNEL_VERSION(5, 3, 0)
+ 	case FS_IOC_GETFLAGS:
+ 		return apfs_ioc_getflags(file, argp);
