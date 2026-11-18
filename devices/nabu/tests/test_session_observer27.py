@@ -153,7 +153,11 @@ int main(void) {
     target.round=5;
     assert(!nabu_session_due(&target,start+660*second-1));
     assert(nabu_session_due(&target,start+660*second));
-    target.round=6;assert(!nabu_session_due(&target,1000*second));
+    target.round=6;assert(!nabu_session_due(&target,start+1000*second-1));
+    assert(nabu_session_due(&target,start+1000*second));
+    target.round=7;assert(!nabu_session_due(&target,start+1250*second-1));
+    assert(nabu_session_due(&target,start+1250*second));
+    target.round=8;assert(!nabu_session_due(&target,start+1800*second));
     const char *auth[]={"authd","authorizationhost","SecurityAgent","usermanagerd"};
     for(unsigned i=0;i<sizeof(auth)/sizeof(*auth);++i) {
         struct nabu_session_target late={auth[i],342*second,0};
@@ -175,6 +179,7 @@ int main(void) {
         assert(!nabu_session_due(&late,882*second-1));
         assert(nabu_session_due(&late,882*second));
         late.round=6;assert(!nabu_session_due(&late,1000*second));
+        assert(nabu_session_due(&late,1342*second)==!strcmp(auth[i],"usermanagerd"));
     }
     assert(!nabu_session_auth_target("authd-helper"));
     assert(!nabu_session_auth_target("tccd"));

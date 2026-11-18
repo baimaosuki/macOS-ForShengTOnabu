@@ -22,12 +22,14 @@ Observer v32 allocates twice the process probe plus 64 KiB, bounded at 8 MiB,
 with five ENOMEM attempts. Every ten seconds it inspects the system LS-store
 directory without following symlinks. An actual regular .csstore >=4 MiB triggers
 file fsync and two sync calls separated by two seconds, once per boot. The size
-trigger does not mean initialization finished. The watch remains alive through
-1800 seconds and by default performs sync/sleep/sync and reboot(0), never
-RB_NOSYNC. The existing explicit 600..1800-second halt argument overrides this
-reboot. This deliberately changes ordinary observer-enabled boots to restart
-after 30 minutes. Only clean shutdown/unmount, not sync alone, can close the
-filesystem lifecycle. No machine-bound store is imported into a Data seed.
+trigger does not mean initialization finished. Observer v33 exits after 1800
+seconds on an ordinary boot. During observation it starts the system's
+`caffeinate -d -i -w <observer-pid>` and logs spawn failures and early exits.
+The power assertions are scoped to observation; system-directed shutdown and
+explicit sleep retain their native paths. The existing explicit 600..1800-second
+halt entry remains separate. Two late samples target WindowServer, loginwindow,
+lsd, backgroundtaskmanagementd and usermanagerd. A process-table snapshot is
+only requested when a sample is due. No machine-bound store is imported.
 
 The coldstart capture extends to 933 seconds. WindowServer 159 aborts in
 `CompositorSW -> CGLayerKitFetch -> CARenderOGLRender -> prepare_layers_roi`
