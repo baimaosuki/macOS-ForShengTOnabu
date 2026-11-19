@@ -44,6 +44,7 @@ def cached_bridge(cache,policy):
 def save_bridge(cache,policy,source):
     cache.mkdir(parents=True,exist_ok=True)
     # Publish policy last, so a partial cache cannot be considered complete.
+    (cache/'policy.json').unlink(missing_ok=True)
     for name in (BRIDGE_ARCHIVE,BRIDGE_ARCHIVE+'.json'):
         with tempfile.NamedTemporaryFile(dir=cache,delete=False) as stream:
             temporary=Path(stream.name)

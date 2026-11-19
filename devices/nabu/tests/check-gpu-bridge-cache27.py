@@ -2,6 +2,7 @@
 """Check complete-archive reuse and rejection of incompatible or partial caches."""
 import argparse,copy,hashlib,importlib.util,json,shutil,tempfile
 from pathlib import Path
+from unittest import mock
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
@@ -41,6 +42,12 @@ def main():
         module.save_bridge(cache,policy,source)
         (cache/'policy.json').write_text('{partial')
         assert module.cached_bridge(cache,policy) is None;checks.append('partial policy')
+        module.save_bridge(cache,policy,source)
+        with mock.patch.object(module.shutil,'copyfile',side_effect=OSError('interrupted cache update')):
+            try:module.save_bridge(cache,policy,source)
+            except OSError:pass
+            else:raise AssertionError('I/O failure was swallowed')
+        assert module.cached_bridge(cache,policy) is None;checks.append('interrupted replacement of existing cache')
     a.output.parent.mkdir(parents=True,exist_ok=True)
     a.output.write_text(json.dumps(dict(passed=True,checks=checks,real_archive=bool(a.archive_dir),hardware_tested=False),indent=2)+'\n')
     print('PASS complete Rust archive cache: exact reuse, incompatible inputs and corruption')
