@@ -32,7 +32,7 @@ def stage(root,out):
     for name in ('NabuLogCore.h','NabuLogFormat.h'):shutil.copyfile(logger/name,staged/name)
     return source,staged,identity,inventory
 
-def build(root,out,compile_cpp,compile_c,run):
+def build(root,out,compile_cpp,compile_c,run,*,triple,sdk):
     root=Path(root);out=Path(out)/'a640';out.mkdir(parents=True,exist_ok=True)
     source,staged,identity,inventory=stage(root,out)
     objects=[]
@@ -63,11 +63,13 @@ def build(root,out,compile_cpp,compile_c,run):
             text+=f'.globl {name}\n{name}:\n bti c\n b {name}.original\n'
     for name,body in [('gpu-native-bindings',text),('native-addresses',addresses)]:
         src=out/(name+'.S');src.write_text(body);obj=out/(name+'.o')
-        run(['xcrun','clang','-target','arm64-apple-macos14','-c',src,'-o',obj]);objects.append(obj)
+        # These adapters link into XNU, so they must use the same Mach-O
+        # platform/deployment as the containing kernel and other driver objects.
+        run(['xcrun','clang','-target',triple,'-isysroot',sdk,'-c',src,'-o',obj]);objects.append(obj)
     c_names=sorted(p.name for p in (source/'upstream/ArmSmmu4K').glob('*.c'))+['AdrenoPM4.c','NabuGpuStart.c']
     for name in c_names:
         obj=out/(Path(name).stem+'.o');compile_c(staged/name,obj,extra=extra);objects.append(obj)
-    report=dict(target='macos-27.3-26C5035r',architecture='arm64',source_identity=identity,
+    report=dict(target='macos-27.3-26C5035r',architecture='arm64',kernel_object_target=triple,source_identity=identity,
         sources=inventory,objects=[dict(path=p.name,sha256=hashlib.sha256(p.read_bytes()).hexdigest()) for p in objects],
         a640_chip='0x06040001',gmem_bytes=1048576,trigger='nabu-gpu=1',native_wire_abi=2,
         metal_runtime_wire_abi=2,metal_publication_enabled=True,original_base_bindings={n:hex(v) for n,v in bindings.items()},hardware_tested=False)

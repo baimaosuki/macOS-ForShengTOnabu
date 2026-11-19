@@ -73,7 +73,8 @@ def main():
         command=[c for c in common if c not in ('-std=gnu++17','-nostdinc++','-fno-rtti','-fno-exceptions','-fno-c++-static-destructors','-fapple-kext')]
         command[0]=a.clang
         run([*command,'-std=gnu11',*extra,'-c',src,'-o',dst])
-    objects=module.build(a.tree,out,compile_cpp,compile_c,run)
+    objects=module.build(a.tree,out,compile_cpp,compile_c,run,
+                         triple='arm64-apple-macos14',sdk=a.sdkroot)
     # The new owned handoff entry points are supplied by the actual presenter.
     # Compile it here as well so the GPU/display boundary has no placeholder.
     presenter=out/'NativeGOPPresenter.o'

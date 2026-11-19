@@ -13,7 +13,7 @@ from pathlib import Path
 import struct
 import subprocess
 import sys
-from kernel_target import ARCH, IOS_VERSION, TRIPLE
+from kernel_target import ARCH, IOS_VERSION, TRIPLE, check_object
 # The OS profile's build selects the class fixtures: the reviewed iPadOS 27 ones, or the macOS 27.3 ones that
 # gen-board-abi.py writes from the symbols of the macOS collection.
 BUILD = os.environ.get('UNIXNU_IPSW_BUILD') or '24A446'
@@ -579,7 +579,10 @@ if MACOS:
 if MACOS:
     gpu_spec=importlib.util.spec_from_file_location('nabu_gpu27',Path(__file__).with_name('build-nabu-gpu27.py'))
     gpu=importlib.util.module_from_spec(gpu_spec);gpu_spec.loader.exec_module(gpu)
-    input_objects += gpu.build(ROOT,OUT,compile_cpp,compile_c,run)
+    gpu_objects = gpu.build(ROOT,OUT,compile_cpp,compile_c,run,triple=TRIPLE,sdk=sdk)
+    for gpu_object in gpu_objects:
+        check_object(gpu_object.read_bytes(), str(gpu_object))
+    input_objects += gpu_objects
 
 archive = OUT / 'libNativeLegacyDisplay.late.a'
 archive.unlink(missing_ok=True)
