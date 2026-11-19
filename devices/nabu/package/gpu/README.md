@@ -12,7 +12,7 @@ This GPU SMMU is distinct from the 0x15000000 SMMU used by UFS and USB. GPU
 streams 0/1/0x400/0x401 use CB0; GMU kernel streams 5/0x405 use CB1.
 The vendor GMU user stream 4/0x404 is not substituted for the kernel stream.
 
-A build links the backend but does not start it unless `nabu-gpu=1` is present.
+A build links the backend and v2 publication but does not start them unless `nabu-gpu=1` is present.
 After IOBSD and a bounded delay, it validates private A640 firmware, owns the
 GPU/GMU contexts, performs bounded power/HFI/ZAP startup and submits a scratch
 write and timestamp fence. Only the observed scratch and CP-written fence make
@@ -50,10 +50,14 @@ not been loaded on macOS or tested on the board.
 `prepare-nabu-m2v27.py` stages the pinned upstream with arm64 Rust/Clang,
 A640 render defaults, no Rust PAC wrappers, and arm64 Shader Cache tools.
 `build-nabu-m2v27.py` runs the matching build and 4 KiB signing on macOS.
-It does not install or enable an addon. The mainline wire remains v2 while the
-A640 core is v1; their adapter, BO no-task/pageable migration, macOS accelerator
-base qualification and GPU scanout still require implementation and evidence.
-No plugin is enabled by this checkpoint; see gpu-port27.json.
+The signed userspace artifact is reused by `integrate-gpu-esp27.py`.
+The A640 overlay now uses wire v2, 128 fixed-submit IBs and selectors 17/18 for
+priority/note. Owned user BOs use no-task pageable WC backing; cached imports
+use explicit cache maintenance and NC GPU mappings. No OwnedCoherent bit is set.
+The native IOAccelerator publication and connection-owned GOP handoff are
+compiled with NABU_GPU_METAL=1. Only the independent A640 Metal menu entry starts
+them; CPU boot remains available. Host compilation/tests and pending full native
+CI are distinct from the still untested hardware rendering path.
 
 Userspace CI 44614135059 (19f8c3b) compiled and 4 KiB-signed the plugin,
 Turnip, probe and three Shader Cache programs with Xcode 26.6 / SDK 26.5.

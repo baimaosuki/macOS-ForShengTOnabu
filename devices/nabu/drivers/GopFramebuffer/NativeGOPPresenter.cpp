@@ -55,10 +55,17 @@ class NativeGOPPresenter : public IOService {
     IOReturn waitSwap(task_t,uint64_t timeoutMs,NGPSwap *);
     IOReturn completeSwap(uint64_t sequence,int status);
     void abandonSwap();
+    const void *handoffOwner=nullptr;
+    task_t handoffTask=TASK_NULL;
+    uint32_t handoffCalls=0;
+    bool handoffClosing=false;
 public:
     void setMemorySource(IOService *source) {memorySource=source;}
     static IOReturn handoffCall(uint32_t op,task_t task,const void *in,size_t inSize,void *out,size_t outSize);
     static IOMemoryDescriptor *handoffMemory();
+    static IOReturn ownedCall(uint32_t,task_t,const void *,const void *,size_t,void *,size_t);
+    static IOMemoryDescriptor *ownedMemory(task_t,const void *);
+    static void ownedClose(const void *);
     bool offer(void *display,IOMemoryDescriptor *,uint64_t stride,uint32_t width,uint32_t height,uint32_t format);
 private:
     IOReturn transfer(task_t,const NGPPresent &,NGPTransfer *);
@@ -161,7 +168,7 @@ IOReturn NativeGOPPresenter::waitSwap(task_t task,uint64_t timeoutMs,NGPSwap *ou
     native_gop_wait_stats[0]=native_gop_wait_stats[0]+1;native_gop_wait_stats[2]=timeoutMs;
     IOLockLock(gate);
     gpuClient=true;
-    while(online && (!swap.offered || swap.delivered)) {
+    while(online && !handoffClosing && (!swap.offered || swap.delivered)) {
         const wait_result_t woke=IOLockSleepDeadline(gate,&swap,deadline,THREAD_ABORTSAFE);
         if(woke!=THREAD_AWAKENED) {
             const uint64_t state=(uint64_t)swap.offered<<32|(uint64_t)swap.delivered<<33|(uint64_t)online<<34|timeoutMs<<40;
@@ -182,7 +189,7 @@ IOReturn NativeGOPPresenter::waitSwap(task_t task,uint64_t timeoutMs,NGPSwap *ou
             return kIOReturnTimeout;
         }
     }
-    if(!online) {IOLockUnlock(gate);return kIOReturnNotReady;}
+    if(!online || handoffClosing) {IOLockUnlock(gate);return kIOReturnNotReady;}
     native_gop_wait_reasons[3]=native_gop_wait_reasons[3]+1;
     swap.delivered=true;
     IOMemoryDescriptor *memory=swap.memory;memory->retain();
@@ -292,6 +299,51 @@ extern "C" IOReturn native_gop_handoff_call(uint32_t op,task_t task,const void *
     return NativeGOPPresenter::handoffCall(op,task,in,inSize,out,outSize);
 }
 extern "C" IOMemoryDescriptor *native_gop_handoff_memory(void) {return NativeGOPPresenter::handoffMemory();}
+IOReturn NativeGOPPresenter::ownedCall(uint32_t op,task_t task,const void *owner,
+    const void *in,size_t inSize,void *out,size_t outSize) {
+    NativeGOPPresenter *p=gHandoff;
+    if(!p || !p->gate || !owner || !task)return kIOReturnNotReady;
+    IOLockLock(p->gate);
+    if(p->handoffClosing || (p->handoffOwner && (p->handoffOwner!=owner || p->handoffTask!=task))) {
+        IOLockUnlock(p->gate);return kIOReturnBusy;
+    }
+    p->handoffOwner=owner;p->handoffTask=task;++p->handoffCalls;
+    IOLockUnlock(p->gate);
+    const IOReturn status=handoffCall(op,task,in,inSize,out,outSize);
+    IOLockLock(p->gate);--p->handoffCalls;IOLockWakeup(p->gate,&p->handoffCalls,false);IOLockUnlock(p->gate);
+    return status;
+}
+IOMemoryDescriptor *NativeGOPPresenter::ownedMemory(task_t task,const void *owner) {
+    NativeGOPPresenter *p=gHandoff;
+    if(!p || !p->gate || !owner || !task)return nullptr;
+    IOLockLock(p->gate);
+    const bool valid=!p->handoffClosing && (!p->handoffOwner || (p->handoffOwner==owner && p->handoffTask==task));
+    IOMemoryDescriptor *memory=nullptr;
+    if(valid) {
+        p->handoffOwner=owner;p->handoffTask=task;
+        memory=handoffMemory(); // returns one retained descriptor
+    }
+    IOLockUnlock(p->gate);return memory;
+}
+void NativeGOPPresenter::ownedClose(const void *owner) {
+    NativeGOPPresenter *p=gHandoff;
+    if(!p || !p->gate || !owner)return;
+    IOLockLock(p->gate);
+    if(p->handoffOwner!=owner) {IOLockUnlock(p->gate);return;}
+    p->handoffClosing=true;IOLockWakeup(p->gate,&p->swap,false);
+    while(p->handoffCalls)IOLockSleep(p->gate,&p->handoffCalls,THREAD_UNINT);
+    IOLockUnlock(p->gate);
+    p->abandonSwap(); // release cached source mappings and retire a pending swap as aborted
+    IOLockLock(p->gate);p->handoffOwner=nullptr;p->handoffTask=TASK_NULL;p->handoffClosing=false;IOLockUnlock(p->gate);
+}
+extern "C" IOReturn native_gop_handoff_owned_call(uint32_t op,task_t task,const void *owner,
+    const void *in,size_t inSize,void *out,size_t outSize) {
+    return NativeGOPPresenter::ownedCall(op,task,owner,in,inSize,out,outSize);
+}
+extern "C" IOMemoryDescriptor *native_gop_handoff_owned_memory(task_t task,const void *owner) {
+    return NativeGOPPresenter::ownedMemory(task,owner);
+}
+extern "C" void native_gop_handoff_owned_close(const void *owner) {NativeGOPPresenter::ownedClose(owner);}
 IOReturn NativeGOPPresenter::newUserClient(task_t task,void *security,UInt32 type,OSDictionary *properties,IOUserClient **out) {
     if(!out || type)return kIOReturnBadArgument;
     *out=nullptr;NativeGOPClient *client=new NativeGOPClient;if(!client)return kIOReturnNoMemory;

@@ -37,6 +37,7 @@ timeout = -1
 panic_screen = true
 root_policies = "{tree}/build/sheng-source-storage/root-policies.bin"
 text_fixups = [
+    "dyld_shared_cache_arm64e.03,5de1134,08060037,1f2003d5",
     "dyld_shared_cache_arm64e.03,5b51d00,7f2303d5f44fbea9,000080d2c0035fd6",
     "dyld_shared_cache_arm64e.03,5b4263c,7f2303d5f657bda9,000080d2c0035fd6",
     "dyld_shared_cache_arm64e.03,5de63cc,1811981a,f803082a",

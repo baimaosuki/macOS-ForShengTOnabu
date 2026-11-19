@@ -1,35 +1,22 @@
 {
-  "candidate_sha256": null,
-  "original_iogpu_text_sha256": "3358bb59a02860bbbfabd0f755e49d62b9e93087cf44de5c81e66cf4270af7c4",
-  "runtime_parent_evidence_sha256": null,
-  "metaclass": "0xfffffff007b2cb88",
+  "kernelcache_sha256": "d1003b5143ffd88439b4d45b6017f587171cfe6855660bed05370a2ea5db9fe9",
+  "collection_slide": "0x1f000000000",
+  "base_class": "IOAccelerator",
+  "metaclass": "0xfffffe000cc22b38",
   "instance_bytes": 136,
-  "vptr": "0xfffffff006e12a60",
-  "virtual_entries": 168,
+  "virtual_entries": 272,
   "operational_overrides": [],
   "metadata_overrides": [
     0,
     1,
     7
   ],
-  "protected_compatible_constructor_aliases": [
-    "0xfffffff005fe0abc",
-    "0xfffffff005fe0adc"
+  "libkern_entries": [
+    16
   ],
-  "nondeleting_destructor": "0xfffffff005fe0b00",
-  "get_meta_class": "0xfffffff005fe0b48",
-  "original_entry_sha256": {
-    "0xfffffff005fe0abc": "06cb5f51bf6cee3185b2508ebe05ef53b0f9203ca25677e6f5d7261209ac910c",
-    "0xfffffff005fe0adc": "24a46c7cf318c13d8b53364cbbc626ea1dbbd72f4d0145218a303b251ab90c16",
-    "0xfffffff005fe0b00": "d3c8778ca9642575cdfb2ad897e8e9784fcc6ac484a3616e598fe173e0c3c45d",
-    "0xfffffff005fe0b48": "32e4e41e6e2cf70bc427906bfad91f8879c74e8457fe53c8e39432fa31cad328"
-  },
-  "native_iogpu_instance_created": false,
-  "system_device_published": false,
-  "system_metal": false,
-  "original_desktop": false,
-  "_audit_notes": {
-    "missing_sha256": "No assembled candidate or runtime parent capture was supplied; the corresponding SHA-256 fields are unavailable.",
-    "runtime_capabilities": "The false capability flags mean this static audit did not establish the corresponding runtime capabilities."
-  }
+  "protected_compatible_constructor_aliases": [
+    "0xfffffe000aae62e0"
+  ],
+  "nondeleting_destructor": "0xfffffe000aae6350",
+  "evidence": "IOGraphicsFamily IOAccelerator of d1003b5143ffd884: vtable 0xfffffe00085c9220, 272 entries with IOService's diversities. Slots 0, 1 (destructors) and 7 (getMetaClass) are its own; slot 16 is OSMetaClassBase::Dispatch(IORPC), which every kext-built class holds where the kernel's IOService vtable holds a reserved stub. Its MetaClass constructor passes size 0x88. Addresses from the collection's symbol table."
 }

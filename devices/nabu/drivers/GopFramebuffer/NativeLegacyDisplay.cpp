@@ -311,6 +311,10 @@ bool nabuSleepRejected = false;
     bool directOn=false,directBoot=true;
     static constexpr uint32_t kVig[2]={0x4000,0x6000},kCtlFlush=0x15018,kBootIova=0xb8000000U,kBootStride=0x2fa0;
     void startDirect() {
+        // nabu keeps the firmware's SM8150 scanout. GPU mode uses the GOP
+        // handoff/copy path; never touch this inherited SM8550 DPU window.
+        unsigned gpu=0;PE_parse_boot_argn("fb-gpu",&gpu,sizeof(gpu));
+        if(gpu==1)return;
         unsigned mode=0;PE_parse_boot_argn("dpu-scanout",&mode,sizeof(mode));
         if(mode<2 || !&native_ufs_dpu_map || !&native_ufs_dpu_state || !(native_ufs_dpu_state>>31) || !primary)return;
         IODeviceMemory *memory=IODeviceMemory::withRange(0xae01000,0x8f000);
@@ -634,7 +638,8 @@ public:
         if(transferred){stat(2);return;}
         const OriginalLegacySwapRequest *request=pendingSwapRequest();
         if(!request || !isValidated(request)){stat(4);return;}
-        if (nabuField<uint32_t>(request, kRequestMasks) & 15U) {
+        unsigned gpuHandoff=0;PE_parse_boot_argn("fb-gpu",&gpuHandoff,sizeof(gpuHandoff));
+        if (gpuHandoff!=1 && (nabuField<uint32_t>(request, kRequestMasks) & 15U)) {
             native_legacy_swap_stage(1);
             if (nabuPresentCpu(request)) {
                 transferred = true;
@@ -699,6 +704,12 @@ public:
         if(!gpuBypass) {
             if(!native_legacy_prepare_scanout()) {native_legacy_transfer_observed(kIOReturnNotReady,request,0);return;}
         }
+#if defined(NATIVE_LEGACY_MACOS) && NATIVE_LEGACY_MACOS
+        if(gpuHandoff==1 && !nabuConsoleClaimed) {
+            nabu_console_claim_framebuffer();nabuConsoleClaimed=true;
+            IOLog("NabuGPU: console_owner=WindowServer text=off handoff=GOP\n");
+        }
+#endif
         noteSurface(surface,memory);
         const bool half=nativeHalf(native_legacy_surface_format(surface),native_legacy_surface_planes(surface));
         if(half) {

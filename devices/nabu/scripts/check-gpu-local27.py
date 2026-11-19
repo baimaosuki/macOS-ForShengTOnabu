@@ -74,6 +74,13 @@ def main():
         command[0]=a.clang
         run([*command,'-std=gnu11',*extra,'-c',src,'-o',dst])
     objects=module.build(a.tree,out,compile_cpp,compile_c,run)
+    # The new owned handoff entry points are supplied by the actual presenter.
+    # Compile it here as well so the GPU/display boundary has no placeholder.
+    presenter=out/'NativeGOPPresenter.o'
+    compile_cpp(device/'drivers/GopFramebuffer/NativeGOPPresenter.cpp',presenter,
+        ['-I',str(device/'drivers/GopFramebuffer')])
+    objects.append(presenter)
+
     # Compile the actual new logger accessor body for this closure check; the
     # full kernel supplies it from the same production NabuLogUfs.h.
     logger=(device/'drivers/ShengUfs/NabuLogUfs.h').read_text()

@@ -228,6 +228,7 @@ IOReturn destroyOwnedStorage(NativeAdrenoBackingStorage &storage)
     }
     const uint32_t release_flags=storage.write_combined?NativeAdrenoMemoryDiagnosticWriteCombined:0;
     if(storage.descriptor) {
+        OSSafeReleaseNULL(storage.cpu_mapping);
         if(storage.prepared) {
             MemoryStageTime elapsed(MemoryComplete,storage.bytes);
             native_adreno_trace_stage=31;
@@ -547,15 +548,21 @@ IOReturn NativeAdrenoMemory::allocate(size_t bytes,unsigned bits,bool contiguous
     if(contiguous) {
         options|=kIOMemoryPhysicallyContiguous;
     }
+    const bool systemBo=write_combined && pooled && !contiguous;
+    if(systemBo)options|=kIOMemoryPageable;
+    auto allocateDescriptor=[&]() {
+        return systemBo?IOBufferMemoryDescriptor::inTaskWithOptions(nullptr,options,bytes,4096):
+            IOBufferMemoryDescriptor::inTaskWithPhysicalMask(kernel_task,options,bytes,(limit-1)&~UINT64_C(4095));
+    };
     {
         MemoryStageTime elapsed(MemoryAllocate,bytes);
-        storage_.descriptor=IOBufferMemoryDescriptor::inTaskWithPhysicalMask(kernel_task,options,bytes,(limit-1)&~UINT64_C(4095));
+        storage_.descriptor=allocateDescriptor();
     }
     if(!storage_.descriptor && backing_cache_count) {
         native_adreno_backing_cache_stats[9]=native_adreno_backing_cache_stats[9]+1;
         (void)trimBackingCache(NativeAdrenoBackingTrimReason::AllocationRetry);
         MemoryStageTime elapsed(MemoryAllocate,bytes);
-        storage_.descriptor=IOBufferMemoryDescriptor::inTaskWithPhysicalMask(kernel_task,options,bytes,(limit-1)&~UINT64_C(4095));
+        storage_.descriptor=allocateDescriptor();
     }
     if(!storage_.descriptor) {
         return kIOReturnNoMemory;
@@ -577,6 +584,10 @@ IOReturn NativeAdrenoMemory::allocate(size_t bytes,unsigned bits,bool contiguous
     storage_.output_bits=bits;
     storage_.contiguous=contiguous;
     storage_.mapping=storage_.descriptor->getBytesNoCopy();
+    if(systemBo && !storage_.mapping) {
+        storage_.cpu_mapping=storage_.descriptor->createMappingInTask(kernel_task,0,kIOMapAnywhere|kIOMapWriteCombineCache);
+        storage_.mapping=storage_.cpu_mapping?reinterpret_cast<void *>(storage_.cpu_mapping->getVirtualAddress()):nullptr;
+    }
     status=kIOReturnUnsupported;
     if(!storage_.mapping || ((uintptr_t)storage_.mapping&4095) || bytes>UINTPTR_MAX-(uintptr_t)storage_.mapping ||
         storage_.descriptor->getLength()!=bytes) {
@@ -741,7 +752,7 @@ IOReturn NativeAdrenoMemory::importTask(void *task,uint64_t address,size_t bytes
         } else if(cpu_cache_mode_!=mode) {
             cpu_cache_mode_=NativeAdrenoCpuCacheMode::Mixed;
         }
-        const unsigned writeback=mode==NativeAdrenoCpuCacheMode::Cached?1u:0u;
+        const unsigned writeback=0; // A640 GPU always NC; cached CPU imports use explicit maintenance.
         if(storage_.span_count && storage_.spans[storage_.span_count-1].writeback==writeback &&
             physical==storage_.spans[storage_.span_count-1].physical+storage_.spans[storage_.span_count-1].bytes) {
             storage_.spans[storage_.span_count-1].bytes+=4096;
@@ -831,6 +842,7 @@ IOReturn NativeAdrenoMemory::publishForDevice(size_t offset,size_t bytes)
 {
     if(!backed() || !storage_.prepared || storage_.quarantined)return kIOReturnNotReady;
     if(!bytes || offset>storage_.bytes || bytes>storage_.bytes-offset)return kIOReturnBadArgument;
+    if(maintainedImport())return maintainImported(offset,bytes,false);
     __asm__ volatile("dsb st" ::: "memory");
     return kIOReturnSuccess;
 }
@@ -838,6 +850,31 @@ IOReturn NativeAdrenoMemory::acquireDeviceWrites(size_t offset,size_t bytes)
 {
     if(!backed() || !storage_.prepared || storage_.quarantined)return kIOReturnNotReady;
     if(!bytes || offset>storage_.bytes || bytes>storage_.bytes-offset)return kIOReturnBadArgument;
+    if(maintainedImport())return maintainImported(offset,bytes,true);
+    __asm__ volatile("dsb sy" ::: "memory");
+    return kIOReturnSuccess;
+}
+extern "C" uint64_t gVirtBase,gPhysBase,gPhysSize;
+IOReturn NativeAdrenoMemory::maintainImported(size_t offset,size_t bytes,bool invalidate)
+{
+    // Only prepared RAM pages already validated at import are touched. The
+    // caller excludes CPU writes until the actual CP completion is observed.
+    const uint64_t end=offset+bytes;
+    for(size_t i=0;i<storage_.span_count;++i) {
+        const auto &span=storage_.spans[i];
+        const uint64_t first=offset>span.offset?offset:span.offset;
+        const uint64_t last=end<span.offset+span.bytes?end:span.offset+span.bytes;
+        if(first>=last)continue;
+        const uint64_t physical=span.physical+first-span.offset;
+        if(physical<gPhysBase || physical-gPhysBase>=gPhysSize || last-first>gPhysSize-(physical-gPhysBase))
+            return kIOReturnUnsupported;
+        const uint64_t start=gVirtBase+physical-gPhysBase;
+        const uint64_t stop=start+last-first;
+        for(uint64_t va=start&~UINT64_C(63);va<stop;va+=64) {
+            if(invalidate)__asm__ volatile("dc ivac, %0" :: "r"(va):"memory");
+            else __asm__ volatile("dc civac, %0" :: "r"(va):"memory");
+        }
+    }
     __asm__ volatile("dsb sy" ::: "memory");
     return kIOReturnSuccess;
 }

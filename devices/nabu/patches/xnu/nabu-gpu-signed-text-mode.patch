@@ -1,0 +1,51 @@
+--- a/bsd/kern/ubc_subr.c
++++ b/bsd/kern/ubc_subr.c
+@@ -7098,9 +7098,30 @@
+ 	return true;
+ }
+ 
++/* One kernel/ADT serves both nabu menu entries. CPU renderer overrides must
++ * never disable Metal discovery in the GPU entry; neither mode writes signed
++ * mapped text directly. The existing signed-byte reconstruction is unchanged. */
++static __attribute__((noinline)) int
++nabu_cs_text_rule_for_mode(const struct cs_text_fixup *f, int gpu)
++{
++#if defined(NABU)
++	if (!strcmp(f->name, "dyld_shared_cache_arm64e.03")) {
++		if (f->offset == 0x5de1134) return gpu == 1;
++		if (f->offset == 0x5b51d00 || f->offset == 0x5b4263c || f->offset == 0x5de63cc) return gpu != 1;
++	}
++	if (!strcmp(f->name, "dyld_shared_cache_arm64e.01") &&
++	    (f->offset == 0x24dfd5c || f->offset == 0x26cde70)) return gpu != 1;
++#else
++	(void)f; (void)gpu;
++#endif
++	return 1;
++}
++
+ static void
+ cs_text_fixup_init(void)
+ {
++	int nabu_gpu_mode = 0;
++	PE_parse_boot_argn("fb-gpu", &nabu_gpu_mode, sizeof(nabu_gpu_mode));
+ 	DTEntry chosen;
+ 	void const *table;
+ 	unsigned int size;
+@@ -7113,7 +7134,7 @@
+ 			if (length < sizeof(entry) && cs_text_fixup_count < CS_TEXT_FIXUP_MAX) {
+ 				strlcpy(entry, s, length + 1);
+ 				if (cs_text_fixup_parse(entry, &cs_text_fixups[cs_text_fixup_count])) {
+-					cs_text_fixup_count++;
++					if (nabu_cs_text_rule_for_mode(&cs_text_fixups[cs_text_fixup_count], nabu_gpu_mode)) cs_text_fixup_count++;
+ 				} else {
+ 					printf("text-fixups[%d]: malformed, ignored\n", i);
+ 				}
+@@ -7132,7 +7153,7 @@
+ 			continue;
+ 		}
+ 		if (cs_text_fixup_parse(args[i], &cs_text_fixups[cs_text_fixup_count])) {
+-			cs_text_fixup_count++;
++			if (nabu_cs_text_rule_for_mode(&cs_text_fixups[cs_text_fixup_count], nabu_gpu_mode)) cs_text_fixup_count++;
+ 		} else {
+ 			printf("text-fixup%d: malformed, ignored\n", i);
+ 		}

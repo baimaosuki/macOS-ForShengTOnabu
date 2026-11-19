@@ -180,7 +180,7 @@ IOReturn NativeAdrenoVm::preflight(const NativeAdrenoMemory *memory,unsigned upp
         permissions!=(ArmSmmu4KRead|ArmSmmu4KWrite) || writeback!=0 ||
         memory->spans()[0].writeback!=0)) return kIOReturnUnsupported;
     if(memory->cpuCacheMode()==NativeAdrenoCpuCacheMode::Unknown || shareability!=2 ||
-        (memory->cpuCacheMode()!=NativeAdrenoCpuCacheMode::NormalUncached && !firmware && !cached_coherent_imports_)) {
+        (memory->cpuCacheMode()!=NativeAdrenoCpuCacheMode::NormalUncached && !firmware && !memory->maintainedImport() && !cached_coherent_imports_)) {
         return kIOReturnUnsupported;
     }
     const ArmSmmu4KLiveArena *a=regions_[upper].arena;
@@ -345,7 +345,7 @@ IOReturn NativeAdrenoVm::map(NativeAdrenoMemory *memory,unsigned upper,uint64_t 
     if(!memory || writeback>1 || (writeback && !memory->cpuCacheCoherent())) {
         return kIOReturnBadArgument;
     }
-    writeback=memory->cpuCacheMode()==NativeAdrenoCpuCacheMode::Mixed?2u:
+    writeback=memory->maintainedImport()?0u:memory->cpuCacheMode()==NativeAdrenoCpuCacheMode::Mixed?2u:
         memory->cpuCacheCoherent()?1u:0u;
     PhaseClock clock;
     IOReturn checked=preflight(memory,upper,iova,permissions,writeback,shareability);if(checked)return checked;

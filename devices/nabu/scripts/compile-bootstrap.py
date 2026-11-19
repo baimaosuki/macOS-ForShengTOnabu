@@ -42,6 +42,12 @@ def main():
                     '--output', str(ROOT / 'out/nabu27-gpu-smmu-host')], check=True)
     subprocess.run([sys.executable, str(ROOT / 'devices/nabu/tests/check-gpu-profile27.py'),
                     '--output', str(ROOT / 'out/nabu27-gpu-profile-host')], check=True)
+    for name in ('wire','bo'):
+        subprocess.run([sys.executable,str(ROOT / ('devices/nabu/tests/check-gpu-'+name+'27.py')),
+                        '--output',str(ROOT / ('out/nabu27-gpu-'+name+'-host'))],check=True)
+    subprocess.run([sys.executable,str(ROOT / 'devices/nabu/tests/check-gpu-handoff27.py'),
+                    '--userspace-wire',str(ROOT / 'devices/nabu/compat/gpu/NativeGOPWire-v1.h'),
+                    '--output',str(ROOT / 'out/nabu27-gpu-handoff-host')],check=True)
     args = cli.parser().parse_args([
         "build", "kernel", "-D", str(ROOT / "devices/nabu"), "--os", "macos-27"
     ])
@@ -59,6 +65,9 @@ def main():
                                    (m.kind != "refer" or m.name in wanted)})
     tree.assemble(ctx, modules)
     order = patches.prepare(ctx, modules)
+    subprocess.run([sys.executable,str(ROOT / 'devices/nabu/tests/check-gpu-text-mode27.py'),
+                    '--xnu',str(ctx.tree / '.cache/xnu-work'),
+                    '--output',str(ctx.work / 'gpu-text-mode-verification')],check=True)
     subprocess.run([sys.executable, str(ROOT / 'devices/nabu/tests/test_desktop_stability27.py'),
                     '--xnu', str(ctx.tree / '.cache/xnu-work')], check=True)
     subprocess.run([sys.executable, str(ROOT / 'devices/nabu/tests/test_zeta_pac27.py'),

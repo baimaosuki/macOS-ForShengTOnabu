@@ -42,6 +42,7 @@
     "clang_cpu": "generic",
     "clang_arch": "armv8.2-a+crypto",
     "abi": "zeta-ordinary-v1",
-    "kernel_wire_adapter_ready": false
+    "kernel_wire_adapter_ready": true,
+    "kernel_wire_host_test": true
   }
 }

@@ -44,13 +44,16 @@
       }
     },
     "metal_abi": {
-      "kernel_wire_version": 1,
+      "kernel_wire_version": 2,
       "mainline_wire_version": 2,
-      "publication_enabled": false
+      "publication_enabled": true,
+      "hardware_tested": false
     },
     "desktop": {
       "gpu_acceleration": false,
-      "current_presenter": "NABU27-CPU"
+      "current_presenter": "NABU27-CPU",
+      "gpu_entry": "a640-metal",
+      "hardware_tested": false
     }
   },
   "firmware": "private local input; never committed",

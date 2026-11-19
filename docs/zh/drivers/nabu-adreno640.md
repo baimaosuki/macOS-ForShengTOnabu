@@ -33,3 +33,12 @@ Clang 显式设置 `-mcpu=generic -march=armv8.2-a+crypto`。Darwin 的默认 Ap
 bridge/translator 输入、普通指针 ABI、CPU 特性、LTO 参数及编译器版本，之后仍由
 上游构建器核对源码身份与静态库哈希。缓存缺失、损坏或不完整时回到 Cargo。
 Host 测试覆盖精确复用和不兼容输入拒绝，不代表 Vulkan 前端或真机已经验证。
+
+
+P026 集成代码：A640 wire v2（Submit 3104 字节，128 IB，17/18 为优先级/Note）；
+无 task 可分页 WC BO，缓存 IOSurface 保留 CPU 属性并执行显式缓存维护，GPU PTE 为 NC。
+发布层使用 26C5035r 的 IOAccelerator，GOP 交接按连接/task 校验并在关闭时清理。
+fb-gpu 模式不执行继承的 SM8550 DPU 寄存器路径。单独 GPU 菜单项启用链路；
+同一内核按启动参数选择 signed-text 规则，CPU 使用原 10 条，GPU 使用 6 条，
+避免 CPU 的 renderer=nil / no-Metal 补丁禁用 GPU。签名用户态复用既有 CI 产物。
+这些是源码与 Host 证据；完整内核 CI 和最终包结果另行记录，真机桌面尚未验证。

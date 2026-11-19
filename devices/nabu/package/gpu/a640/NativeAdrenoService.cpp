@@ -78,10 +78,8 @@ extern volatile uint32_t armcpu_smp_step[8],armcpu_smp_mpidr[8],armcpu_smp_seen_
 extern volatile uint32_t armcpu_smp_sys[8][5],armcpu_core_timer[8],armcpu_core_sgi[8];
 extern volatile int32_t armcpu_smp_psci_rc[8];
 extern volatile uint64_t armcpu_ipi_interrupts,armcpu_ipi_sent;
-extern volatile uint64_t nabu_scanout_offers,nabu_scanout_completed,nabu_scanout_fallbacks;
-extern volatile uint64_t nabu_scanout_waits,nabu_scanout_timeouts,nabu_scanout_abandoned;
-extern volatile uint64_t nabu_scanout_maps,nabu_scanout_map_hits;
-extern volatile uint32_t nabu_scanout_ready,nabu_scanout_last_status,nabu_scanout_pending;
+extern volatile uint64_t native_gop_gpu_offers,native_gop_gpu_completions,native_gop_gpu_failures,native_gop_gpu_abandoned;
+extern volatile uint32_t native_gop_ready;
 extern unsigned int real_ncpus;
 extern uint32_t processor_avail_count;
 unsigned int ml_get_cpu_count(void);
@@ -195,15 +193,10 @@ void nabuGpuProbeWriterSample()
             sample,index,20,open.name,open.type,open.macf,open.res,open.attach,open.foreign));
     }
     emit(snprintf(line,sizeof(line),
-        "NabuGPU: writer_scanout=%u ready=%u pending=%u offered=%llu done=%llu fallback=%llu status=%x\n",
-        sample,nabu_scanout_ready,nabu_scanout_pending,
-        static_cast<unsigned long long>(nabu_scanout_offers),static_cast<unsigned long long>(nabu_scanout_completed),
-        static_cast<unsigned long long>(nabu_scanout_fallbacks),nabu_scanout_last_status));
-    emit(snprintf(line,sizeof(line),
-        "NabuGPU: writer_scanout_wait=%u calls=%llu timeout=%llu abandoned=%llu maps=%llu hits=%llu\n",
-        sample,static_cast<unsigned long long>(nabu_scanout_waits),static_cast<unsigned long long>(nabu_scanout_timeouts),
-        static_cast<unsigned long long>(nabu_scanout_abandoned),static_cast<unsigned long long>(nabu_scanout_maps),
-        static_cast<unsigned long long>(nabu_scanout_map_hits)));
+        "NabuGPU: writer_scanout=%u ready=%u offered=%llu done=%llu failed=%llu abandoned=%llu\n",
+        sample,native_gop_ready,static_cast<unsigned long long>(native_gop_gpu_offers),
+        static_cast<unsigned long long>(native_gop_gpu_completions),static_cast<unsigned long long>(native_gop_gpu_failures),
+        static_cast<unsigned long long>(native_gop_gpu_abandoned)));
     /* Which cores ArmCpu started and the scheduler counts them in: slot 0 (boot core)
      * always, a secondary slot once ArmCpu has touched it. */
     emit(snprintf(line,sizeof(line),

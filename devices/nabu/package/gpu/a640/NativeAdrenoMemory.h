@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: MIT */
 #ifndef NATIVE_ADRENO_MEMORY_H
 #define NATIVE_ADRENO_MEMORY_H
+class IOMemoryMap;
 #include <IOKit/IOTypes.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -119,6 +120,7 @@ struct NativeAdrenoMemoryDiagnostics {
  * importing descriptor and its task lifetime. */
 struct NativeAdrenoBackingStorage {
     IOBufferMemoryDescriptor *descriptor=nullptr;
+    IOMemoryMap *cpu_mapping=nullptr;
     void *mapping=nullptr;
     NativeAdrenoPhysicalSpan *spans=nullptr;
     size_t bytes=0,span_count=0,span_capacity=0;
@@ -188,6 +190,9 @@ public:
     bool imported() const {return imported_!=nullptr;}
     NativeAdrenoCpuCacheMode cpuCacheMode() const {return cpu_cache_mode_;}
     bool cpuCacheCoherent() const {return cpu_cache_mode_==NativeAdrenoCpuCacheMode::Cached;}
+    bool maintainedImport() const {return imported_ &&
+        (cpu_cache_mode_==NativeAdrenoCpuCacheMode::Cached || cpu_cache_mode_==NativeAdrenoCpuCacheMode::Mixed);}
+    IOReturn maintainImported(size_t offset,size_t bytes,bool invalidate);
     /* An import of memory the owner maps read-only (the kernel could pin it for reading only): the GPU may read it, never write it. */
     bool readOnly() const {return read_only_;}
     bool writeCombined() const {return storage_.write_combined;}

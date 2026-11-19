@@ -1,0 +1,31 @@
+NABU macOS 27.3 integration overlays
+
+The original MIT A6xx source remains under upstream/Adreno6xx at 83a0453e981567a30cecd6486bdb8b3b33d64683.
+The a640 copies of ABI/UserClient/Submit/Scheduler/Publish/Accelerator adapt that
+source to the v2 wire used by signed userspace 19f8c3b. Wire extensions reserve
+17/18 for priority/note and move old profile/map-v2 to 33/34. The public v2
+records are compared against compat/gpu/NativeAdrenoABI-v2.h, copied from the
+pinned UniXNU/Adreno740 submodule selected by UniXNU 8542980d.
+
+The macOS OriginalAcceleratorABI.h and ioaccelerator-base-abi.json are copied
+from the same pinned mainline (AdrenoMetal cc0a4e8e, 26C5035r IOGraphicsFamily).
+The macOS base is IOAccelerator, 136 bytes/272 slots. Constructor/destructor and
+metaclass bindings use the recorded collection slide. Initializers run only
+after the native parent family loads. No original vtable is replaced.
+
+A640 owned user BOs are no-task pageable WC descriptors, prepared before
+segment discovery and kernel mapping. CPU-cached imports retain their CPU
+attributes; GPU PTEs are NC and production cache maintenance cleans/invalidates
+validated RAM spans around actual producer/completion events. A642L IO
+coherence is never enabled or reported. Submission/resource lifetime remains
+fence-based. Host peers do not execute shaders or establish hardware coherence.
+
+NabuGpuDisplayBridge.cpp forwards the existing handoff protocol to GOP with
+connection/task ownership. GOP close wakes a waiting client, aborts its pending
+swap and releases kept mappings. fb-gpu selects this path instead of the CPU
+compositor. Inherited SM8550 direct-DPU register writes are excluded from this
+mode; nabu retains the firmware-owned physical scanout.
+
+The BO profile recorder moved from static BSS to a retained heap allocation at
+publication, preserving all eight source slots and snapshot capacity. Other
+existing upstream and a640 license/provenance files remain applicable.
