@@ -8,21 +8,28 @@ namespace nabu {
 enum class UsbBlock { Gcc, Phy, Scratch, Core };
 template<class Io> class Usb2Core {
     Io &io;
+    const char *phase_="idle";
+    uint32_t failedOffset_=0,failedValue_=0,failedMask_=0,failedExpected_=0;
+    UsbBlock failedBlock_=UsbBlock::Gcc;
+    void phase(const char *name) { phase_=name;io.checkpoint(name); }
+    bool failure(UsbBlock b,uint32_t off,uint32_t mask,uint32_t expected) {
+        failedBlock_=b;failedOffset_=off;failedValue_=io.read(b,off);
+        failedMask_=mask;failedExpected_=expected;return false;
+    }
     bool update(UsbBlock b,uint32_t r,uint32_t mask,uint32_t value) {
         io.write(b,r,(io.read(b,r)&~mask)|(value&mask));
-        return (io.read(b,r)&mask)==(value&mask);
+        return (io.read(b,r)&mask)==(value&mask) || failure(b,r,mask,value&mask);
     }
     bool wait(UsbBlock b,uint32_t r,uint32_t mask,uint32_t value,unsigned us) {
         for(unsigned t=0;t<us;t+=10){if((io.read(b,r)&mask)==value)return true;io.delayUs(10);}
-        return (io.read(b,r)&mask)==value;
+        return (io.read(b,r)&mask)==value || failure(b,r,mask,value);
     }
     bool branch(uint32_t r) {
-        if(!update(UsbBlock::Gcc,r,1,1))return false;
         for(unsigned us=0;us<100000;us+=10){
             if(clockBranchReady(io.read(UsbBlock::Gcc,r)))return true;
             io.delayUs(10);
         }
-        return clockBranchReady(io.read(UsbBlock::Gcc,r));
+        return clockBranchReady(io.read(UsbBlock::Gcc,r)) || failure(UsbBlock::Gcc,r,1u<<31,0);
     }
     bool rcg(uint32_t r,uint32_t cfg) {
         if(!update(UsbBlock::Gcc,r+4,0x371f,cfg))return false;
@@ -31,23 +38,57 @@ template<class Io> class Usb2Core {
     }
 public:
     explicit Usb2Core(Io &i):io(i){}
+    const char *lastPhase() const { return phase_; }
+    UsbBlock failedBlock() const { return failedBlock_; }
+    uint32_t failedOffset() const { return failedOffset_; }
+    uint32_t failedValue() const { return failedValue_; }
+    uint32_t failedMask() const { return failedMask_; }
+    uint32_t failedExpected() const { return failedExpected_; }
     bool clocksAndReset() {
-        // GDSC USB30_PRIM, then core reset. Preserve unrelated clock fields.
-        if(!update(UsbBlock::Gcc,0xf004,1,0) || !wait(UsbBlock::Gcc,0xf004,1u<<31,1u<<31,100000))return false;
-        if(!update(UsbBlock::Gcc,0xf000,1,1))return false;
+        using B=UsbBlock;
+        phase("GDSC-config");
+        // usb30_prim_gdsc uses POLL_CFG_GDSCR: +4 bit16, NOT GDSCR bit31.
+        // Match gdsc_init: SW ownership, hardware sequencer, 2/8/2 XO waits.
+        // Preserve every field outside this domain's sequencing controls.
+        if(!update(B::Gcc,0xf004,0x00fff006,0x00282000))return false;
+        phase("GDSC-power-up");
+        if(!update(B::Gcc,0xf004,1,0) || !wait(B::Gcc,0xf008,1u<<16,1u<<16,100000))return false;
+        phase("controller-reset");
+        if(!update(B::Gcc,0xf000,1,1))return false;
         io.delayUs(100);
-        // DWC3-QCOM releases the controller BCR BEFORE enabling its clocks.
-        // Waiting for the NoC branch while this reset is asserted never completes.
-        if(!update(UsbBlock::Gcc,0xf000,1,0))return false;
+        if(!update(B::Gcc,0xf000,1,0))return false;
         io.delayUs(100);
+        // Request the selected RCG parent before waiting on its child clocks.
+        // OR only GPLL0's APPS vote; never reprogram/disable a PLL shared by UFS.
+        phase("GPLL0-vote");
+        if(!update(B::Gcc,0x52000,1,1))return false;
+        const uint32_t mode=io.read(B::Gcc,0);
+        if(mode&(1u<<20)) {
+            if(!wait(B::Gcc,0,1u<<30,1u<<30,20000))return false;
+        } else {
+            // Firmware may leave GPLL0 in manual RUN mode. Accept only real
+            // locked, enabled outputs; do not change shared PLL_MODE/OPMODE.
+            if(!wait(B::Gcc,0,(1u<<31)|1,(1u<<31)|1,20000))return false;
+        }
+        phase("RCG-master");
         // GPLL0 600MHz / 3 = 200MHz; CXO 19.2MHz / 1 for Mock UTMI.
-        if(!rcg(0xf01c,0x105) || !rcg(0xf034,1))return false;
-        const uint32_t branches[]={0xf078,0xf010,0xf07c,0xf014,0xf018};
+        if(!rcg(0xf01c,0x105))return false;
+        phase("RCG-UTMI");
+        if(!rcg(0xf034,1))return false;
+        // Enable all prerequisites before polling NoC readiness. Previously the
+        // CFG NoC halt loop ran while MASTER, UTMI and SLEEP were still gated.
+        // Match the stock clock bulk order; writes preserve firmware fields.
+        phase("branch-enable");
+        const uint32_t branches[]={0xf010,0xf078,0xf07c,0xf018,0xf014};
+        for(uint32_t off:branches)
+            if(!update(B::Gcc,off,1,1))return false;
+        phase("branch-ready");
         for(uint32_t off:branches)
             if(!branch(off))return false;
-        if(!update(UsbBlock::Gcc,0x12000,1,1))return false;
+        phase("PHY-reset");
+        if(!update(B::Gcc,0x12000,1,1))return false;
         io.delayUs(150);
-        if(!update(UsbBlock::Gcc,0x12000,1,0))return false;
+        if(!update(B::Gcc,0x12000,1,0))return false;
         io.delayUs(150);
         return true;
     }

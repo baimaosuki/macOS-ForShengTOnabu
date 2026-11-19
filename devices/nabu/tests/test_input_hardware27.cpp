@@ -9,6 +9,7 @@
 #include <vector>
 #include <tuple>
 #include <cstdio>
+#include <string>
 struct Spmi {
     unsigned owner=0;bool stuck=false,error=false;uint8_t byte=0x55;std::map<unsigned,unsigned> ch[2];
     uint32_t coreRead(unsigned o){if(!o)return 0x50000000;if(o==4)return 2;return o==0x904?0x20800:0;}
@@ -20,19 +21,33 @@ struct Spmi {
 struct Usb {
     std::map<std::pair<nabu::UsbBlock,unsigned>,unsigned> regs;
     std::vector<std::tuple<nabu::UsbBlock,unsigned,unsigned>> writes;
-    bool clockStuck=false,resetStuck=false,branchStuck=false;unsigned cap=0x40;
-    Usb(){regs[{nabu::UsbBlock::Gcc,0xf004}]=0x80000000;regs[{nabu::UsbBlock::Core,0xc120}]=0x55333330;regs[{nabu::UsbBlock::Core,0}]=cap;regs[{nabu::UsbBlock::Core,cap+4}]=1;}
-    unsigned read(nabu::UsbBlock b,unsigned o){return regs[{b,o}];}
+    std::vector<std::string> phases;
+    bool gdscStuck=false,pllStuck=false,clockStuck=false,resetStuck=false,branchStuck=false;
+    unsigned cap=0x40,elapsedUs=0;
+    Usb(){regs[{nabu::UsbBlock::Gcc,0xf004}]=0x80000007; // stale PWR_ON, collapsed HW ownership
+        regs[{nabu::UsbBlock::Gcc,0}]=1u<<20; // GPLL0 firmware FSM mode, no APPS vote
+        regs[{nabu::UsbBlock::Core,0xc120}]=0x55333330;
+        regs[{nabu::UsbBlock::Core,0}]=cap;regs[{nabu::UsbBlock::Core,cap+4}]=1;}
+    unsigned read(nabu::UsbBlock b,unsigned o){
+        if(b==nabu::UsbBlock::Gcc){
+            if(o==0xf008)return !gdscStuck && !(regs[{b,0xf004}]&7)?1u<<16:0;
+            if(o==0 && !pllStuck && (regs[{b,0x52000}]&1))regs[{b,0}]|=1u<<30;
+            if(o==0xf078||o==0xf010||o==0xf07c||o==0xf014||o==0xf018){
+                // NoC cannot acknowledge until ALL dependent branches receive
+                // their enable vote, regardless of which branch is polled first.
+                bool ready=!branchStuck && !(regs[{b,0xf000}]&1);
+                for(unsigned r:{0xf010u,0xf078u,0xf07cu,0xf018u,0xf014u})ready&=bool(regs[{b,r}]&1);
+                return (regs[{b,o}]&~0x80000000u)|(ready?0:0x80000000u);
+            }
+        }
+        return regs[{b,o}];
+    }
     void write(nabu::UsbBlock b,unsigned o,unsigned v){writes.emplace_back(b,o,v);regs[{b,o}]=v;
         if(b==nabu::UsbBlock::Gcc && (o==0xf01c||o==0xf034) && !clockStuck)regs[{b,o}]=v&~1;
-        if(b==nabu::UsbBlock::Gcc && (o==0xf078||o==0xf010||o==0xf07c||o==0xf014||o==0xf018)) {
-            // Branches cannot run with USB controller reset still asserted.
-            if(branchStuck || (regs[{b,0xf000}]&1))regs[{b,o}]=v|0x80000000u;
-            else regs[{b,o}]=v&~0x80000000u;
-        }
         if(b==nabu::UsbBlock::Core && o==cap && (v&2) && !resetStuck)regs[{b,o}]=v&~2;
     }
-    void delayUs(unsigned){}
+    void delayUs(unsigned us){elapsedUs+=us;assert(elapsedUs<3000000);}
+    void checkpoint(const char *p){phases.emplace_back(p);}
 };
 struct Pmic {uint8_t cc=0,cmd=0,cfg=2;unsigned writes=0;
     nabu::InputError read(uint8_t sid,uint16_t reg,uint8_t &v){assert(sid==2);v=reg==0x150b?cc:reg==0x1140?cmd:0;return nabu::InputError::Ok;}
@@ -72,9 +87,32 @@ int main(){
     for(unsigned off:{0xf078u,0xf010u,0xf07cu,0xf014u,0xf018u})u.regs[{nabu::UsbBlock::Gcc,off}]=0x80000000;
     nabu::Usb2Core<Usb> core(u);assert(core.clocksAndReset());assert(core.femtoPhy());assert(core.selectUtmiHost());assert(core.resetXhci());
     assert((u.read(nabu::UsbBlock::Scratch,8)&0x109)==9);assert((u.read(nabu::UsbBlock::Core,0xc110)&0x3000)==0x1000);
+    assert((u.read(nabu::UsbBlock::Gcc,0xf004)&0x00fff007)==0x00282000);
+    assert(u.read(nabu::UsbBlock::Gcc,0x52000)&1);
+    // PWR_ON is not the SM8150 completion predicate: stale bit31 must fail,
+    // and a real CFG_GDSCR completion must work even with bit31 clear.
+    Usb gdsc;gdsc.gdscStuck=true;nabu::Usb2Core<Usb> cg(gdsc);assert(!cg.clocksAndReset());
+    assert(std::string(cg.lastPhase())=="GDSC-power-up"&&cg.failedOffset()==0xf008);
+    assert(cg.failedMask()==0x10000&&gdsc.elapsedUs<=100000);
+    Usb cfgOnly;cfgOnly.regs[{nabu::UsbBlock::Gcc,0xf004}]=7;
+    nabu::Usb2Core<Usb> ccfg(cfgOnly);assert(ccfg.clocksAndReset());
+    Usb pll;pll.pllStuck=true;nabu::Usb2Core<Usb> cp(pll);assert(!cp.clocksAndReset());
+    assert(std::string(cp.lastPhase())=="GPLL0-vote"&&cp.failedOffset()==0&&pll.elapsedUs<=20200);
+    // Do not alter a manual PLL that firmware and UFS already use.
+    Usb manual;manual.regs[{nabu::UsbBlock::Gcc,0}]=0x80000001;
+    nabu::Usb2Core<Usb> cm(manual);assert(cm.clocksAndReset());
+    for(auto w:manual.writes)assert(!(std::get<0>(w)==nabu::UsbBlock::Gcc&&std::get<1>(w)==0));
     Usb stuck;stuck.clockStuck=true;nabu::Usb2Core<Usb> c2(stuck);assert(!c2.clocksAndReset());
+    assert(std::string(c2.lastPhase())=="RCG-master"&&c2.failedOffset()==0xf01c);
     Usb gated;gated.branchStuck=true;nabu::Usb2Core<Usb> blocked(gated);assert(!blocked.clocksAndReset());
+    assert(std::string(blocked.lastPhase())=="branch-ready"&&blocked.failedOffset()==0xf010);
     Usb reset;reset.resetStuck=true;nabu::Usb2Core<Usb> c3(reset);assert(!c3.resetXhci());
+    assert(c3.failedOffset()==reset.cap&&reset.elapsedUs<=1000000);
+    // Every GCC write is domain-local, except the additive shared PLL vote.
+    // In particular UFS 0x77000..0x77fff, GPLL0 MODE and global resets survive.
+    for(auto w:u.writes)if(std::get<0>(w)==nabu::UsbBlock::Gcc){
+        unsigned o=std::get<1>(w);assert((o>=0xf000&&o<0xf080)||o==0x12000||o==0x52000);
+    }
     Pmic p;nabu::UsbVbus<Pmic> vbus(p);assert(vbus.initializeRole()==nabu::InputError::Ok);p.writes=0;assert(vbus.enable()==nabu::InputError::Busy&&p.writes==0);
     p.cc=1;assert(vbus.enable()==nabu::InputError::Busy&&p.writes==0); // attached sink -> no backfeed
     assert(!nabu::UsbVbus<Pmic>::wantSource(0x41,0x10,false));
