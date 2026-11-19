@@ -160,6 +160,7 @@ jobs:
           brew install llvm ninja bison glslang shaderc rustup
           echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
           echo "$(brew --prefix bison)/bin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix rustup)/bin" >> "$GITHUB_PATH"
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           python3 -m pip install capstone==5.0.7
       - uses: actions/cache@v4
@@ -172,6 +173,7 @@ jobs:
         if: always()
         with:
           name: nabu27-gpu-userspace
+          include-hidden-files: true
           path: |
             out/nabu27-gpu-userspace/verification.json
             out/nabu27-gpu-userspace/tree/nabu-runtime-inputs.json

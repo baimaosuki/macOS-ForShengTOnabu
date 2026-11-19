@@ -42,6 +42,7 @@ def main():
     run(sys.executable,'-m','venv','--system-site-packages',tree/'.cache/mesa-venv')
     run(tree/'.cache/mesa-venv/bin/python','-m','pip','install','meson==1.9.1','mako','packaging','PyYAML')
     run('rustup','toolchain','install','1.98.0','--profile','minimal','--component','rust-src','--target','aarch64-apple-darwin')
+    run('cargo','+1.98.0','--version')
     priority=out/'queue-priority-host'
     run('xcrun','clang++','-std=c++17','-Wall','-Wextra','-Werror',tree/'drivers/AdrenoMetal/bridge/queue_priority_host.cpp','-o',priority)
     run(priority)
