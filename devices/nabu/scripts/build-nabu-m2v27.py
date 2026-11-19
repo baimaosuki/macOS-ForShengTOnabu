@@ -12,7 +12,9 @@ sys.path.insert(0,str(Path(__file__).resolve().parent))
 import importlib.util
 
 def main():
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--output',type=Path,required=True);a=p.parse_args()
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--output',type=Path,required=True)
+    p.add_argument('--phase',choices=['all','prepare','turnip','bridge','plugin','verify'],default='all')
+    a=p.parse_args()
     if platform.system()!='Darwin':raise SystemExit('Use a real macOS SDK/signing host')
     out=a.output.resolve();out.mkdir(parents=True,exist_ok=True)
     offsets={}
@@ -48,35 +50,50 @@ def main():
         if read('git','-C',dest,'status','--porcelain'):raise ValueError(f'Preserve modified scratch input: {dest}')
         run('git','-C',dest,'switch','--detach',commit)
         return dest
-    core=fetch('UniXNU','https://github.com/UniXNU/UniXNU.git',stage.CORE)
-    frontend=fetch('AdrenoMetal','https://github.com/UniXNU/AdrenoMetal.git',stage.FRONTEND)
-    run('git','-C',core,'submodule','update','--init','--depth=1','--','drivers/Adreno740','drivers/GopFramebuffer','kits/AdrenoPM4')
-    pins=json.loads((core/'scripts/data/gpu-metal-vulkan-inputs.json').read_text())
-    mesa=fetch('mesa',pins['mesa']['repository'],stage.MESA)
-    translator=fetch('metal2vulkan',pins['translator']['repository'],pins['translator']['commit'])
     tree=out/'tree'
-    run(sys.executable,Path(__file__).with_name('prepare-nabu-m2v27.py'),'--core',core,'--frontend',frontend,'--output',tree)
-    run(sys.executable,ROOT/'devices/nabu/tests/check-gpu-userspace-policy27.py',
-        '--stage',tree,'--clang',read('xcrun','--find','clang'),
-        '--output',out/'cpu-policy-verification.json')
-    patch=tree/'patches/nabu/mesa-c823-darwin.patch'
-    run('git','-C',mesa,'apply','--check',patch);run('git','-C',mesa,'apply',patch)
-    (tree/'.cache/mesa-work').symlink_to(mesa,target_is_directory=True)
-    run(sys.executable,'-m','venv','--system-site-packages',tree/'.cache/mesa-venv')
-    run(tree/'.cache/mesa-venv/bin/python','-m','pip','install','meson==1.9.1','mako','packaging','PyYAML')
-    run('rustup','toolchain','install','1.98.0','--profile','minimal','--component','rust-src','--target','aarch64-apple-darwin')
-    run('cargo','+1.98.0','--version')
-    priority=out/'queue-priority-host'
-    run('xcrun','clang++','-std=c++17','-Wall','-Wextra','-Werror',tree/'drivers/AdrenoMetal/bridge/queue_priority_host.cpp','-o',priority)
-    run(priority)
-    # Keep Cargo's incremental release objects across retries without creating
-    # a partial staging tree before its exact-source preparation.
-    cargo_target=ROOT/'.ci-cache/nabu27-m2v-target'
-    cargo_target.mkdir(parents=True,exist_ok=True)
-    (tree/'build').mkdir(exist_ok=True)
-    (tree/'build/m2v-target').symlink_to(cargo_target,target_is_directory=True)
-    run(sys.executable,tree/'scripts/build-turnip-darwin.py','--target','macos27')
-    run(sys.executable,tree/'scripts/build-adreno-metal-plugin.py','--target','macos27','--no-replay','--translator-source',translator)
+    translator=upstream/'metal2vulkan'
+    if a.phase in ('all','prepare'):
+        core=fetch('UniXNU','https://github.com/UniXNU/UniXNU.git',stage.CORE)
+        frontend=fetch('AdrenoMetal','https://github.com/UniXNU/AdrenoMetal.git',stage.FRONTEND)
+        run('git','-C',core,'submodule','update','--init','--depth=1','--','drivers/Adreno740','drivers/GopFramebuffer','kits/AdrenoPM4')
+        pins=json.loads((core/'scripts/data/gpu-metal-vulkan-inputs.json').read_text())
+        mesa=fetch('mesa',pins['mesa']['repository'],stage.MESA)
+        translator=fetch('metal2vulkan',pins['translator']['repository'],pins['translator']['commit'])
+        run(sys.executable,Path(__file__).with_name('prepare-nabu-m2v27.py'),'--core',core,'--frontend',frontend,'--output',tree)
+        run(sys.executable,ROOT/'devices/nabu/tests/check-gpu-userspace-policy27.py',
+            '--stage',tree,'--clang',read('xcrun','--find','clang'),
+            '--output',out/'cpu-policy-verification.json')
+        patch=tree/'patches/nabu/mesa-c823-darwin.patch'
+        run('git','-C',mesa,'apply','--check',patch);run('git','-C',mesa,'apply',patch)
+        (tree/'.cache/mesa-work').symlink_to(mesa,target_is_directory=True)
+        run(sys.executable,'-m','venv','--system-site-packages',tree/'.cache/mesa-venv')
+        run(tree/'.cache/mesa-venv/bin/python','-m','pip','install','meson==1.9.1','mako','packaging','PyYAML')
+        run('rustup','toolchain','install','1.98.0','--profile','minimal','--component','rust-src','--target','aarch64-apple-darwin')
+        run('cargo','+1.98.0','--version')
+        priority=out/'queue-priority-host'
+        run('xcrun','clang++','-std=c++17','-Wall','-Wextra','-Werror',tree/'drivers/AdrenoMetal/bridge/queue_priority_host.cpp','-o',priority)
+        run(priority)
+        # Keep Cargo's incremental release objects across retries without creating
+        # a partial staging tree before its exact-source preparation.
+        cargo_target=ROOT/'.ci-cache/nabu27-m2v-target'
+        cargo_target.mkdir(parents=True,exist_ok=True)
+        (tree/'build').mkdir(exist_ok=True)
+        (tree/'build/m2v-target').symlink_to(cargo_target,target_is_directory=True)
+        (out/'prepared.json').write_text(json.dumps(dict(commit=read('git','-C',ROOT,'rev-parse','HEAD'),policy=json.loads((tree/'nabu-runtime-inputs.json').read_text())),indent=2)+'\n')
+    else:
+        prepared=json.loads((out/'prepared.json').read_text())
+        if prepared['commit']!=read('git','-C',ROOT,'rev-parse','HEAD'):
+            raise ValueError('Prepared runtime sources belong to another commit')
+    if a.phase=='prepare':return
+    if a.phase in ('all','turnip'):
+        run(sys.executable,tree/'scripts/build-turnip-darwin.py','--target','macos27')
+    if a.phase=='turnip':return
+    if a.phase in ('all','bridge'):
+        run(sys.executable,tree/'scripts/build-adreno-metal-bridge.py','--target','macos27','--source',translator)
+    if a.phase=='bridge':return
+    if a.phase in ('all','plugin'):
+        run(sys.executable,tree/'scripts/build-adreno-metal-plugin.py','--target','macos27','--no-replay','--reuse-bridge','--translator-source',translator)
+    if a.phase=='plugin':return
     artifacts=tree/'build/adreno-metal-plugin-macos27'
     code=artifacts/'NativeAdrenoMetal.bundle/Contents/MacOS'
     paths=[code/'NativeAdrenoMetal',code/'libvulkan_freedreno.dylib',artifacts/'adrenoprobed']

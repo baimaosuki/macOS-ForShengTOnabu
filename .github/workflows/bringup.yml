@@ -171,8 +171,16 @@ jobs:
           path: |
             ~/.cargo/registry
             .ci-cache/nabu27-m2v-target
-      - name: Build and sign ordinary arm64 M2V and Turnip
-        run: python3 devices/nabu/scripts/build-nabu-m2v27.py --output out/nabu27-gpu-userspace
+      - name: Prepare pinned sources and verify ordinary arm64 CPU policy
+        run: python3 devices/nabu/scripts/build-nabu-m2v27.py --phase prepare --output out/nabu27-gpu-userspace
+      - name: Compile Turnip for macOS 27 arm64
+        run: python3 devices/nabu/scripts/build-nabu-m2v27.py --phase turnip --output out/nabu27-gpu-userspace
+      - name: Compile Rust M2V with parallel ThinLTO
+        run: python3 devices/nabu/scripts/build-nabu-m2v27.py --phase bridge --output out/nabu27-gpu-userspace
+      - name: Link and 4K-sign Metal plugin and Shader Cache app
+        run: python3 devices/nabu/scripts/build-nabu-m2v27.py --phase plugin --output out/nabu27-gpu-userspace
+      - name: Verify signed binaries and reject unsupported PAuth instructions
+        run: python3 devices/nabu/scripts/build-nabu-m2v27.py --phase verify --output out/nabu27-gpu-userspace
       - uses: actions/cache/save@v4
         if: always() && steps.gpu-cargo-cache.outputs.cache-hit != 'true'
         with:
@@ -188,6 +196,7 @@ jobs:
           path: |
             out/nabu27-gpu-userspace/verification.json
             out/nabu27-gpu-userspace/cpu-policy-verification.json
+            out/nabu27-gpu-userspace/prepared.json
             out/nabu27-gpu-userspace/tree/nabu-runtime-inputs.json
             out/nabu27-gpu-userspace/tree/build/adreno-metal-plugin-macos27/
             out/nabu27-gpu-userspace/tree/build/adreno-metal-bridge/*.log
