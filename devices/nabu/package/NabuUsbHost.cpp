@@ -102,6 +102,7 @@ struct Hardware {
         return ok;
     }
 } hardware;
+} // namespace
 class NabuXhciNub;
 NabuXhciNub *active=nullptr;bool lineAttached=false;
 class NabuXhciNub : public IOService {
@@ -134,7 +135,6 @@ public:
     }
 };
 OSDefineMetaClassAndStructors(NabuXhciNub,IOService)
-}
 class NabuUsbXhci : public AppleUSBXHCI {
     OSDeclareDefaultStructors(NabuUsbXhci)
 public:
