@@ -46,6 +46,8 @@ static void *IOMallocAligned(size_t n,size_t){return malloc(n);}
 static void IOFree(void *p,size_t){free(p);}
 static void IOFreeAligned(void *p,size_t){free(p);}
 extern "C" uint32_t nabu_log_copy_msgbuf(uint8_t *p){memcpy(p,"EARLY\n",6);return 6;}
+// Physical console transport is tested separately against the real console source.
+extern "C" void nabu_console_panic_takeover(void) {}
 #include "../NabuLogUfs.h"
 int main(){
  uint8_t token[16],data[4096]={};
