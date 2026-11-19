@@ -15,7 +15,27 @@ def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--output',type=Path,required=True);a=p.parse_args()
     if platform.system()!='Darwin':raise SystemExit('Use a real macOS SDK/signing host')
     out=a.output.resolve();out.mkdir(parents=True,exist_ok=True)
-    def run(*cmd,env=None):subprocess.run(list(map(str,cmd)),check=True,env=env)
+    offsets={}
+    def forward_logs():
+        candidates=list((out/'tree/.cache').glob('mesa-tu-macos27-*.log'))
+        candidates+=list((out/'tree/build/adreno-metal-bridge').glob('*.log'))
+        for path in sorted(candidates):
+            offset=offsets.get(path,0)
+            if path.stat().st_size<offset:offset=0
+            with path.open('rb') as stream:
+                stream.seek(offset);chunk=stream.read(1024*1024);offsets[path]=stream.tell()
+            if chunk:
+                print('GPU BUILD LOG:',path.name,flush=True)
+                print(chunk.decode(errors='replace'),end='',flush=True)
+    def run(*cmd,env=None):
+        command=list(map(str,cmd));print('GPU BUILD STEP:',*command,flush=True)
+        process=subprocess.Popen(command,env=env)
+        while process.poll() is None:
+            forward_logs()
+            try:process.wait(timeout=3)
+            except subprocess.TimeoutExpired:pass
+        forward_logs()
+        if process.returncode:raise subprocess.CalledProcessError(process.returncode,command)
     def read(*cmd):return subprocess.check_output(list(map(str,cmd)),text=True).strip()
     if read('xcrun','--sdk','macosx','--show-sdk-version')!='26.5':raise ValueError('Select SDK 26.5; OS target stays macOS 27')
     spec=importlib.util.spec_from_file_location('nabu_stage',Path(__file__).with_name('prepare-nabu-m2v27.py'));stage=importlib.util.module_from_spec(spec);spec.loader.exec_module(stage)
