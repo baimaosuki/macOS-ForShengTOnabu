@@ -47,3 +47,10 @@ macOS27 A640 adaptations added locally:
   ASID invalidation for larger ranges. Existing failure quarantine is retained.
 - The exclusive map entry point reuses the existing caller-validated
   transaction; the VM's physical interval checks prove its alias precondition.
+
+NativeAdrenoGpuProfile.cpp overlays the preserved MIT Adreno6xx recorder. Its
+4096 counter and job records are allocated as a complete pair on the first
+profiling request, outside profileLock, with failed/concurrent candidates freed.
+The published pair is retained for the recorder lifetime. This removes 1,163,264
+bytes of optional BSS from the fixed 26C5035r kernelcache DATA hole without
+reducing recorder capacity or changing A640 counter programming.

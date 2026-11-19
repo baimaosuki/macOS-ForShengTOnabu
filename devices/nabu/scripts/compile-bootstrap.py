@@ -40,6 +40,8 @@ def main():
     subprocess.run([sys.executable, str(ROOT / 'devices/nabu/tests/test_power_hold27.py')], check=True)
     subprocess.run([sys.executable, str(ROOT / 'devices/nabu/tests/check-gpu-smmu27.py'),
                     '--output', str(ROOT / 'out/nabu27-gpu-smmu-host')], check=True)
+    subprocess.run([sys.executable, str(ROOT / 'devices/nabu/tests/check-gpu-profile27.py'),
+                    '--output', str(ROOT / 'out/nabu27-gpu-profile-host')], check=True)
     args = cli.parser().parse_args([
         "build", "kernel", "-D", str(ROOT / "devices/nabu"), "--os", "macos-27"
     ])

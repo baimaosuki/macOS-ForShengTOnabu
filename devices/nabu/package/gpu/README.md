@@ -45,3 +45,9 @@ Do not publish a v1 service under a v2 runtime or silently reinterpret its flags
 No plugin/addon is enabled by this checkpoint. BO no-task/pageable migration,
 macOS accelerator base qualification, shader prewarm and GPU scanout still need
 independent implementation and hardware evidence; see gpu-port27.json.
+
+The optional GPU recorder allocates its 4096-sample/job arrays on the first
+profiling request, not in static BSS. This keeps the native DATA segment below
+the first retained 26C5035r kext (Libm at DATA + 0x284000). Allocation failures
+and concurrent requests are exercised against the production recorder with
+ASan/UBSan; no request or partial allocation can enable profiling.

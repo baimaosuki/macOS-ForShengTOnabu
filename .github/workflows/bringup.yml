@@ -96,6 +96,7 @@ jobs:
             out/nabu/**/a640-ring-verification.json
             out/nabu27-gpu-smmu-host/verification.json
             out/nabu27-gpu-smmu-host/run.log
+            out/nabu27-gpu-profile-host/verification.json
             out/nabu/**/zeta-pac-verification/verification.json
             out/nabu/**/esp-log-verification/*.log
             out/nabu/**/esp-log-verification/verification.json
