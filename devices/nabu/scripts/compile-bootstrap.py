@@ -65,6 +65,9 @@ def main():
                                    (m.kind != "refer" or m.name in wanted)})
     tree.assemble(ctx, modules)
     order = patches.prepare(ctx, modules)
+    subprocess.run([sys.executable,str(ROOT / 'devices/nabu/tests/check-gpu-audit27.py'),
+                    '--xnu',str(ctx.tree / '.cache/xnu-work'),
+                    '--output',str(ctx.work / 'gpu-audit-verification')],check=True)
     subprocess.run([sys.executable,str(ROOT / 'devices/nabu/tests/check-gpu-text-mode27.py'),
                     '--xnu',str(ctx.tree / '.cache/xnu-work'),
                     '--output',str(ctx.work / 'gpu-text-mode-verification')],check=True)

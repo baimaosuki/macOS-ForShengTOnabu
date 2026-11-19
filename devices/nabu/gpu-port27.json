@@ -5,8 +5,15 @@
   "stages": {
     "kmd": {
       "source": true,
-      "host": "local-kmd: 31 GPU objects + logger accessor, linked without missing symbols",
-      "device": false
+      "host": "40 native GPU objects; 42 local closure objects including actual presenter and logger; no missing symbols",
+      "device": false,
+      "native_objects": 40,
+      "local_closure_objects": 42,
+      "latest_completed_ci": {
+        "run": 44630035429,
+        "commit": "fd0845d4a77f80c50f67bd01f910de0968dcff58",
+        "result": "success"
+      }
     },
     "m2v": {
       "source_pins": "package/gpu/sources.lock.json",
@@ -37,10 +44,19 @@
         "frontend_vulkan_runtime_tests": false
       },
       "addon": {
-        "sha256": "a40c710e6344bf4c752f1581e6e1a43f0942e93b9f5b55f35322e1e8b2a585c6",
         "installed": false,
-        "esp_modified": false,
-        "kernel_wire_compatible": false
+        "esp_modified": true,
+        "kernel_wire_compatible": true,
+        "signed_input_sha256": "a40c710e6344bf4c752f1581e6e1a43f0942e93b9f5b55f35322e1e8b2a585c6",
+        "packaged_in_esp": true,
+        "installed_on_device": false,
+        "shader_cache_application": "/Applications/Shader Cache.app",
+        "latest_completed_delivery": {
+          "native_commit": "fd0845d4a77f80c50f67bd01f910de0968dcff58",
+          "zip_sha256": "7081892b16f96526a3a3f5524ca7a7312539c82ad5f48f0e8ba1715e2094e9c5",
+          "merged_addon_sha256": "acf9bdffb2583a8d4be0d2d81b32654488ecbd1c07de643cefba570c819f56d2"
+        },
+        "metadata_scope": "Latest completed host delivery; no device installation or rendering result is asserted"
       }
     },
     "metal_abi": {

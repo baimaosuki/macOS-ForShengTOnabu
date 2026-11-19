@@ -31,8 +31,8 @@ without TLB invalidation. Unmap uses TLBIVAL for up to 512 pages and ASID
 invalidation above that. Submission never uses a map as proof of completion.
 `log-gpu=1` emits limited `[vm map]`, `[vm unmap]` and `[bo memory]` counters.
 
-Host evidence: real SDK compile/link of 31 GPU objects plus the production logger
-accessor; execution of the actual ARM64 ring against a software register/fence
+Host evidence: real SDK compile/link of 40 native GPU objects; 42 objects in the local
+closure check including the actual presenter and production logger accessor; execution of the actual ARM64 ring against a software register/fence
 peer; ASan/UBSan tests of page invalidation and timeout failures; stock DT versus
 production ADT checks. These are not hardware qualification.
 
@@ -56,13 +56,13 @@ priority/note. Owned user BOs use no-task pageable WC backing; cached imports
 use explicit cache maintenance and NC GPU mappings. No OwnedCoherent bit is set.
 The native IOAccelerator publication and connection-owned GOP handoff are
 compiled with NABU_GPU_METAL=1. Only the independent A640 Metal menu entry starts
-them; CPU boot remains available. Host compilation/tests and pending full native
-CI are distinct from the still untested hardware rendering path.
+them; CPU boot remains available. Full native CI 44630035429 passed at fd0845d;
+the hardware rendering path is still untested.
 
 Userspace CI 44614135059 at 19f8c3b passed compilation, 4 KiB signing and strict
 signature verification with SDK 26.5. Its final text scan covered 6,873,990
-instructions without unsupported PAuth. The separate addon is not installed or
-boot-enabled; frontend Vulkan runtime and board execution remain untested.
+instructions without unsupported PAuth. The signed addon was merged into the ESP with an independent GPU boot entry;
+installation on a device, frontend Vulkan runtime and board execution remain untested.
 
 Userspace CI caches the complete Rust bridge in addition to Cargo objects.
 Reuse binds the bridge and translator inputs, ABI, CPU features, LTO settings
@@ -74,3 +74,13 @@ The optional GPU profiler lazily allocates its unchanged 4096-record sample
 and job arrays. Removing their 1,163,264 bytes of static BSS keeps the native
 DATA placement within the 26C5035r retained-kext boundary. Host ASan/UBSan tests
 exercise both allocation failures, concurrent requests and the sample/job lifecycle.
+
+Audit follow-up: the signed 19f8c3b Shader Cache tools and LaunchAgent use
+`/Applications/Shader Cache.app`. The nabu installer now routes that exact addon
+prefix to the Data-backed `/Applications` with the kernel context; signed bytes
+and CodeResources stay unchanged. Other addon destinations are preserved.
+WindowServer and backboardd share render-server export/diagnostics policy.
+Submit caps report KernelCacheMaintenance rather than hardware coherence, and
+legacy, V2 and async submissions apply the same foreground/background priority.
+Host replays cover the routing and all three submission paths. These corrections
+still require a new full native build and device validation.

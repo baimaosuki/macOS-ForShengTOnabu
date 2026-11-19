@@ -95,6 +95,7 @@ jobs:
             out/nabu/**/native-verification.json
             out/nabu/**/a640-ring-verification.json
             out/nabu/**/gpu-text-mode-verification/
+            out/nabu/**/gpu-audit-verification/
             out/nabu27-gpu-smmu-host/verification.json
             out/nabu27-gpu-smmu-host/run.log
             out/nabu27-gpu-profile-host/verification.json

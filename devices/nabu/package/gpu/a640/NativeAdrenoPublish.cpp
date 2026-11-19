@@ -27,6 +27,7 @@
 #include <mach/kmod.h>
 #include <pexpert/pexpert.h>
 #include "NativeAdrenoUserClient.h"
+#include "NabuGpuClientPolicy.h"
 #include "NativeAdrenoIntegration.h"
 #include "NativeAdrenoA6xxService.h"
 #include "NativeAdrenoDisplay.h"
@@ -753,7 +754,7 @@ IOReturn AGXDeviceUserClient::mount(bool kernel,unsigned connection_limit)
     unsigned slot=NativeAdrenoMaxClients;
     if(kernel)slot=g.kernel_client?NativeAdrenoMaxClients:0;
     else {
-        if((!strncmp(name_,"backboardd",sizeof name_) || !strncmp(name_,"WindowServer",sizeof name_)) && !g.slots[0])slot=0;
+        if(nabuGpuRenderServer(name_) && !g.slots[0])slot=0;
         for(unsigned i=1;slot==NativeAdrenoMaxClients && i<NativeAdrenoMaxClients;++i)if(!g.slots[i])slot=i;
     }
     const IOReturn opened=g.failed?kIOReturnNotReady:capped?kIOReturnBusy:
@@ -795,7 +796,7 @@ IOReturn AGXDeviceUserClient::mount(bool kernel,unsigned connection_limit)
         }
     }
     /* The mailbox page and its poller serve the render server's connection only. */
-    if(ok && !kernel && slot==0 && (!strncmp(name_,"backboardd",sizeof name_) || !strncmp(name_,"WindowServer",sizeof name_))) {
+    if(ok && !kernel && slot==0 && nabuGpuRenderServer(name_)) {
         if(!gMailbox) {
             gMailbox=IOBufferMemoryDescriptor::inTaskWithOptions(kernel_task,kIODirectionInOut,4096,4096);
             if(gMailbox) {gMailboxWords=static_cast<volatile uint32_t *>(gMailbox->getBytesNoCopy());memset(const_cast<uint32_t *>(gMailboxWords),0,4096);}
@@ -1435,7 +1436,7 @@ IOReturn AGXDeviceUserClient::run(uint32_t method,const void *input,size_t input
         Piece piece{};
         if(input && input_size>=sizeof(piece))memcpy(&piece,input,sizeof(piece));
         const bool valid=!output_size && input && input_size>=sizeof(piece) && piece.bytes && piece.bytes<=NativeAdrenoExportMaxPiece &&
-            input_size==sizeof(piece)+piece.bytes && !strncmp(caller,"backboardd",sizeof caller);
+            input_size==sizeof(piece)+piece.bytes && nabuGpuRenderServer(caller);
         IOLockLock(g.export_lock);
         const int stored=valid && integration.exportPut?integration.exportPut(piece.generation,piece.total,piece.offset,
             static_cast<const uint8_t *>(input)+sizeof(piece),piece.bytes):-1;
@@ -1679,7 +1680,7 @@ extern "C" IOReturn native_adreno_new_user_client(IOService *provider,task_t own
                  * rewrites report2 every ten seconds, so the reason another process's device failed would be gone from it. */
                 char who[20]={};
                 proc_selfname(who,sizeof who);
-                if(value==0x7fff && strncmp(who,"backboardd",sizeof who)) {
+                if(value==0x7fff && !nabuGpuRenderServer(who)) {
                     for(auto &entry:native_adreno_client_text) {
                         if(!entry.name[0]) strlcpy(entry.name,who,sizeof entry.name);
                         if(!strncmp(entry.name,who,sizeof entry.name)) {line=entry.text;break;}
@@ -1802,7 +1803,7 @@ extern "C" IOReturn native_adreno_new_user_client(IOService *provider,task_t own
     }
     /* Closed enumeration and device connections return their admission credit.
      * The fixed client slots also bound every process's live GPU resources. */
-    const unsigned cap=(strncmp(opener,"backboardd",sizeof opener) && strncmp(opener,"WindowServer",sizeof opener))?(limit && limit<8?limit:8):limit;
+    const unsigned cap=!nabuGpuRenderServer(opener)?(limit && limit<8?limit:8):limit;
     const IOReturn refusal=connection->mount(kernel,cap);
     if(refusal) {
         connection->release();

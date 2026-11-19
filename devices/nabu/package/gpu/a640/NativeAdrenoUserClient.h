@@ -62,6 +62,7 @@ class NativeAdrenoUserClient final {
     uint64_t window_start_=0,window_bytes_=0,window_peak_=0;
     bool open_=false;
     int32_t foregroundPriority_=1,backgroundPriority_=3;
+    void applyOwnerPriority();
     NativeAdrenoAbiSubmit submit_request_{};
     Entry *find(uint64_t);
     const Entry *find(uint64_t) const;

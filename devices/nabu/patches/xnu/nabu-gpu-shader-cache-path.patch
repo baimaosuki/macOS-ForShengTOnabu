@@ -1,0 +1,19 @@
+Install the existing signed macOS Shader Cache app at its compiled /Applications path.
+Only this app prefix joins the Data-volume destinations; bootshim files retain their paths.
+--- a/bsd/kern/kern_exec.c
++++ b/bsd/kern/kern_exec.c
+@@ -8626,8 +8626,12 @@
+ 		 * replaced on a later boot. */
+ 		const bool bundle_file = !strncmp(name, "GPUBundles/", sizeof("GPUBundles/") - 1);
+ 		const bool library_file = bundle_file || !strncmp(name, "Library/", sizeof("Library/") - 1);
+-		snprintf(path, sizeof(path), bundle_file ? "/Library/%s" : library_file ? "/%s" : "/private/var/ngpu/%s", name);
+-		vfs_context_t file_ctx = library_file ? vfs_context_kernel() : ctx;
++		/* The CI-signed registration tool and its LaunchAgent both use this path.
++		 * Keep executable bytes/signatures unchanged instead of relocating the app. */
++		const bool shader_cache_app = !strncmp(name, "Applications/Shader Cache.app/", sizeof("Applications/Shader Cache.app/") - 1);
++		const bool data_file = library_file || shader_cache_app;
++		snprintf(path, sizeof(path), bundle_file ? "/Library/%s" : data_file ? "/%s" : "/private/var/ngpu/%s", name);
++		vfs_context_t file_ctx = data_file ? vfs_context_kernel() : ctx;
+ #else
+ 		snprintf(path, sizeof(path), "/private/var/ngpu/%s", name);
+ 		vfs_context_t file_ctx = ctx;

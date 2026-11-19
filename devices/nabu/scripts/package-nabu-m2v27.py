@@ -7,6 +7,7 @@ must be completed before integrating them into a device ESP.
 """
 import argparse,hashlib,json,os,struct,subprocess,sys,uuid,zlib
 from pathlib import Path
+from nabu_gpu_addon_contract import shader_cache_contract
 
 def main():
     p=argparse.ArgumentParser(description=__doc__)
@@ -31,7 +32,7 @@ def main():
     # Check the actual compressed output and every installed byte/mode.
     raw=addon.read_bytes();magic,count,reserved,total=struct.unpack_from('<8sIIQ',raw)
     assert magic==b'NGPUADD2' and not reserved and total==len(raw)
-    at=24;entries={}
+    at=24;entries={};installed={}
     for _ in range(count):
         n,mode,size,packed=struct.unpack_from('<IIQQ',raw,at);at+=24
         name=raw[at:at+n];assert name.endswith(b'\0');name=name[:-1].decode();at+=(n+7)&~7
@@ -41,7 +42,9 @@ def main():
         expected_mode=0o755 if Path(name).parent.name=='MacOS' or Path(name).name in ('NativeAdrenoMetal','libvulkan_freedreno.dylib') else 0o644
         assert mode==expected_mode,(name,mode)
         entries[name]=dict(mode=mode,sha256=hashlib.sha256(body).hexdigest(),bytes=size)
+        installed[name]=(mode,body)
     assert at==len(raw)
+    cache_contract=shader_cache_contract(installed)
     for name in entries:
         if name.startswith('GPUBundles/NativeAdrenoMetal.bundle/'):
             source=plugin/'NativeAdrenoMetal.bundle'/name.split('GPUBundles/NativeAdrenoMetal.bundle/',1)[1]
@@ -63,7 +66,7 @@ def main():
         addon_sha256=hashlib.sha256(raw).hexdigest(),owner_module_sha256=hashlib.sha256(module).hexdigest(),
         owner_cdhashes=[h.hex() for h in hashes],entries=entries,
         publish_marker=False,installed=False,esp_modified=False,hardware_tested=False,
-        kernel_wire_compatible=False)
+        kernel_wire_compatible=False,shader_cache=cache_contract)
     (out/'verification.json').write_text(json.dumps(result,indent=2)+'\n')
     print(json.dumps({k:v for k,v in result.items() if k!='entries'},indent=2))
 

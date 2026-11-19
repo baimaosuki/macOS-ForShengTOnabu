@@ -14,3 +14,4 @@ device:compat/pac/zzzzzz-nabu-emulation-dispatch.patch
 device:compat/pac/zzzzzzz-nabu-zeta-ordinary.patch
 nabu-desktop-stability.patch
 nabu-gpu-signed-text-mode.patch
+nabu-gpu-shader-cache-path.patch

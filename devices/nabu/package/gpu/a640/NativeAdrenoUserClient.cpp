@@ -473,9 +473,7 @@ IOReturn NativeAdrenoUserClient::submit(const NativeAdrenoAbiSubmit *request,
         }
         submit_resources_[resource_count++]={entry.mapped,0,bytes,permissions&3u,false};
     }
-    const int32_t role=task_get_gpu_role(current_task());
-    const bool background=role==PRIO_DARWIN_GPU_DENY || role==PRIO_DARWIN_GPU_BACKGROUND || role==PRIO_DARWIN_GPU_UTILITY;
-    submit_->scheduler()->setOwnerPriority(queue_base_,background?backgroundPriority_:foregroundPriority_);
+    applyOwnerPriority();
     uint32_t fence=0;
     used_=true;
     const IOReturn status=submit_->scheduler()->submitLegacy(
@@ -485,6 +483,12 @@ IOReturn NativeAdrenoUserClient::submit(const NativeAdrenoAbiSubmit *request,
     reply->fence=fence;
     return kIOReturnSuccess;
 }
+void NativeAdrenoUserClient::applyOwnerPriority()
+{
+    const int32_t role=task_get_gpu_role(current_task());
+    const bool background=role==PRIO_DARWIN_GPU_DENY || role==PRIO_DARWIN_GPU_BACKGROUND || role==PRIO_DARWIN_GPU_UTILITY;
+    submit_->scheduler()->setOwnerPriority(queue_base_,background?backgroundPriority_:foregroundPriority_);
+}
 IOReturn NativeAdrenoUserClient::submitCaps(NativeAdrenoAbiSubmitCaps *reply)
 {
     if(!reply || !open_) {
@@ -492,10 +496,7 @@ IOReturn NativeAdrenoUserClient::submitCaps(NativeAdrenoAbiSubmitCaps *reply)
     }
     *reply={NativeAdrenoSubmitVersion,NativeAdrenoSubmitMaxPacketBytes,
         NativeAdrenoSubmitMaxIbs,NativeAdrenoSubmitMaxResources,
-        NativeAdrenoSubmitHardwareCoherent,0,status_?status_->suspends()+1:1};
-    if(vm_->cachedCoherentImports()) {
-        reply->flags|=NativeAdrenoSubmitCachedCoherentImports;
-    }
+        NativeAdrenoSubmitKernelCacheMaintenance,0,status_?status_->suspends()+1:1};
     return kIOReturnSuccess;
 }
 
@@ -678,6 +679,7 @@ IOReturn NativeAdrenoUserClient::submitV2(const void *input,size_t input_size,
             submit_resources_[resource_count++]={entry.mapped,0,bytes,permissions&3u,false};
         }
     }
+    applyOwnerPriority();
     uint32_t fence=0;
     used_=true;
     if(async) {

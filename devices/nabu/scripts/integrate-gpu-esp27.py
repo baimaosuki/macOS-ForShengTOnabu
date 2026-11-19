@@ -2,6 +2,7 @@
 """Merge previously signed M2V artifacts into an assembled nabu ESP directory."""
 import argparse,hashlib,json,struct,tomllib,uuid,zlib
 from pathlib import Path
+from nabu_gpu_addon_contract import shader_cache_contract
 
 def decode(raw):
     magic,count,reserved,total=struct.unpack_from('<8sIIQ',raw)
@@ -31,7 +32,9 @@ def main():
     assert hashlib.sha256(owner).hexdigest()==report['owner_module_sha256']
     payload=a.esp/'EFI/UniXNU/Payloads';addon=payload/'kernel.macho.gpuaddon';trust=payload/'kernel.macho.trustcache'
     original=decode(addon.read_bytes());merged=dict(original)
-    for name,value in decode(gpu).items():
+    gpu_entries=decode(gpu)
+    cache_contract=shader_cache_contract(gpu_entries)
+    for name,value in gpu_entries.items():
         assert name not in merged or merged[name]==value,name
         merged[name]=value
     addon.write_bytes(encode(merged));readback=decode(addon.read_bytes());assert readback==merged
@@ -58,7 +61,7 @@ def main():
     result=dict(passed=True,signed_userspace_commit=report['source_commit'],
         addon_sha256=hashlib.sha256(addon.read_bytes()).hexdigest(),trust_sha256=hashlib.sha256(trust.read_bytes()).hexdigest(),
         preserved_entries=len(original),gpu_entries=len(merged)-len(original),owner_module_preserved=True,
-        cpu_entry_preserved=True,gpu_entry=entry,hardware_tested=False)
+        cpu_entry_preserved=True,gpu_entry=entry,shader_cache=cache_contract,hardware_tested=False)
     a.output.write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result,indent=2))
 
 if __name__=='__main__':main()
