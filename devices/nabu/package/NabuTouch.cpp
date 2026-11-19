@@ -8,6 +8,7 @@
 // node /nabu-touch; nothing runs without the nabu-touch=1 boot argument.
 #include "OriginalHidDeviceABI.h"
 #include "NabuInputHardware.h"
+#include "NabuClockBranch.h"
 #include <IOKit/IOLib.h>
 #include <IOKit/IOCatalogue.h>
 #include <libkern/c++/OSNumber.h>
@@ -97,10 +98,15 @@ bool clocksUp()
   // Shared vote register: only add SE18 core (bit5), wrap2 m-ahb (bit2) and s-ahb (bit1).
   vote.w(0x14, vote.r(0x14) | (1u << 5) | (1u << 2) | (1u << 1));
   uint64_t end = deadlineUs(20000);
-  while (((gcc.r(0x004) | gcc.r(0x008) | gcc.r(0x274)) & 0x80000000u) && mach_absolute_time() < end) { IODelay(10); }
+  // wrap2_s_ahb has HWCG bit1: 0x80000002 is idle hardware gating,
+  // not a failed software vote. Mainline clk_branch_wait skips halt in HWCG.
+  auto ready=[&]() { return nabu::clockBranchReady(gcc.r(0x004)) &&
+      nabu::clockBranchReady(gcc.r(0x008),(gcc.r(0x008)&2)!=0) &&
+      nabu::clockBranchReady(gcc.r(0x274)); };
+  while (!ready() && mach_absolute_time() < end) { IODelay(10); }
   uint32_t m = gcc.r(0x004), se = gcc.r(0x274), slave=gcc.r(0x008);
   TLOG("clk after vote=%#x m-ahb=%#x s-ahb=%#x se=%#x", vote.r(0x14), m, gcc.r(0x008), se);
-  if ((m | se | slave) & 0x80000000u) { return false; }
+  if (!nabu::clockBranchReady(m) || !nabu::clockBranchReady(slave,(slave&2)!=0) || !nabu::clockBranchReady(se)) { return false; }
   // Pick an SE clock: DFS levels are preset by firmware and selected by GENI CLK_SEL.
   uint32_t level = 0;
   uint64_t hz = 0;

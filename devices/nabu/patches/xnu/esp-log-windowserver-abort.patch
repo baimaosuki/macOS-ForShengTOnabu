@@ -9,7 +9,7 @@
  nabu_critical_user_context(proc_t p, int rv)
  {
  	if (p != current_proc()) return;
-@@ -2006,6 +2006,27 @@
+@@ -2006,6 +2006,29 @@
  	}
  	nabu_log_checkpoint();
  }
@@ -20,7 +20,9 @@
 +nabu_windowserver_abort_context(proc_t p, int rv)
 +{
 +	static _Atomic unsigned captured;
-+	if (p != current_proc() || WTERMSIG(rv) != SIGABRT ||
++	int signal = WTERMSIG(rv);
++	if (p != current_proc() ||
++	    (signal != SIGABRT && signal != SIGSEGV && signal != SIGBUS && signal != SIGILL) ||
 +	    strcmp(p->p_name, "WindowServer") != 0) return;
 +	unsigned slot = atomic_load_explicit(&captured, memory_order_relaxed);
 +	do {
@@ -37,7 +39,7 @@
  #endif
  
  static void
-@@ -2097,6 +2118,11 @@
+@@ -2097,6 +2120,11 @@
  	boot_progress_exit(proc_getpid(p),p->p_name,rv,
  	    p->p_exit_reason ? p->p_exit_reason->osr_namespace : 0,
  	    p->p_exit_reason ? p->p_exit_reason->osr_code : 0);

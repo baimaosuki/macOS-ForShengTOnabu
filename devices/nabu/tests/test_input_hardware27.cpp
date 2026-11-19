@@ -20,11 +20,16 @@ struct Spmi {
 struct Usb {
     std::map<std::pair<nabu::UsbBlock,unsigned>,unsigned> regs;
     std::vector<std::tuple<nabu::UsbBlock,unsigned,unsigned>> writes;
-    bool clockStuck=false,resetStuck=false;unsigned cap=0x40;
+    bool clockStuck=false,resetStuck=false,branchStuck=false;unsigned cap=0x40;
     Usb(){regs[{nabu::UsbBlock::Gcc,0xf004}]=0x80000000;regs[{nabu::UsbBlock::Core,0xc120}]=0x55333330;regs[{nabu::UsbBlock::Core,0}]=cap;regs[{nabu::UsbBlock::Core,cap+4}]=1;}
     unsigned read(nabu::UsbBlock b,unsigned o){return regs[{b,o}];}
     void write(nabu::UsbBlock b,unsigned o,unsigned v){writes.emplace_back(b,o,v);regs[{b,o}]=v;
         if(b==nabu::UsbBlock::Gcc && (o==0xf01c||o==0xf034) && !clockStuck)regs[{b,o}]=v&~1;
+        if(b==nabu::UsbBlock::Gcc && (o==0xf078||o==0xf010||o==0xf07c||o==0xf014||o==0xf018)) {
+            // Branches cannot run with USB controller reset still asserted.
+            if(branchStuck || (regs[{b,0xf000}]&1))regs[{b,o}]=v|0x80000000u;
+            else regs[{b,o}]=v&~0x80000000u;
+        }
         if(b==nabu::UsbBlock::Core && o==cap && (v&2) && !resetStuck)regs[{b,o}]=v&~2;
     }
     void delayUs(unsigned){}
@@ -43,6 +48,11 @@ struct Tcs {
     void delayUs(unsigned){}
 };
 int main(){
+    assert(!nabu::clockBranchReady(0x80000002));
+    assert(nabu::clockBranchReady(0x80000002,true)); // captured wrap2 slave AHB
+    assert(nabu::clockBranchReady(0xa0000001)); // NoC FSM_ON despite CLK_OFF
+    assert(!nabu::clockBranchReady(0x90000001));
+
     uint8_t report[2];nabuPowerReport(true,report);assert(report[0]==2&&report[1]==1);
     nabuPowerReport(false,report);assert(report[0]==2&&report[1]==0);
     assert(kNabuPowerDescriptor[1]==0x0c&&kNabuPowerDescriptor[9]==0x30);
@@ -58,9 +68,12 @@ int main(){
     assert(!key.sample(false,60));assert(key.sample(false,90)==6);assert(!key.sample(false,100));
     assert(!key.sample(true,110));assert(key.sample(true,140)==1);assert(key.sample(true,2140)==8);
     assert(!key.sample(true,4000));assert(!key.sample(false,4001));assert(key.sample(false,4031)==2);
-    Usb u;nabu::Usb2Core<Usb> core(u);assert(core.clocksAndReset());assert(core.femtoPhy());assert(core.selectUtmiHost());assert(core.resetXhci());
+    Usb u;
+    for(unsigned off:{0xf078u,0xf010u,0xf07cu,0xf014u,0xf018u})u.regs[{nabu::UsbBlock::Gcc,off}]=0x80000000;
+    nabu::Usb2Core<Usb> core(u);assert(core.clocksAndReset());assert(core.femtoPhy());assert(core.selectUtmiHost());assert(core.resetXhci());
     assert((u.read(nabu::UsbBlock::Scratch,8)&0x109)==9);assert((u.read(nabu::UsbBlock::Core,0xc110)&0x3000)==0x1000);
     Usb stuck;stuck.clockStuck=true;nabu::Usb2Core<Usb> c2(stuck);assert(!c2.clocksAndReset());
+    Usb gated;gated.branchStuck=true;nabu::Usb2Core<Usb> blocked(gated);assert(!blocked.clocksAndReset());
     Usb reset;reset.resetStuck=true;nabu::Usb2Core<Usb> c3(reset);assert(!c3.resetXhci());
     Pmic p;nabu::UsbVbus<Pmic> vbus(p);assert(vbus.initializeRole()==nabu::InputError::Ok);p.writes=0;assert(vbus.enable()==nabu::InputError::Busy&&p.writes==0);
     p.cc=1;assert(vbus.enable()==nabu::InputError::Busy&&p.writes==0); // attached sink -> no backfeed

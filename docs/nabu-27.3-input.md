@@ -91,3 +91,16 @@ eight consecutive event-read failures release a held pointer and stop the
 worker. Firmware watchdog reloads are limited to three. CI explicitly selects
 Xcode26.6 and checks iPhoneOS/macOS SDK26.5 before the native build. Target
 family ABI remains the original macOS27.3 build26C5035r.
+
+
+P021 hardware log confirms native PM8150 HID matched IOHIDEventDriver,
+press/release reports returned success, and short/long detection ran. USB
+RPMh votes completed; controller stopped at clocks before PHY/HCRST/SMMU.
+Correct the DWC3-QCOM sequence to assert then release BCR before clocks.
+Qualcomm branch2 ready accepts either CLK_OFF clear or NOC_FSM_STATUS=2.
+Touch wrap2 slave-AHB has HWCG bit1; captured status0x80000002 is idle
+hardware gating, so Linux skips its halt poll while HWCG is enabled.
+P021 already fixes Apple interrupt handles. WindowServer SIGSEGV exited
+without a fault PC because prior capture only selected SIGABRT; select
+SEGV/BUS/ILL as well without changing process signal/restart behavior.
+No claim of USB enumeration or touch SPI success before new hardware logs.

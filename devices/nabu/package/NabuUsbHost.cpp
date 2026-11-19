@@ -175,7 +175,7 @@ void worker(void *,wait_result_t){
     if(!nabu::pmic().initialize()||!hardware.map()){IOLog("NABU USB: PMIC/map failed; worker stopped\n");return;}
     bool ok=hardware.rails();IOLog("NABU USB: stage=RPMh result=%u\n",ok);if(!ok)return;
     nabu::Usb2Core<Hardware> core(hardware);
-    ok=core.clocksAndReset();IOLog("NABU USB: stage=clocks result=%u GDSC=%08x MASTER=%08x UTMI=%08x\n",ok,hardware.gcc.read(0xf004),hardware.gcc.read(0xf010),hardware.gcc.read(0xf018));if(!ok)return;
+    ok=core.clocksAndReset();IOLog("NABU USB: stage=clocks result=%u GDSC=%08x BCR=%08x CFG=%08x AGGR=%08x MASTER=%08x UTMI=%08x RCG=%08x/%08x\n",ok,hardware.gcc.read(0xf004),hardware.gcc.read(0xf000),hardware.gcc.read(0xf078),hardware.gcc.read(0xf07c),hardware.gcc.read(0xf010),hardware.gcc.read(0xf018),hardware.gcc.read(0xf01c),hardware.gcc.read(0xf034));if(!ok)return;
     ok=core.femtoPhy(!(hardware.rcal.read(0)&0x1e00000));IOLog("NABU USB: stage=FEMTO result=%u CTRL=%08x POR=%08x\n",ok,hardware.phy.read(0x94),hardware.phy.read(0x50));if(!ok)return;
     ok=core.selectUtmiHost();IOLog("NABU USB: stage=UTMI-host result=%u SCRATCH=%08x GCTL=%08x USB2=%08x\n",ok,hardware.scratch.read(8),hardware.core.read(0xc110),hardware.core.read(0xc200));if(!ok)return;
     ok=core.resetXhci();IOLog("NABU USB: stage=HCRST result=%u\n",ok);if(!ok)return;

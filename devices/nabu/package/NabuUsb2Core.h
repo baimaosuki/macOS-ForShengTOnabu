@@ -3,6 +3,7 @@
 // Sequences derived from Linux gcc-sm8150, phy-msm-snps-hs and dwc3-qcom.
 #pragma once
 #include <stdint.h>
+#include "NabuClockBranch.h"
 namespace nabu {
 enum class UsbBlock { Gcc, Phy, Scratch, Core };
 template<class Io> class Usb2Core {
@@ -14,6 +15,14 @@ template<class Io> class Usb2Core {
     bool wait(UsbBlock b,uint32_t r,uint32_t mask,uint32_t value,unsigned us) {
         for(unsigned t=0;t<us;t+=10){if((io.read(b,r)&mask)==value)return true;io.delayUs(10);}
         return (io.read(b,r)&mask)==value;
+    }
+    bool branch(uint32_t r) {
+        if(!update(UsbBlock::Gcc,r,1,1))return false;
+        for(unsigned us=0;us<100000;us+=10){
+            if(clockBranchReady(io.read(UsbBlock::Gcc,r)))return true;
+            io.delayUs(10);
+        }
+        return clockBranchReady(io.read(UsbBlock::Gcc,r));
     }
     bool rcg(uint32_t r,uint32_t cfg) {
         if(!update(UsbBlock::Gcc,r+4,0x371f,cfg))return false;
@@ -27,13 +36,15 @@ public:
         if(!update(UsbBlock::Gcc,0xf004,1,0) || !wait(UsbBlock::Gcc,0xf004,1u<<31,1u<<31,100000))return false;
         if(!update(UsbBlock::Gcc,0xf000,1,1))return false;
         io.delayUs(100);
+        // DWC3-QCOM releases the controller BCR BEFORE enabling its clocks.
+        // Waiting for the NoC branch while this reset is asserted never completes.
+        if(!update(UsbBlock::Gcc,0xf000,1,0))return false;
+        io.delayUs(100);
         // GPLL0 600MHz / 3 = 200MHz; CXO 19.2MHz / 1 for Mock UTMI.
         if(!rcg(0xf01c,0x105) || !rcg(0xf034,1))return false;
         const uint32_t branches[]={0xf078,0xf010,0xf07c,0xf014,0xf018};
         for(uint32_t off:branches)
-            if(!update(UsbBlock::Gcc,off,1,1) || !wait(UsbBlock::Gcc,off,1u<<31,0,100000))return false;
-        if(!update(UsbBlock::Gcc,0xf000,1,0))return false;
-        io.delayUs(100);
+            if(!branch(off))return false;
         if(!update(UsbBlock::Gcc,0x12000,1,1))return false;
         io.delayUs(150);
         if(!update(UsbBlock::Gcc,0x12000,1,0))return false;
