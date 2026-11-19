@@ -28,5 +28,20 @@
     "repository": "https://github.com/RigoLigoRLC/unixnu-adreno6xx",
     "commit": "83a0453e981567a30cecd6486bdb8b3b33d64683"
   },
-  "hardware_tested": false
+  "hardware_tested": false,
+  "userspace": {
+    "adrenometal": "cc0a4e8e57d20f4a4698753c2530875f2b10c0ca",
+    "metal2vulkan": "46e7cc96a284150bdf19b4a6a7890b0a8bc0ef71",
+    "translator_patches": [
+      "0063-main-optimizations-on-development-46e7cc96.patch",
+      "0064-copies-leave-unreachable-pages-alone.patch"
+    ],
+    "mesa": "c823a83e8f373a5c36c2b9ed1d7dc98a4f3360ee",
+    "mesa_patch": "patches/mesa-c823-darwin.patch",
+    "mesa_patch_sha256": "a373645d4a740af2fcef95c0cde4ed29dca62988493129b037328317a8644825",
+    "clang_cpu": "generic",
+    "clang_arch": "armv8.2-a+crypto",
+    "abi": "zeta-ordinary-v1",
+    "kernel_wire_adapter_ready": false
+  }
 }

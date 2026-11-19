@@ -22,7 +22,9 @@
       ],
       "local_final_pac_instruction_scan": 0,
       "signed": false,
-      "loaded_on_macos": false
+      "loaded_on_macos": false,
+      "clang_cpu": "generic",
+      "unsupported_pauth_register_and_branch_scan": 0
     },
     "metal_abi": {
       "kernel_wire_version": 1,
