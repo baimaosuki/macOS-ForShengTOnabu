@@ -45,6 +45,7 @@ def main():
     bridge='scripts/build-adreno-metal-bridge.py'
     change(bridge,"'macos27': 'arm64e-apple-darwin'","'macos27': 'aarch64-apple-darwin'")
     change(bridge,"ARM64E = args.target in ('ios27', 'macos27')","ARM64E = args.target == 'ios27'")
+    change(bridge,"'lto = \"fat\"', 'codegen-units = 1'", "'lto = \"thin\"', 'codegen-units = 8'")
     change(bridge,"if ARM64E:\n    env['RUSTC_BOOTSTRAP'] = '1'", "if ARM64E:\n    env['RUSTC_BOOTSTRAP'] = '1'\nelif args.target == 'macos27':\n    env['RUSTFLAGS'] = '-C target-cpu=generic -C target-feature=-paca,-pacg,-bti'")
     change(bridge,"identity = dict(target=args.target,", "identity = dict(architecture='arm64' if args.target == 'macos27' else triple, abi='zeta-ordinary-v1' if args.target == 'macos27' else 'upstream', target=args.target,")
     revision="json.loads((ROOT / 'nabu-runtime-inputs.json').read_text())['adrenometal_commit']"
@@ -71,6 +72,7 @@ def main():
         clang_target='arm64-apple-macos27.0',rust_target='aarch64-apple-darwin',
         clang_cpu='generic',clang_arch='armv8.2-a+crypto',rust_target_cpu='generic',rust_target_features='-paca,-pacg,-bti',
         abi='zeta-ordinary-v1',panic='unwind',rust_pac_boundary=False,
+        rust_lto='thin',rust_codegen_units=8,
         kernel_wire_compatible=False,deployment_enabled=False,hardware_tested=False)
     record['adapted_files']={rel:hashlib.sha256((out/rel).read_bytes()).hexdigest()
         for rel in [bridge,plugin,'scripts/build-turnip-darwin.py',frontend,cache]}
