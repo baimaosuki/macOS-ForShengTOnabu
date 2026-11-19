@@ -12,8 +12,17 @@
       "source_pins": "package/gpu/sources.lock.json",
       "translator_patches": "0063 + 0064 apply",
       "mesa_pin": "c823a83e8f373a5c36c2b9ed1d7dc98a4f3360ee",
-      "mesa_patch_port_required": true,
-      "device": false
+      "mesa_patch_port_required": false,
+      "device": false,
+      "mesa_patch": "package/gpu/patches/mesa-c823-darwin.patch",
+      "local_arm64_cross_compile_link": [
+        "Turnip Darwin dylib",
+        "M2V Rust staticlib",
+        "NativeAdrenoMetal plugin"
+      ],
+      "local_final_pac_instruction_scan": 0,
+      "signed": false,
+      "loaded_on_macos": false
     },
     "metal_abi": {
       "kernel_wire_version": 1,

@@ -15,3 +15,8 @@ Metal bundle/addon 尚未启用。无 task/可分页 BO、macOS accelerator ABI�
 可选 GPU 性能记录器改为首次请求时分配 4096 条采样与任务记录，容量保持不变。
 移除 1,163,264 字节静态 BSS，避免原生 DATA 段越过 26C5035r 保留 kext 边界。
 Host ASan/UBSan 覆盖两次分配分别失败、并发启动及采样/任务生命周期。
+
+Mesa c823a83 的 24 项 Darwin 补丁已移植并可完整反向还原原始输入。
+本地 SDK 26.5 已完成普通 arm64 Turnip、M2V 静态库和 macOS Metal 插件编译链接；
+最终插件和 Turnip 代码扫描未见 PAC 指令。这些是交叉构建证据，尚无真机 GPU 运行证据。
+独立 gpu-userspace CI 构建签名产物，不自动安装；v1/v2 内核协议适配和 GPU 扫描输出仍待完成。

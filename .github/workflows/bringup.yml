@@ -4,7 +4,7 @@ on:
     inputs:
       stage:
         type: choice
-        options: [native, runtime, boot-tools]
+        options: [native, runtime, boot-tools, gpu-userspace]
         default: native
 permissions:
   contents: read
@@ -35,7 +35,7 @@ jobs:
           name: nabu27-boot-tools
           path: out/nabu27-boot-tools/
   compile:
-    if: inputs.stage != 'runtime' && inputs.stage != 'boot-tools'
+    if: inputs.stage == 'native' || inputs.stage == ''
     runs-on: macos-26-intel
     timeout-minutes: 180
     env:
@@ -141,4 +141,42 @@ jobs:
             out/fresh-runtime/runtime.enc
             out/fresh-runtime/runtime-envelope.json
           if-no-files-found: error
+          retention-days: 14
+  gpu-userspace:
+    if: inputs.stage == 'gpu-userspace'
+    runs-on: macos-26-intel
+    timeout-minutes: 120
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: 1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Select SDK 26.5 and install public build tools
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
+          test "$(xcrun --sdk macosx --show-sdk-version)" = 26.5
+          brew install llvm ninja bison glslang shaderc rustup
+          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix bison)/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          python3 -m pip install capstone==5.0.7
+      - uses: actions/cache@v4
+        with:
+          key: nabu27-m2v-cargo-v1-${{ runner.arch }}
+          path: ~/.cargo/registry
+      - name: Build and sign ordinary arm64 M2V and Turnip
+        run: python3 devices/nabu/scripts/build-nabu-m2v27.py --output out/nabu27-gpu-userspace
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nabu27-gpu-userspace
+          path: |
+            out/nabu27-gpu-userspace/verification.json
+            out/nabu27-gpu-userspace/tree/nabu-runtime-inputs.json
+            out/nabu27-gpu-userspace/tree/build/adreno-metal-plugin-macos27/
+            out/nabu27-gpu-userspace/tree/build/adreno-metal-bridge/*.log
+            out/nabu27-gpu-userspace/tree/.cache/mesa-tu-macos27-*.log
+          if-no-files-found: warn
           retention-days: 14

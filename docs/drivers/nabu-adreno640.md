@@ -37,14 +37,20 @@ peer; ASan/UBSan tests of page invalidation and timeout failures; stock DT versu
 production ADT checks. These are not hardware qualification.
 
 The current M2V source pin is 46e7cc96, with AdrenoMetal patches 0063 and 0064.
-The requested Mesa c823a83 is retained. Mainline's separate compiler manifest
-still selects 85fda3b and its patch set does not apply unchanged to c823a83
-(ir3_disk_cache.c has moved). That patch port and the wire ABI adapter remain
-required: the A640 core uses ABI v1, while the current mainline client uses v2.
-Do not publish a v1 service under a v2 runtime or silently reinterpret its flags.
-No plugin/addon is enabled by this checkpoint. BO no-task/pageable migration,
-macOS accelerator base qualification, shader prewarm and GPU scanout still need
-independent implementation and hardware evidence; see gpu-port27.json.
+The required Mesa c823a83 now has a complete recorded Darwin backport of the
+24 SHENG patches (original patch base 85fda3b). The patch guard reconstructs
+c823 exactly. Local SDK 26.5 cross builds have linked Turnip, the M2V static
+runtime and the macOS plugin for ordinary arm64. The final plugin and Turnip
+text scan found no authenticated-pointer instructions. These binaries have
+not been loaded on macOS or tested on the board.
+
+`prepare-nabu-m2v27.py` stages the pinned upstream with arm64 Rust/Clang,
+A640 render defaults, no Rust PAC wrappers, and arm64 Shader Cache tools.
+`build-nabu-m2v27.py` runs the matching build and 4 KiB signing on macOS.
+It does not install or enable an addon. The mainline wire remains v2 while the
+A640 core is v1; their adapter, BO no-task/pageable migration, macOS accelerator
+base qualification and GPU scanout still require implementation and evidence.
+No plugin is enabled by this checkpoint; see gpu-port27.json.
 
 The optional GPU profiler lazily allocates its unchanged 4096-record sample
 and job arrays. Removing their 1,163,264 bytes of static BSS keeps the native
