@@ -36,6 +36,9 @@ def main():
     translator=fetch('metal2vulkan',pins['translator']['repository'],pins['translator']['commit'])
     tree=out/'tree'
     run(sys.executable,Path(__file__).with_name('prepare-nabu-m2v27.py'),'--core',core,'--frontend',frontend,'--output',tree)
+    run(sys.executable,ROOT/'devices/nabu/tests/check-gpu-userspace-policy27.py',
+        '--stage',tree,'--clang',read('xcrun','--find','clang'),
+        '--output',out/'cpu-policy-verification.json')
     patch=tree/'patches/nabu/mesa-c823-darwin.patch'
     run('git','-C',mesa,'apply','--check',patch);run('git','-C',mesa,'apply',patch)
     (tree/'.cache/mesa-work').symlink_to(mesa,target_is_directory=True)
@@ -46,6 +49,12 @@ def main():
     priority=out/'queue-priority-host'
     run('xcrun','clang++','-std=c++17','-Wall','-Wextra','-Werror',tree/'drivers/AdrenoMetal/bridge/queue_priority_host.cpp','-o',priority)
     run(priority)
+    # Keep Cargo's incremental release objects across retries without creating
+    # a partial staging tree before its exact-source preparation.
+    cargo_target=ROOT/'.ci-cache/nabu27-m2v-target'
+    cargo_target.mkdir(parents=True,exist_ok=True)
+    (tree/'build').mkdir(exist_ok=True)
+    (tree/'build/m2v-target').symlink_to(cargo_target,target_is_directory=True)
     run(sys.executable,tree/'scripts/build-turnip-darwin.py','--target','macos27')
     run(sys.executable,tree/'scripts/build-adreno-metal-plugin.py','--target','macos27','--no-replay','--translator-source',translator)
     artifacts=tree/'build/adreno-metal-plugin-macos27'
@@ -70,7 +79,7 @@ def main():
                         va,length,off=struct.unpack_from('<QQI',raw,sect+32)
                         for addr,_,mn,_ in cs.disasm_lite(raw[off:off+length],va):
                             instructions+=1
-                            if mn.startswith(('pac','aut','braa','brab','blraa','blrab')) or mn in ('retaa','retab'):
+                            if mn.startswith(('pac','aut','braa','brab','blraa','blrab')) or mn in ('retaa','retab','xpaci','xpacd'):
                                 raise ValueError(f'Authenticated instruction in {path}: {addr:#x} {mn}')
             at+=size
         run('codesign','--verify','--strict',path)

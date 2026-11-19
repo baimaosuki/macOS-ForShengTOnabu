@@ -41,7 +41,10 @@ The required Mesa c823a83 now has a complete recorded Darwin backport of the
 24 SHENG patches (original patch base 85fda3b). The patch guard reconstructs
 c823 exactly. Local SDK 26.5 cross builds have linked Turnip, the M2V static
 runtime and the macOS plugin for ordinary arm64. The final plugin and Turnip
-text scan found no authenticated-pointer instructions. These binaries have
+text scan rejects authenticated branches and XPACI/XPACD. Clang explicitly
+uses `-mcpu=generic` with ARMv8.2 crypto: Darwin's implicit Apple CPU otherwise
+emits register XPACI for return-address diagnostics. The generic target uses
+backwards-compatible HINT #7 instead. These binaries have
 not been loaded on macOS or tested on the board.
 
 `prepare-nabu-m2v27.py` stages the pinned upstream with arm64 Rust/Clang,

@@ -20,3 +20,7 @@ Mesa c823a83 的 24 项 Darwin 补丁已移植并可完整反向还原原始输�
 本地 SDK 26.5 已完成普通 arm64 Turnip、M2V 静态库和 macOS Metal 插件编译链接；
 最终插件和 Turnip 代码扫描未见 PAC 指令。这些是交叉构建证据，尚无真机 GPU 运行证据。
 独立 gpu-userspace CI 构建签名产物，不自动安装；v1/v2 内核协议适配和 GPU 扫描输出仍待完成。
+
+Clang 显式设置 `-mcpu=generic -march=armv8.2-a+crypto`。Darwin 的默认 Apple CPU
+会让返回地址诊断产生 XPACI 寄存器指令；generic 改为无 PAuth CPU 安全忽略的 HINT #7。
+最终代码检查同时拒绝 XPACI/XPACD 与鉴权分支；CI 增加真实编译器探针。

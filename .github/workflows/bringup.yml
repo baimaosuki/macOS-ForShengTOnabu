@@ -163,12 +163,23 @@ jobs:
           echo "$(brew --prefix rustup)/bin" >> "$GITHUB_PATH"
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
           python3 -m pip install capstone==5.0.7
-      - uses: actions/cache@v4
+      - uses: actions/cache/restore@v4
+        id: gpu-cargo-cache
         with:
-          key: nabu27-m2v-cargo-v1-${{ runner.arch }}
-          path: ~/.cargo/registry
+          key: nabu27-m2v-cargo-v2-${{ runner.arch }}-${{ github.sha }}
+          restore-keys: nabu27-m2v-cargo-v2-${{ runner.arch }}-
+          path: |
+            ~/.cargo/registry
+            .ci-cache/nabu27-m2v-target
       - name: Build and sign ordinary arm64 M2V and Turnip
         run: python3 devices/nabu/scripts/build-nabu-m2v27.py --output out/nabu27-gpu-userspace
+      - uses: actions/cache/save@v4
+        if: always() && steps.gpu-cargo-cache.outputs.cache-hit != 'true'
+        with:
+          key: ${{ steps.gpu-cargo-cache.outputs.cache-primary-key }}
+          path: |
+            ~/.cargo/registry
+            .ci-cache/nabu27-m2v-target
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -176,6 +187,7 @@ jobs:
           include-hidden-files: true
           path: |
             out/nabu27-gpu-userspace/verification.json
+            out/nabu27-gpu-userspace/cpu-policy-verification.json
             out/nabu27-gpu-userspace/tree/nabu-runtime-inputs.json
             out/nabu27-gpu-userspace/tree/build/adreno-metal-plugin-macos27/
             out/nabu27-gpu-userspace/tree/build/adreno-metal-bridge/*.log

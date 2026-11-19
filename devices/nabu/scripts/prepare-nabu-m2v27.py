@@ -51,14 +51,14 @@ def main():
     change(bridge,"subprocess.check_output(['git', '-C', str(ROOT / 'drivers/AdrenoMetal'), 'rev-parse', 'HEAD'], text=True).strip()",revision)
     plugin='scripts/build-adreno-metal-plugin.py'
     change(plugin,"IOS27 = args.target in ('ios27', 'macos27')","IOS27 = args.target == 'ios27'")
-    change(plugin,"metal_build_id = source_hash.hexdigest()", "metal_build_id = source_hash.hexdigest()\nif MACOS:\n    base += ['-march=armv8.2-a+crypto', '-mbranch-protection=none']")
+    change(plugin,"metal_build_id = source_hash.hexdigest()", "metal_build_id = source_hash.hexdigest()\nif MACOS:\n    base += ['-mcpu=generic', '-march=armv8.2-a+crypto', '-mbranch-protection=none']")
     for script in [plugin,'scripts/build-turnip-darwin.py']:
         change(script,"'macos27': 'arm64e-apple-macos27.0'","'macos27': 'arm64-apple-macos27.0'")
-    change('scripts/build-turnip-darwin.py',"    cross = ROOT / ('build/mesa-tu-%s.cross' % args.target)", "    if args.target == 'macos27':\n        flags += ['-march=armv8.2-a+crypto', '-mbranch-protection=none']\n    cross = ROOT / ('build/mesa-tu-%s.cross' % args.target)")
+    change('scripts/build-turnip-darwin.py',"    cross = ROOT / ('build/mesa-tu-%s.cross' % args.target)", "    if args.target == 'macos27':\n        flags += ['-mcpu=generic', '-march=armv8.2-a+crypto', '-mbranch-protection=none']\n    cross = ROOT / ('build/mesa-tu-%s.cross' % args.target)")
     change(plugin,"subprocess.check_output(['git', '-C', str(ROOT / 'drivers/AdrenoMetal'), 'rev-parse', 'HEAD'], text=True).strip()",revision)
     change(plugin,"ROOT / 'drivers/AdrenoMetal/tools/build-shader-cache-app.py', OUT]", "ROOT / 'drivers/AdrenoMetal/tools/build-shader-cache-app.py', OUT, '--arch', 'arm64']")
     cache='drivers/AdrenoMetal/tools/build-shader-cache-app.py'
-    change(cache,"sdk = subprocess.check_output(", "nabu_flags = ['-march=armv8.2-a+crypto', '-mbranch-protection=none'] if args.arch == 'arm64' else []\nsdk = subprocess.check_output(")
+    change(cache,"sdk = subprocess.check_output(", "nabu_flags = ['-mcpu=generic', '-march=armv8.2-a+crypto', '-mbranch-protection=none'] if args.arch == 'arm64' else []\nsdk = subprocess.check_output(")
     change(cache,"subprocess.run([*base, SOURCE / 'ShaderCache' / source,", "subprocess.run([*base, *nabu_flags, SOURCE / 'ShaderCache' / source,")
     change(cache,"if name == 'ShaderCacheWorker' and args.arch == 'arm64e' else {}", "if name == 'ShaderCacheWorker' else {}")
     frontend='drivers/AdrenoMetal/NativeAdrenoMetalPlugin.mm'
@@ -69,7 +69,7 @@ def main():
     record=dict(core_commit=CORE,adrenometal_commit=FRONTEND,mesa_commit=MESA,
         mesa_patch_sha256=hashlib.sha256(patch.read_bytes()).hexdigest(),target='macos27',
         clang_target='arm64-apple-macos27.0',rust_target='aarch64-apple-darwin',
-        clang_arch='armv8.2-a+crypto',rust_target_cpu='generic',rust_target_features='-paca,-pacg,-bti',
+        clang_cpu='generic',clang_arch='armv8.2-a+crypto',rust_target_cpu='generic',rust_target_features='-paca,-pacg,-bti',
         abi='zeta-ordinary-v1',panic='unwind',rust_pac_boundary=False,
         kernel_wire_compatible=False,deployment_enabled=False,hardware_tested=False)
     record['adapted_files']={rel:hashlib.sha256((out/rel).read_bytes()).hexdigest()
