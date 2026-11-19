@@ -31,7 +31,7 @@ struct Hardware {
     uint32_t read(nabu::UsbBlock b,uint32_t off){return region(b).read(off);}
     void write(nabu::UsbBlock b,uint32_t off,uint32_t v){region(b).write(off,v);}
     void delayUs(unsigned us){IODelay(us);}
-    void checkpoint(const char *phase){IOLog("NABU USB: clocks enter=%s\n",phase);}
+    void checkpoint(const char *phase){IOLog("NABU USB: init enter=%s\n",phase);}
     bool map(){return gcc.map(0x100000,0x100000)&&phy.map(0x88e2000,0x1000)&&
         scratch.map(0xa6f8800,0x400)&&rcal.map(0x7801f8,4)&&core.map(0xa600000,0x10000)&&smmu.map(0x15000000,0x100000);}
     bool rails(){
@@ -172,27 +172,29 @@ bool publishHost(){
     if(!ok){OSSafeReleaseNULL(host);if(nub){nub->terminate(kIOServiceSynchronous);nub->release();nub=nullptr;}}
     IOLog("NABU USB: native AppleUSBXHCI start=%u IRQ=%u SID=%x\n",ok,irq,sid);return ok;
 }
+template<class Core> void reportFailure(const char *stage,const Core &core){
+    for(unsigned attempt=0;attempt<2;++attempt){
+        if(attempt)IOSleep(1000);
+        IOLog("NABU USB: %s failed phase=%s block=%u off=%x value=%08x mask=%08x want=%08x\n",
+            stage,core.lastPhase(),unsigned(core.failedBlock()),core.failedOffset(),core.failedValue(),core.failedMask(),core.failedExpected());
+    }
+}
 void worker(void *,wait_result_t){
     if(!nabu::pmic().initialize()||!hardware.map()){IOLog("NABU USB: PMIC/map failed; worker stopped\n");return;}
     bool ok=hardware.rails();IOLog("NABU USB: stage=RPMh result=%u\n",ok);if(!ok)return;
     nabu::Usb2Core<Hardware> core(hardware);
     ok=core.clocksAndReset();
     IOLog("NABU USB: stage=clocks result=%u phase=%s\n",ok,core.lastPhase());
-    if(!ok){
-        // The early console ring may contend with UFS/touch. Repeat the terminal
-        // failure once after those workers settle, instead of losing its cause.
-        for(unsigned attempt=0;attempt<2;++attempt){
-            if(attempt)IOSleep(1000);
-            IOLog("NABU USB: clocks failed phase=%s block=%u off=%x value=%08x mask=%08x want=%08x\n",
-                core.lastPhase(),unsigned(core.failedBlock()),core.failedOffset(),core.failedValue(),core.failedMask(),core.failedExpected());
-        }
-        return;
-    }
+    // Delay one repeat on failure so early console contention cannot hide it.
+    if(!ok){reportFailure("clocks",core);return;}
     IOLog("NABU USB: GDSC=%08x CFG_GDSC=%08x PLL=%08x vote=%08x\n",hardware.gcc.read(0xf004),hardware.gcc.read(0xf008),hardware.gcc.read(0),hardware.gcc.read(0x52000));
     IOLog("NABU USB: clocks MASTER=%08x CFG=%08x AGGR=%08x UTMI=%08x SLEEP=%08x\n",hardware.gcc.read(0xf010),hardware.gcc.read(0xf078),hardware.gcc.read(0xf07c),hardware.gcc.read(0xf018),hardware.gcc.read(0xf014));
-    ok=core.femtoPhy(!(hardware.rcal.read(0)&0x1e00000));IOLog("NABU USB: stage=FEMTO result=%u CTRL=%08x POR=%08x\n",ok,hardware.phy.read(0x94),hardware.phy.read(0x50));if(!ok)return;
-    ok=core.selectUtmiHost();IOLog("NABU USB: stage=UTMI-host result=%u SCRATCH=%08x GCTL=%08x USB2=%08x\n",ok,hardware.scratch.read(8),hardware.core.read(0xc110),hardware.core.read(0xc200));if(!ok)return;
-    ok=core.resetXhci();IOLog("NABU USB: stage=HCRST result=%u\n",ok);if(!ok)return;
+    ok=core.femtoPhy(!(hardware.rcal.read(0)&0x1e00000));IOLog("NABU USB: stage=FEMTO result=%u CTRL=%08x POR=%08x\n",ok,hardware.phy.read(0x94),hardware.phy.read(0x50));if(!ok){reportFailure("FEMTO",core);return;}
+    ok=core.selectUtmiHost();
+    IOLog("NABU USB: IP GSNPSID=%08x revision=%08x phase=%s\n",core.coreId(),core.coreRevision(),core.lastPhase());
+    IOLog("NABU USB: stage=UTMI-host result=%u SCRATCH=%08x GCTL=%08x USB2=%08x\n",ok,hardware.scratch.read(8),hardware.core.read(0xc110),hardware.core.read(0xc200));
+    if(!ok){reportFailure("UTMI-host",core);return;}
+    ok=core.resetXhci();IOLog("NABU USB: stage=HCRST result=%u\n",ok);if(!ok){reportFailure("HCRST",core);return;}
     ok=hardware.dma();IOLog("NABU USB: stage=SMMU result=%u\n",ok);if(!ok)return;
     nabu::UsbVbus<nabu::PmicBus> vbus(nabu::pmic());
     auto role=vbus.initializeRole();

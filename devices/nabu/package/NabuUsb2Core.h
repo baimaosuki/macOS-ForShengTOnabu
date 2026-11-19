@@ -8,6 +8,7 @@ namespace nabu {
 enum class UsbBlock { Gcc, Phy, Scratch, Core };
 template<class Io> class Usb2Core {
     Io &io;
+    uint32_t coreId_=0,coreRevision_=0;
     const char *phase_="idle";
     uint32_t failedOffset_=0,failedValue_=0,failedMask_=0,failedExpected_=0;
     UsbBlock failedBlock_=UsbBlock::Gcc;
@@ -39,6 +40,8 @@ template<class Io> class Usb2Core {
 public:
     explicit Usb2Core(Io &i):io(i){}
     const char *lastPhase() const { return phase_; }
+    uint32_t coreId() const { return coreId_; }
+    uint32_t coreRevision() const { return coreRevision_; }
     UsbBlock failedBlock() const { return failedBlock_; }
     uint32_t failedOffset() const { return failedOffset_; }
     uint32_t failedValue() const { return failedValue_; }
@@ -94,6 +97,7 @@ public:
     }
     bool femtoPhy(bool externalResistor=false) {
         using B=UsbBlock;
+        phase("FEMTO-init");
         if(!update(B::Phy,0x94,2,2) || !update(B::Phy,0x50,2,2) ||
            !update(B::Phy,0x54,0x70,0) || !update(B::Phy,0x58,0x20,0x20) ||
            !update(B::Phy,0xa0,3,2) || !update(B::Phy,0x58,0x10,0x10) ||
@@ -110,34 +114,57 @@ public:
     }
     bool selectUtmiHost() {
         using B=UsbBlock;
+        phase("UTMI-clock-select");
         // Missing PIPE clock otherwise stalls xHCI HCRST. Disable -> select -> enable.
         if(!update(B::Scratch,8,0x100,0x100))return false;
         io.delayUs(100);
         if(!update(B::Scratch,8,9,9))return false;
         io.delayUs(100);
         if(!update(B::Scratch,8,0x100,0))return false;
-        uint32_t id=io.read(B::Core,0xc120);
-        if((id&0xffff0000)!=0x55330000)return false;
-        // Core and PHY soft-reset while changing PRTCAPDIR; USB3 stays suspended.
-        if(!update(B::Core,0xc110,1u<<11,1u<<11) ||
-           !update(B::Core,0xc200,1u<<31,1u<<31) || !update(B::Core,0xc2c0,1u<<31,1u<<31))return false;
+        phase("controller-id");
+        coreId_=io.read(B::Core,0xc120);
+        const uint32_t ip=coreId_>>16;
+        // DWC_usb3 encodes its revision in GSNPSID; DWC_usb31 identifies as
+        // 0x3331 and keeps the revision in VER_NUMBER (Linux dwc3_core_is_valid).
+        // USB2-only describes link speed, not the DWC controller IP generation.
+        if(ip==0x5533)coreRevision_=coreId_;
+        else if(ip==0x3331){
+            coreRevision_=io.read(B::Core,0xc1a0);
+            // Published usb31 VER_NUMBER values encode decimal digits and '*'.
+            if((coreRevision_&0xff)!=0x2a)
+                return failure(B::Core,0xc1a0,0xff,0x2a);
+        } else return failure(B::Core,0xc120,0xffff0000,0x33310000);
+        // GCTL.CORESOFTRESET is a role-switch reset on DWC_usb3 and usb31
+        // before 1.90a. Later usb31 cores synchronize through host HCRST.
+        const bool roleReset=ip==0x5533 || coreRevision_<0x3139302a;
+        phase("UTMI-PHY-reset");
+        if(roleReset && !update(B::Core,0xc110,1u<<11,1u<<11))return false;
+        if(!update(B::Core,0xc200,1u<<31,1u<<31) ||
+           !update(B::Core,0xc2c0,1u<<31,1u<<31))return false;
         io.delayUs(100000);
-        // 8-bit UTMI (PHYIF=0), turnaround=9, no SUSPHY/ENBLSLPM on SM8150.
-        const uint32_t mask=(1u<<31)|(15u<<10)|(1u<<8)|(1u<<6)|(1u<<3);
+        phase("UTMI-host-config");
+        // 8-bit UTMI (PHYIF=0, ULPI_UTMI=0), turnaround=9, no SUSPHY/ENBLSLPM.
+        const uint32_t mask=(1u<<31)|(15u<<10)|(1u<<8)|(1u<<6)|(1u<<4)|(1u<<3);
         if(!update(B::Core,0xc200,mask,9u<<10) ||
-           !update(B::Core,0xc2c0,(1u<<31)|(1u<<17),1u<<17) ||
-           !update(B::Core,0xc110,(3u<<12)|(1u<<11)|1u,(1u<<12)|1u))return false;
+           !update(B::Core,0xc2c0,(1u<<31)|(1u<<17),1u<<17))return false;
+        // Clear scaledown and select Host; retain all unrelated core settings.
+        const uint32_t ctlMask=(3u<<12)|(3u<<4)|1u|(roleReset?1u<<11:0);
+        if(!update(B::Core,0xc110,ctlMask,(1u<<12)|1u))return false;
         io.delayUs(100000);
         // No synthetic VBUS-valid: the host provides power through SMB5.
         return update(B::Scratch,0x10,(1u<<20)|(1u<<28),0);
     }
     bool resetXhci() {
         using B=UsbBlock;
+        phase("XHCI-halt");
         const uint32_t cap=io.read(B::Core,0)&0xff;
-        if(cap<0x20 || cap>0x80)return false;
+        if(cap<0x20 || cap>0x80)return failure(B::Core,0,0xff,0x40);
         if(!update(B::Core,cap,1,0) || !wait(B::Core,cap+4,1,1,100000))return false;
+        phase("XHCI-reset");
         io.write(B::Core,cap,io.read(B::Core,cap)|2);
-        return wait(B::Core,cap,2,0,1000000) && wait(B::Core,cap+4,1u<<11,0,1000000);
+        if(!wait(B::Core,cap,2,0,1000000))return false;
+        phase("XHCI-ready");
+        return wait(B::Core,cap+4,1u<<11,0,1000000);
     }
 };
 }

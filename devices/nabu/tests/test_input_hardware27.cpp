@@ -113,6 +113,39 @@ int main(){
     for(auto w:u.writes)if(std::get<0>(w)==nabu::UsbBlock::Gcc){
         unsigned o=std::get<1>(w);assert((o>=0xf000&&o<0xf080)||o==0x12000||o==0x52000);
     }
+    // SM8150's DWC_usb31 family must reach real Host mode/HCRST, not be
+    // rejected by the legacy DWC_usb3 GSNPSID check.
+    Usb usb31;usb31.regs[{nabu::UsbBlock::Core,0xc120}]=0x33310000;
+    usb31.regs[{nabu::UsbBlock::Core,0xc1a0}]=0x3137302a;
+    nabu::Usb2Core<Usb> c31(usb31);assert(c31.selectUtmiHost()&&c31.resetXhci());
+    assert(c31.coreId()==0x33310000&&c31.coreRevision()==0x3137302a);
+    assert((usb31.read(nabu::UsbBlock::Core,0xc110)&0x3000)==0x1000);
+    assert((usb31.read(nabu::UsbBlock::Core,0xc200)&((1u<<31)|(1u<<8)|(1u<<6)|(1u<<4)|(1u<<3)))==0);
+    bool roleResetSeen=false;
+    for(auto w:usb31.writes)if(std::get<0>(w)==nabu::UsbBlock::Core&&std::get<1>(w)==0xc110)
+        roleResetSeen|=bool(std::get<2>(w)&(1u<<11));
+    assert(roleResetSeen);
+    // usb31 1.90a+ uses host HCRST rather than the older GCTL role reset.
+    Usb newer;newer.regs[{nabu::UsbBlock::Core,0xc120}]=0x33310000;
+    newer.regs[{nabu::UsbBlock::Core,0xc1a0}]=0x3139302a;
+    nabu::Usb2Core<Usb> cnew(newer);assert(cnew.selectUtmiHost()&&cnew.resetXhci());
+    for(auto w:newer.writes)if(std::get<0>(w)==nabu::UsbBlock::Core&&std::get<1>(w)==0xc110)
+        assert(!(std::get<2>(w)&(1u<<11)));
+    for(unsigned id:{0u,0xffffffffu,0x33320000u,0x12340000u}){
+        Usb unknown;unknown.regs[{nabu::UsbBlock::Core,0xc120}]=id;
+        nabu::Usb2Core<Usb> cx(unknown);assert(!cx.selectUtmiHost());
+        assert(std::string(cx.lastPhase())=="controller-id"&&cx.failedOffset()==0xc120);
+        for(auto w:unknown.writes)assert(std::get<0>(w)!=nabu::UsbBlock::Core);
+    }
+    for(unsigned rev:{0u,0xffffffffu}){
+        Usb invalid;invalid.regs[{nabu::UsbBlock::Core,0xc120}]=0x33310000;
+        invalid.regs[{nabu::UsbBlock::Core,0xc1a0}]=rev;
+        nabu::Usb2Core<Usb> ci(invalid);assert(!ci.selectUtmiHost()&&ci.failedOffset()==0xc1a0);
+    }
+    Usb notReady;notReady.regs[{nabu::UsbBlock::Core,notReady.cap+4}]=1|(1u<<11);
+    nabu::Usb2Core<Usb> cnr(notReady);assert(!cnr.resetXhci());
+    assert(std::string(cnr.lastPhase())=="XHCI-ready"&&cnr.failedOffset()==notReady.cap+4);
+    assert(notReady.elapsedUs<=1000000);
     Pmic p;nabu::UsbVbus<Pmic> vbus(p);assert(vbus.initializeRole()==nabu::InputError::Ok);p.writes=0;assert(vbus.enable()==nabu::InputError::Busy&&p.writes==0);
     p.cc=1;assert(vbus.enable()==nabu::InputError::Busy&&p.writes==0); // attached sink -> no backfeed
     assert(!nabu::UsbVbus<Pmic>::wantSource(0x41,0x10,false));
