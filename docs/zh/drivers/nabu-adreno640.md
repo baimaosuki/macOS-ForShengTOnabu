@@ -25,6 +25,10 @@ Clang 显式设置 `-mcpu=generic -march=armv8.2-a+crypto`。Darwin 的默认 Ap
 会让返回地址诊断产生 XPACI 寄存器指令；generic 改为无 PAuth CPU 安全忽略的 HINT #7。
 最终代码检查同时拒绝 XPACI/XPACD 与鉴权分支；CI 增加真实编译器探针。
 
+用户态 CI 44614135059（19f8c3b）已通过 SDK 26.5 编译、4 KiB 签名与严格签名检查。
+最终扫描 6,873,990 条代码指令，未发现不支持的 PAuth。独立 addon 没有发布标记，
+未安装、未并入 ESP；Vulkan 前端运行测试、内核协议适配及真机执行仍待完成。
+
 用户态 CI 同时缓存 Cargo 目标文件和完整 Rust bridge 静态库。成品复用绑定
 bridge/translator 输入、普通指针 ABI、CPU 特性、LTO 参数及编译器版本，之后仍由
 上游构建器核对源码身份与静态库哈希。缓存缺失、损坏或不完整时回到 Cargo。

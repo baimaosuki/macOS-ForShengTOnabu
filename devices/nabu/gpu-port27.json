@@ -21,10 +21,27 @@
         "NativeAdrenoMetal plugin"
       ],
       "local_final_pac_instruction_scan": 0,
-      "signed": false,
+      "signed": true,
       "loaded_on_macos": false,
       "clang_cpu": "generic",
-      "unsupported_pauth_register_and_branch_scan": 0
+      "unsupported_pauth_register_and_branch_scan": 0,
+      "codesign_strict": true,
+      "userspace_ci": {
+        "run": 44614135059,
+        "commit": "19f8c3bbcc3f970e50748ab05f060b58c50567cf",
+        "url": "https://github.com/baimaosuki/macOS-ForShengTOnabu/actions/runs/44614135059",
+        "result": "success",
+        "sdk": "26.5",
+        "text_instructions_scanned": 6873990,
+        "unsupported_pauth": 0,
+        "frontend_vulkan_runtime_tests": false
+      },
+      "addon": {
+        "sha256": "a40c710e6344bf4c752f1581e6e1a43f0942e93b9f5b55f35322e1e8b2a585c6",
+        "installed": false,
+        "esp_modified": false,
+        "kernel_wire_compatible": false
+      }
     },
     "metal_abi": {
       "kernel_wire_version": 1,

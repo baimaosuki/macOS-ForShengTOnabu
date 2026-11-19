@@ -55,6 +55,11 @@ A640 core is v1; their adapter, BO no-task/pageable migration, macOS accelerator
 base qualification and GPU scanout still require implementation and evidence.
 No plugin is enabled by this checkpoint; see gpu-port27.json.
 
+Userspace CI 44614135059 at 19f8c3b passed compilation, 4 KiB signing and strict
+signature verification with SDK 26.5. Its final text scan covered 6,873,990
+instructions without unsupported PAuth. The separate addon is not installed or
+boot-enabled; frontend Vulkan runtime and board execution remain untested.
+
 Userspace CI caches the complete Rust bridge in addition to Cargo objects.
 Reuse binds the bridge and translator inputs, ABI, CPU features, LTO settings
 and compiler versions; the upstream builder also verifies its source identity
