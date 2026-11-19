@@ -12,3 +12,15 @@ def test_input_algorithms(tmp_path,source):
                     '-fsanitize=address,undefined','-fno-sanitize-recover=all',
                     '-I',str(DEVICE/'package'),str(DEVICE/'tests'/source),'-o',str(binary)],check=True)
     subprocess.run([str(binary)],check=True)
+
+
+def test_xhci_dispatch_is_native_inherited():
+    import importlib.util
+    import json
+    script=DEVICE/'scripts/build-nabu-usb27.py'
+    spec=importlib.util.spec_from_file_location('usb_header',script)
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+    abi=json.loads((script.parent/'usb-xhci-26C5035r.json').read_text())
+    # This target was resolved in the original 26C5035r com.apple.kernel symbols.
+    assert any(s['target']=='0xfffffe000c2edb3c' for s in abi['slots'])
+    assert 'Dispatch(IORPC)' not in module.header(abi)

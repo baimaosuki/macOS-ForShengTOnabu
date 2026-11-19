@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 
 def header(abi):
+    # Original XHCI inherits IOService::Dispatch (native kernel), not a kext override.
+    # Redeclaring it would bind to the discarded original kernel address.
     text='''// Generated from original 26C5035r class, plain arm64 ABI.
 #pragma once
 #include <IOKit/IOService.h>
@@ -11,7 +13,6 @@ class AppleUSBXHCI : public IOService {
  OSDeclareDefaultStructors(AppleUSBXHCI)
  unsigned char originalPrivate[0xf88-sizeof(IOService)];
 public:
- IOReturn Dispatch(IORPC) override;
  void free() override;
  bool init(OSDictionary *properties=nullptr) override;
  IOReturn setProperties(OSObject *) override;

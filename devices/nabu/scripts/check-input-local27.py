@@ -52,7 +52,9 @@ def main():
         for i,entry in enumerate(f['slots']):
             if fixups[int(f['vtable'],16)+16+8*i][0]!=int(entry['target'],16):
                 raise ValueError(f'Original slot mismatch {i}')
-    del kc,original,fixups
+    old_kernel=Image(kc,original.entries['com.apple.kernel'][1])
+    replaced_text=[(v['va']+int(fixtures[0]['collection_slide'],16),v['va']+v['size']+int(fixtures[0]['collection_slide'],16)) for v in old_kernel.segments if v['name']=='__TEXT_EXEC']
+    del old_kernel,kc,original,fixups
     headers=a.sdkroot/'System/Library/Frameworks/Kernel.framework/Headers'
     common=[a.clangxx,'-target','arm64-apple-macos14','-isysroot',str(a.sdkroot),'-std=gnu++17',
         '-fno-exceptions','-fno-rtti','-fno-common','-fno-c++-static-destructors','-fapple-kext','-ffreestanding','-mgeneral-regs-only',
@@ -68,6 +70,9 @@ def main():
         commands.append(command);return subprocess.run(command,check=True,**kw)
     def compile_cpp(src,dst,extra=()):run([*common,*extra,'-c',src,'-o',dst])
     objects=module.build(a.tree,out,compile_cpp,run,Path('/usr/bin'),'arm64-apple-macos14',str(a.sdkroot),macho)
+    bindings=json.loads((out/'input/build-report.json').read_text())['bindings']
+    for name,value in bindings.items():
+        if any(lo<=int(value,16)<hi for lo,hi in replaced_text):raise ValueError(f'Original-kernel address must use native inheritance: {name}')
     archive=out/'libNabuInput.local.a';run([a.ar,'rcs',archive,*objects])
     native_raw=a.native_kernel.read_bytes()
     native={n:v for v,names in Image(native_raw).symbols().items() for n in names}
