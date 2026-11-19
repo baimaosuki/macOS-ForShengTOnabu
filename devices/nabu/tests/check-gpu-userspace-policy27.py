@@ -9,6 +9,7 @@ record=json.loads((a.stage/'nabu-runtime-inputs.json').read_text())
 assert record['abi']=='zeta-ordinary-v1' and record['clang_cpu']=='generic'
 assert record['clang_arch']=='armv8.2-a+crypto' and not record['rust_pac_boundary']
 assert record['rust_lto']=='thin' and record['rust_codegen_units']==8
+assert '-Wl,-fixup_chains' in (a.stage/'scripts/build-turnip-darwin.py').read_text()
 for name in ['scripts/build-turnip-darwin.py','scripts/build-adreno-metal-plugin.py',
              'drivers/AdrenoMetal/tools/build-shader-cache-app.py']:
     assert '-mcpu=generic' in (a.stage/name).read_text(),name

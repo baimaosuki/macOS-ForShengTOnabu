@@ -56,6 +56,7 @@ def main():
     for script in [plugin,'scripts/build-turnip-darwin.py']:
         change(script,"'macos27': 'arm64e-apple-macos27.0'","'macos27': 'arm64-apple-macos27.0'")
     change('scripts/build-turnip-darwin.py',"    cross = ROOT / ('build/mesa-tu-%s.cross' % args.target)", "    if args.target == 'macos27':\n        flags += ['-mcpu=generic', '-march=armv8.2-a+crypto', '-mbranch-protection=none']\n    cross = ROOT / ('build/mesa-tu-%s.cross' % args.target)")
+    change('scripts/build-turnip-darwin.py',"(k, flags) for k in ('c_args', 'cpp_args', 'objc_args', 'c_link_args', 'cpp_link_args',", "(k, flags + (['-Wl,-fixup_chains'] if args.target == 'macos27' and k.endswith('_link_args') else [])) for k in ('c_args', 'cpp_args', 'objc_args', 'c_link_args', 'cpp_link_args',")
     change(plugin,"subprocess.check_output(['git', '-C', str(ROOT / 'drivers/AdrenoMetal'), 'rev-parse', 'HEAD'], text=True).strip()",revision)
     change(plugin,"ROOT / 'drivers/AdrenoMetal/tools/build-shader-cache-app.py', OUT]", "ROOT / 'drivers/AdrenoMetal/tools/build-shader-cache-app.py', OUT, '--arch', 'arm64']")
     cache='drivers/AdrenoMetal/tools/build-shader-cache-app.py'
