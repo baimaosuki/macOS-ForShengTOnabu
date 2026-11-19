@@ -24,6 +24,13 @@ def main():
     options = parser.parse_args()
     subprocess.run([sys.executable, str(ROOT / 'devices/nabu/tests/test_zeta_macos_sign27.py')], check=True)
     subprocess.run([sys.executable, str(ROOT / 'devices/nabu/tests/test_cpu_trace27.py')], check=True)
+    import tempfile
+    with tempfile.TemporaryDirectory(prefix='nabu-touch-host-') as temporary:
+        pointer_test = Path(temporary) / 'pointer-test'
+        subprocess.run(['c++', '-std=c++17', '-Wall', '-Wextra', '-Werror',
+                        str(ROOT / 'devices/nabu/tests/test_touch_pointer27.cpp'),
+                        '-o', str(pointer_test)], check=True)
+        subprocess.run([str(pointer_test)], check=True)
     subprocess.run([sys.executable, str(ROOT / 'devices/nabu/tests/test_power_hold27.py')], check=True)
     args = cli.parser().parse_args([
         "build", "kernel", "-D", str(ROOT / "devices/nabu"), "--os", "macos-27"

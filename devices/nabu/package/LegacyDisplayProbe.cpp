@@ -524,6 +524,7 @@ void native_legacy_display_late_probe(void);
 extern void native_hid_input_probe(void);
 extern void native_keystore_probe(void);
 extern void native_touch_probe(void);
+extern "C" bool nabu_touch_publish(IOService *);
 extern void sheng_cpufreq_probe(void);
 extern void sheng_thermal_probe(void) __attribute__((weak_import));       // ThermalProbe.cpp, thermal=1
 extern void sheng_thermal_level_probe(void) __attribute__((weak_import)); // ThermalLevel.cpp, thermal-level=1
@@ -544,6 +545,7 @@ extern void sheng_backlight_probe(void);
 extern "C" void sheng_keyboard_probe(void) __attribute__((weak_import));
 extern "C" void sheng_dpu_probe(void);
 void native_legacy_display_late_probe(void) {
+    nabu_touch_publish(IOService::getResourceService());
     if (sheng_software_aes_probe) sheng_software_aes_probe();
     native_keystore_probe();
     if (sheng_ethernet_probe) sheng_ethernet_probe();

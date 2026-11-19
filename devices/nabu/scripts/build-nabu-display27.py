@@ -567,6 +567,13 @@ if MACOS:
     input_objects += [aes_late, AES_OUT / 'aes-bindings.o', AES_OUT / 'aes-addresses.o', AES_OUT / 'SoftwareAesProbe.o']
     print(f'AES: {len(aes_used)} original bindings, {aes_vt} matches the original {len(aes_slots)} diversities')
 
+# Board-owned NT36523 transport; bind this OS's native HID base, never 21H16 offsets.
+if MACOS:
+    import importlib.util
+    touch_spec=importlib.util.spec_from_file_location('nabu_touch27',Path(__file__).with_name('build-nabu-touch27.py'))
+    touch=importlib.util.module_from_spec(touch_spec);touch_spec.loader.exec_module(touch)
+    input_objects += touch.build(ROOT,OUT,compile_cpp,run,llvm,TRIPLE,sdk,macho)
+
 archive = OUT / 'libNativeLegacyDisplay.late.a'
 archive.unlink(missing_ok=True)
 run(['xcrun', 'ar', 'rcs', archive, late, OUT / 'original-bindings.o', OUT / 'original-addresses.o', OUT / 'LegacyDisplayProbe.o', OUT / 'LegacyDisplaySupport27.o', gop_late,
@@ -575,6 +582,7 @@ sources = [ROOT / 'drivers/GopFramebuffer/NativeLegacyDisplay.cpp', ROOT / 'driv
            ROOT / 'drivers/GopFramebuffer/NativeGOPPresenter.cpp', ROOT / 'drivers/GopFramebuffer/NativeGOPWire.h', ROOT / 'drivers/GopFramebuffer/NativeHalfCodes.h',
            source, ABI_PATH, keystore_source, ROOT / 'drivers/AppleKeyStoreState/NativeKeyStoreEvents.cpp',
            KITS / 'ShengEthernet.cpp', KITS / 'SoftwareAesProbe.cpp', ROOT / 'drivers/SoftwareAES/NativeAES.cpp', Path(__file__)]
+sources += [KITS/'NabuTouch.cpp',KITS/'NabuTouchPointer.h',Path(__file__).with_name('build-nabu-touch27.py'),Path(__file__).with_name('hid-device-26C5035r.json')]
 sources += sorted((ROOT / 'drivers/GopFramebuffer').glob('nabu_*.h'))
 sources += sorted((ROOT / 'drivers/GopFramebuffer').glob('nabu_*.inc'))
 sources += [ROOT / 'drivers/GopFramebuffer/gop_layers.h']
