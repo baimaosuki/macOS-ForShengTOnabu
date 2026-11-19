@@ -55,6 +55,13 @@ A640 core is v1; their adapter, BO no-task/pageable migration, macOS accelerator
 base qualification and GPU scanout still require implementation and evidence.
 No plugin is enabled by this checkpoint; see gpu-port27.json.
 
+The userspace CI retains both Cargo objects and the complete Rust bridge
+archive. Complete-archive reuse requires the same bridge/translator inputs,
+ordinary-pointer ABI, CPU features, LTO settings and compiler versions, followed
+by the upstream source-identity/hash check. Missing, partial or corrupt caches
+fall back to Cargo. The host cache check exercises reuse and incompatible-input
+rejection; this cache changes build time, not the hardware qualification state.
+
 The optional GPU recorder allocates its 4096-sample/job arrays on the first
 profiling request, not in static BSS. This keeps the native DATA segment below
 the first retained 26C5035r kext (Libm at DATA + 0x284000). Allocation failures

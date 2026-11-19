@@ -55,6 +55,12 @@ A640 core is v1; their adapter, BO no-task/pageable migration, macOS accelerator
 base qualification and GPU scanout still require implementation and evidence.
 No plugin is enabled by this checkpoint; see gpu-port27.json.
 
+Userspace CI caches the complete Rust bridge in addition to Cargo objects.
+Reuse binds the bridge and translator inputs, ABI, CPU features, LTO settings
+and compiler versions; the upstream builder also verifies its source identity
+and archive hash. Incomplete or corrupt caches use Cargo. The host cache test
+does not replace the frontend Vulkan or board tests.
+
 The optional GPU profiler lazily allocates its unchanged 4096-record sample
 and job arrays. Removing their 1,163,264 bytes of static BSS keeps the native
 DATA placement within the 26C5035r retained-kext boundary. Host ASan/UBSan tests

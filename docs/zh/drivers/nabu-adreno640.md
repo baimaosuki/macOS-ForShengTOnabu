@@ -24,3 +24,8 @@ Mesa c823a83 的 24 项 Darwin 补丁已移植并可完整反向还原原始输�
 Clang 显式设置 `-mcpu=generic -march=armv8.2-a+crypto`。Darwin 的默认 Apple CPU
 会让返回地址诊断产生 XPACI 寄存器指令；generic 改为无 PAuth CPU 安全忽略的 HINT #7。
 最终代码检查同时拒绝 XPACI/XPACD 与鉴权分支；CI 增加真实编译器探针。
+
+用户态 CI 同时缓存 Cargo 目标文件和完整 Rust bridge 静态库。成品复用绑定
+bridge/translator 输入、普通指针 ABI、CPU 特性、LTO 参数及编译器版本，之后仍由
+上游构建器核对源码身份与静态库哈希。缓存缺失、损坏或不完整时回到 Cargo。
+Host 测试覆盖精确复用和不兼容输入拒绝，不代表 Vulkan 前端或真机已经验证。

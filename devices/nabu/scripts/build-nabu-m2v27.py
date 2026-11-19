@@ -4,12 +4,55 @@
 The output is an integration artifact. It is not automatically installed or
 added to the ESP: the A640 kernel wire adapter and hardware proof remain gates.
 """
-import argparse,hashlib,json,os,platform,struct,subprocess,sys
+import argparse,hashlib,json,os,platform,shutil,struct,subprocess,sys,tempfile
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parents[3]
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 import importlib.util
+
+BRIDGE_ARCHIVE='libadreno_metal_bridge.a'
+
+def bridge_cache_policy(tree,tools):
+    """Bind the reusable archive to the actual code, ABI and compiler inputs.
+
+    The upstream builder separately checks its complete identity and archive
+    hash before copying NMB_PREBUILT_BRIDGE. This key also binds compiler flags
+    and tool versions that its upstream identity does not yet include.
+    """
+    policy=json.loads((tree/'nabu-runtime-inputs.json').read_text())
+    files=[tree/'scripts/build-adreno-metal-bridge.py',
+           tree/'scripts/data/gpu-metal-vulkan-inputs.json']
+    for directory in ('drivers/AdrenoMetal/bridge','drivers/AdrenoMetal/shaders'):
+        files+=sorted(p for p in (tree/directory).rglob('*') if p.is_file())
+    return dict(version=1,sdk='26.5',tools=tools,
+        target={key:policy[key] for key in ('adrenometal_commit','abi','rust_target',
+            'rust_target_cpu','rust_target_features','rust_pac_boundary','rust_lto','rust_codegen_units')},
+        sources={str(p.relative_to(tree)):hashlib.sha256(p.read_bytes()).hexdigest() for p in files})
+
+def cached_bridge(cache,policy):
+    try:
+        if json.loads((cache/'policy.json').read_text())!=policy:return None
+        record=cache/(BRIDGE_ARCHIVE+'.json')
+        expected=json.loads(record.read_text())['sha256']
+        with (cache/BRIDGE_ARCHIVE).open('rb') as stream:
+            if hashlib.file_digest(stream,'sha256').hexdigest()!=expected:return None
+        return record
+    except (OSError,ValueError,KeyError,TypeError):
+        return None
+
+def save_bridge(cache,policy,source):
+    cache.mkdir(parents=True,exist_ok=True)
+    # Publish policy last, so a partial cache cannot be considered complete.
+    for name in (BRIDGE_ARCHIVE,BRIDGE_ARCHIVE+'.json'):
+        with tempfile.NamedTemporaryFile(dir=cache,delete=False) as stream:
+            temporary=Path(stream.name)
+        try:
+            shutil.copyfile(source/name,temporary);os.replace(temporary,cache/name)
+        finally:temporary.unlink(missing_ok=True)
+    temporary=cache/'policy.json.tmp'
+    temporary.write_text(json.dumps(policy,sort_keys=True,indent=2)+'\n')
+    os.replace(temporary,cache/'policy.json')
 
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--output',type=Path,required=True)
@@ -63,6 +106,8 @@ def main():
         run(sys.executable,ROOT/'devices/nabu/tests/check-gpu-userspace-policy27.py',
             '--stage',tree,'--clang',read('xcrun','--find','clang'),
             '--output',out/'cpu-policy-verification.json')
+        run(sys.executable,ROOT/'devices/nabu/tests/check-gpu-bridge-cache27.py',
+            '--stage',tree,'--output',out/'bridge-cache-verification.json')
         patch=tree/'patches/nabu/mesa-c823-darwin.patch'
         run('git','-C',mesa,'apply','--check',patch);run('git','-C',mesa,'apply',patch)
         (tree/'.cache/mesa-work').symlink_to(mesa,target_is_directory=True)
@@ -89,7 +134,17 @@ def main():
         run(sys.executable,tree/'scripts/build-turnip-darwin.py','--target','macos27')
     if a.phase=='turnip':return
     if a.phase in ('all','bridge'):
-        run(sys.executable,tree/'scripts/build-adreno-metal-bridge.py','--target','macos27','--source',translator)
+        cache=ROOT/'.ci-cache/nabu27-m2v-prebuilt'
+        policy=bridge_cache_policy(tree,dict(rustc=read('rustc','+1.98.0','--version','--verbose'),
+            clang=read('clang','--version'),apple_clang=read('xcrun','clang','--version')))
+        prebuilt=cached_bridge(cache,policy)
+        env=dict(os.environ)
+        env.pop('NMB_PREBUILT_BRIDGE',None)
+        if prebuilt:
+            print('GPU BUILD CACHE: reusing source/ABI/toolchain-matched complete Rust archive',flush=True)
+            env['NMB_PREBUILT_BRIDGE']=str(prebuilt)
+        run(sys.executable,tree/'scripts/build-adreno-metal-bridge.py','--target','macos27','--source',translator,env=env)
+        save_bridge(cache,policy,tree/'build/adreno-metal-bridge/macos27')
     if a.phase=='bridge':return
     if a.phase in ('all','plugin'):
         run(sys.executable,tree/'scripts/build-adreno-metal-plugin.py','--target','macos27','--no-replay','--reuse-bridge','--translator-source',translator)
