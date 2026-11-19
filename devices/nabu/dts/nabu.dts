@@ -12,6 +12,7 @@
         ranges;
         // Firmware owns the initialized 1600x2560 BGRA scanout.
         framebuffer@9c000000 { reg = <0 0x9c000000 0 0x1000000>; no-map; };
+        zap@98f15000 { reg = <0 0x98f15000 0 0x2000>; no-map; };
     };
 };
 
@@ -67,5 +68,37 @@
             nabu,power-key = <0 0x0800 0x10 1>;
             nabu,vbus-regs = <2 0x1140 0x1153 0x150b 0x1310>;
         };
+    };
+};
+
+// A640 resources use absolute root ranges; never inherit arm-io translation.
+/ {
+    nabu_adreno@2c00000 {
+        unixnu,adt-root = "nabu-adreno";
+        compatible = "xiaomi,nabu-adreno640";
+        nabu,private-gpu-firmware;
+        reg = <0 0x2c00000 0 0x40000>, <0 0x2c6a000 0 0x30000>, <0 0x2c8d000 0 0x2000>, <0 0x2ca0000 0 0x10000>, <0 0x2cc2000 0 0x20>, <0 0x2cc5000 0 0x1000>, <0 0x2cc9000 0 0x1000>, <0 0x2cc2200 0 0x8>, <0 0x2cc2208 0 0x8>, <0 0x2c90000 0 0x9000>, <0 0x100000 0 0x1f0000>, <0 0xb290000 0 0x10000>, <0 0xb490000 0 0x10000>, <0 0x85f20000 0 0x20000>, <0 0x18220000 0 0x10000>, <0 0xc300000 0 0x400>, <0 0x17c00000 0 0x1000>, <0 0x98f15000 0 0x2000>;
+        reg-names = "gpu", "gmu", "rscc", "smmu", "smmu-tcu", "smmu-tbu-0", "smmu-tbu-1", "smmu-tbu-status-0", "smmu-tbu-status-1", "gpucc", "gcc", "pdc", "pdc-seq", "command-db", "rpmh", "aop", "aop-doorbell", "zap";
+        nabu,chip-id = <0x6040001>;
+        nabu,gmem-bytes = <0x100000>;
+        nabu,frequency-hz = <0xf518240>;
+        nabu,highest-bank-bit = <0xf>;
+        nabu,min-access-length = <0x20>;
+        nabu,ubwc-mode = <0x3>;
+        nabu,gpu-bank = <0x0>;
+        nabu,gpu-asid = <0x1>;
+        nabu,gpu-slot = <0x0>;
+        nabu,gpu-sid = <0x0>;
+        nabu,gpu-sid-mask = <0x401>;
+        nabu,gmu-bank = <0x1>;
+        nabu,gmu-asid = <0x2>;
+        nabu,gmu-slot = <0x4>;
+        nabu,gmu-sid = <0x5>;
+        nabu,gmu-sid-mask = <0x400>;
+        nabu,aop-doorbell-offset = <0xc>;
+        nabu,aop-doorbell-value = <0x1>;
+        nabu,zap-pas-id = <0xd>;
+        interrupt-names = "gpu", "smmu-global", "smmu-context-0", "smmu-context-1", "smmu-context-2", "smmu-context-3", "smmu-context-4", "smmu-context-5", "smmu-context-6", "smmu-context-7";
+        nabu,interrupts = <332 706 713 714 715 716 717 718 719 720>;
     };
 };

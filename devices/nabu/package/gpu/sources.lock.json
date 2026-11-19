@@ -1,0 +1,32 @@
+{
+  "target": "26C5035r",
+  "source": [
+    {
+      "name": "UniXNU",
+      "url": "https://github.com/UniXNU/UniXNU.git",
+      "commit": "8542980d02b4d2cc5c32ee3542de1760b2562aac",
+      "date": "2026-11-19T06:56:11+00:00"
+    },
+    {
+      "name": "UniXNU-sheng",
+      "url": "https://github.com/UniXNU/UniXNU-sheng.git",
+      "commit": "c8f92b208068eeaa4cd2b0f592671f04ee70076e",
+      "date": "2026-11-18T16:21:35+08:00"
+    },
+    {
+      "name": "AdrenoMetal",
+      "url": "https://github.com/UniXNU/AdrenoMetal.git",
+      "commit": "cc0a4e8e57d20f4a4698753c2530875f2b10c0ca",
+      "date": "2026-11-18T16:24:51+08:00"
+    }
+  ],
+  "a640_donor": {
+    "repository": "https://github.com/zzweiqing/UniXNU-nabu",
+    "commit": "54b4f98457f8e9e232cc0a077c20d08d0b2f0ac9"
+  },
+  "a640_base": {
+    "repository": "https://github.com/RigoLigoRLC/unixnu-adreno6xx",
+    "commit": "83a0453e981567a30cecd6486bdb8b3b33d64683"
+  },
+  "hardware_tested": false
+}

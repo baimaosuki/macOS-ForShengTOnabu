@@ -38,6 +38,8 @@ def main():
                         str(ROOT / 'devices/nabu/tests/test_input_hardware27.cpp'), '-o', str(test)], check=True)
         subprocess.run([str(test)], check=True)
     subprocess.run([sys.executable, str(ROOT / 'devices/nabu/tests/test_power_hold27.py')], check=True)
+    subprocess.run([sys.executable, str(ROOT / 'devices/nabu/tests/check-gpu-smmu27.py'),
+                    '--output', str(ROOT / 'out/nabu27-gpu-smmu-host')], check=True)
     args = cli.parser().parse_args([
         "build", "kernel", "-D", str(ROOT / "devices/nabu"), "--os", "macos-27"
     ])
@@ -133,6 +135,8 @@ def main():
                       native_sha256=hashlib.sha256(native.read_bytes()).hexdigest(),
                       installable=False)
         (ctx.work / 'native-verification.json').write_text(json.dumps(report, indent=2) + '\n')
+        subprocess.run([sys.executable, str(ROOT / 'devices/nabu/tests/check-a640-ring27.py'),
+                        '--kernel', str(native), '--output', str(ctx.work / 'a640-ring-verification.json')], check=True)
 
 
 if __name__ == "__main__":

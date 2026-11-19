@@ -305,7 +305,7 @@ def compile_cpp(src, dst, extra=()):
     run(cmd, cwd=r['directory'])
 
 
-def compile_c(src, dst, recipe='osfmk/DEVELOPMENT/startup.o.json'):
+def compile_c(src, dst, recipe='osfmk/DEVELOPMENT/startup.o.json', extra=()):
     """A C board core with the flags of one kernel C file (osfmk for the cores, bsd for the VFS readers)."""
     rc = json.loads((ROOT / 'build/xnu/ios-obj/DEVELOPMENT_ARM64_BCM2837' / recipe).read_text().strip().rstrip(','))
     cmd, args, i = [], rc['arguments'], 0
@@ -322,7 +322,7 @@ def compile_c(src, dst, recipe='osfmk/DEVELOPMENT/startup.o.json'):
         elif not value.startswith('-W'):
             cmd.append(value)
         i += 1
-    cmd += ['-Wall', '-Wextra', '-Werror', '-mgeneral-regs-only', '-I', str(ROOT / '.cache/xnu-work/osfmk'), '-I', str(ROOT / 'kits/sheng')]
+    cmd += ['-Wall', '-Wextra', '-Werror', '-mgeneral-regs-only', '-I', str(ROOT / '.cache/xnu-work/osfmk'), '-I', str(ROOT / 'kits/sheng'), *extra]
     run(cmd, cwd=rc['directory'])
 
 
@@ -574,6 +574,13 @@ if MACOS:
     touch=importlib.util.module_from_spec(touch_spec);touch_spec.loader.exec_module(touch)
     input_objects += touch.build(ROOT,OUT,compile_cpp,run,llvm,TRIPLE,sdk,macho)
 
+# A640 hardware backend is linked into this kernel but stays off unless explicitly
+# enabled with nabu-gpu=1. It does not publish the old accelerator wire ABI.
+if MACOS:
+    gpu_spec=importlib.util.spec_from_file_location('nabu_gpu27',Path(__file__).with_name('build-nabu-gpu27.py'))
+    gpu=importlib.util.module_from_spec(gpu_spec);gpu_spec.loader.exec_module(gpu)
+    input_objects += gpu.build(ROOT,OUT,compile_cpp,compile_c,run)
+
 archive = OUT / 'libNativeLegacyDisplay.late.a'
 archive.unlink(missing_ok=True)
 run(['xcrun', 'ar', 'rcs', archive, late, OUT / 'original-bindings.o', OUT / 'original-addresses.o', OUT / 'LegacyDisplayProbe.o', OUT / 'LegacyDisplaySupport27.o', gop_late,
@@ -596,3 +603,5 @@ def source_name(p):
     inherited_native_entries=native, original_bindings='fixed-collection-addresses', original_instructions_modified=False,
     architecture='arm64', os_build='26C5035r', device_tested=False),indent=2)+'\n')
 print('NABU27 CPU display, original Ethernet/keystore/AES bindings compiled')
+
+# A640 source digests live in build/native-legacy-display/a640/build-report.json.

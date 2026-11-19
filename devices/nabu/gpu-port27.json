@@ -1,0 +1,30 @@
+{
+  "target": "macos-27.3-26C5035r",
+  "gpu": "Adreno640v2",
+  "chip_id": "0x06040001",
+  "stages": {
+    "kmd": {
+      "source": true,
+      "host": "local-kmd: 31 GPU objects + logger accessor, linked without missing symbols",
+      "device": false
+    },
+    "m2v": {
+      "source_pins": "package/gpu/sources.lock.json",
+      "translator_patches": "0063 + 0064 apply",
+      "mesa_pin": "c823a83e8f373a5c36c2b9ed1d7dc98a4f3360ee",
+      "mesa_patch_port_required": true,
+      "device": false
+    },
+    "metal_abi": {
+      "kernel_wire_version": 1,
+      "mainline_wire_version": 2,
+      "publication_enabled": false
+    },
+    "desktop": {
+      "gpu_acceleration": false,
+      "current_presenter": "NABU27-CPU"
+    }
+  },
+  "firmware": "private local input; never committed",
+  "data_reset": false
+}

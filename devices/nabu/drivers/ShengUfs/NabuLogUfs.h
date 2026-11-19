@@ -102,12 +102,19 @@ static bool nabuEspToken (uint8_t token[16]) {
   }
   return found == 1;
 }
+// Publish only completed journal positions for hardware phase barriers.
+static uint64_t nabu_gpu_log_committed_end;
+extern "C" uint64_t nabu_log_committed_position(void) {
+  return __atomic_load_n(&nabu_gpu_log_committed_end,__ATOMIC_ACQUIRE);
+}
 static int nabuEspCommit (bool panic) {
   nb_esp_io_context ctx={panic,0};
   clock_interval_to_deadline (panic ? 3000 : 5000,kMillisecondScale,&ctx.deadline);
   int result=nb_journal_commit (&nabu_esp_journal,&ctx);
   nabu_log_writer_rounds=nabu_esp_journal.commits;
   nabu_log_writer_failures=nabu_esp_journal.failures;
+  if (result==NB_COMMIT_OK || result==NB_COMMIT_UNCHANGED)
+    __atomic_store_n(&nabu_gpu_log_committed_end,nabu_esp_journal.committed_end,__ATOMIC_RELEASE);
   return result;
 }
 extern "C" void nabu_log_checkpoint (void) {
