@@ -67,7 +67,7 @@ struct Hardware {
         const uint32_t ufsCb=sm::context_offset(info.global_pages,1);
         const uint32_t ufsRegisters[]={0,0x10,0x20,0x24,0x28,0x2c,0x30,0x38,0x3c};
         uint32_t ufsBefore[9];for(unsigned i=0;i<9;++i)ufsBefore[i]=smmu.read(ufsCb+ufsRegisters[i]);
-        dmaTable=IOBufferMemoryDescriptor::withOptions(kIODirectionInOut|kIOMemoryPhysicallyContiguous,4096,4096);
+        dmaTable=IOBufferMemoryDescriptor::withOptions(IOOptionBits(kIODirectionInOut)|IOOptionBits(kIOMemoryPhysicallyContiguous),4096,4096);
         if(!dmaTable || dmaTable->prepare()!=kIOReturnSuccess)return false;
         auto *table=static_cast<uint64_t *>(dmaTable->getBytesNoCopy());
         uint64_t span=0,pa=dmaTable->getPhysicalSegment(0,&span,0);
