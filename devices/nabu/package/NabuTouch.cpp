@@ -7,7 +7,10 @@
 // The proprietary firmware and its partition table come from the private ADT
 // node /nabu-touch; nothing runs without the nabu-touch=1 boot argument.
 #include "OriginalHidDeviceABI.h"
+#include "NabuInputHardware.h"
 #include <IOKit/IOLib.h>
+#include <IOKit/IOCatalogue.h>
+#include <libkern/c++/OSNumber.h>
 #include <IOKit/IOBufferMemoryDescriptor.h>
 #include <IOKit/IOWorkLoop.h>
 #include <IOKit/IODeviceTreeSupport.h>
@@ -78,8 +81,8 @@ enum : uint32_t {
   S_IRQ_CLEAR = 0x648, TX_FIFO = 0x700, RX_FIFO = 0x780, TX_FIFO_STATUS = 0x800,
   RX_FIFO_STATUS = 0x804, RX_WM = 0x810, RX_RFR_WM = 0x814, GSI_EVENT_EN = 0xe18, SE_IRQ_EN = 0xe1c,
 };
-constexpr uint32_t kMErrors = 0x3e;          // OVERRUN, ILLEGAL_CMD, FAILURE, CANCEL, ABORT
-constexpr uint32_t kFifoWords = 16;
+constexpr uint32_t kMErrors = 0x3300003e;          // command + TX/RX FIFO faults
+uint32_t gFifoWords = 0;
 
 Mmio gSe;
 uint8_t *gScratch = nullptr;                 // full-duplex receive buffer
@@ -94,10 +97,10 @@ bool clocksUp()
   // Shared vote register: only add SE18 core (bit5), wrap2 m-ahb (bit2) and s-ahb (bit1).
   vote.w(0x14, vote.r(0x14) | (1u << 5) | (1u << 2) | (1u << 1));
   uint64_t end = deadlineUs(20000);
-  while (((gcc.r(0x004) | gcc.r(0x274)) & 0x80000000u) && mach_absolute_time() < end) { IODelay(10); }
-  uint32_t m = gcc.r(0x004), se = gcc.r(0x274);
+  while (((gcc.r(0x004) | gcc.r(0x008) | gcc.r(0x274)) & 0x80000000u) && mach_absolute_time() < end) { IODelay(10); }
+  uint32_t m = gcc.r(0x004), se = gcc.r(0x274), slave=gcc.r(0x008);
   TLOG("clk after vote=%#x m-ahb=%#x s-ahb=%#x se=%#x", vote.r(0x14), m, gcc.r(0x008), se);
-  if ((m | se) & 0x80000000u) { return false; }
+  if ((m | se | slave) & 0x80000000u) { return false; }
   // Pick an SE clock: DFS levels are preset by firmware and selected by GENI CLK_SEL.
   uint32_t level = 0;
   uint64_t hz = 0;
@@ -123,7 +126,7 @@ bool clocksUp()
     while ((gcc.r(kRcg) & 1) && mach_absolute_time() < end) { IODelay(1); }
     hz = 19200000ull;
   }
-  if (!hz) { hz = 128000000ull; }    // unknown: assume the fastest table entry, stay slow
+  if (!hz) return false; // Unknown DFS parents cannot safely set SPI timing.
   uint32_t div = static_cast<uint32_t>((hz + 9600000 - 1) / 9600000);
   if (div < 1) { div = 1; }
   if (div > 0xfff) { div = 0xfff; }
@@ -133,16 +136,19 @@ bool clocksUp()
   return true;
 }
 
-void pinsUp()
+bool pinsUp()
 {
   static const uint32_t ctl[4] = {0x088, 0x08c, 0x08c, 0x088};   // qup18 function, 6 mA, no pull
   Mmio spi = map(kTlmmSpiPa, 0x4000);
-  if (spi.base) {
+  if (!spi.base) return false;
+  {
     for (uint32_t i = 0; i < 4; i++) {
       TLOG("pin gpio%u ctl=%#x -> %#x", 23 + i, spi.r(i * 0x1000), ctl[i]);
       spi.w(i * 0x1000, ctl[i]);
+      if ((spi.r(i * 0x1000) & 0x3ff) != ctl[i]) return false;
     }
   }
+  return true;
 }
 
 bool seInit()
@@ -150,6 +156,9 @@ bool seInit()
   uint32_t fw = gSe.r(GENI_FW_REVISION), fifoOff = gSe.r(GENI_FIFO_DISABLE);
   TLOG("se fw=%#x proto=%u fifo-disabled=%u status=%#x m-irq=%#x", fw, (fw >> 8) & 0xff,
        fifoOff & 1, gSe.r(GENI_STATUS), gSe.r(M_IRQ_STATUS));
+  const uint32_t hw = gSe.r(0xe24);
+  gFifoWords=(hw>>16)&0x3f;
+  if(gFifoWords<4 || gFifoWords>63 || ((hw>>24)&0x3f)!=32) return false;
   if (((fw >> 8) & 0xff) != 1 || (fifoOff & 1)) { return false; }
   if (gSe.r(GENI_STATUS) & 1) {
     gSe.w(M_CMD_CTRL, 1u << 2);
@@ -158,6 +167,7 @@ bool seInit()
     IODelay(100);
   }
   gSe.w(GENI_CGC_CTRL, gSe.r(GENI_CGC_CTRL) | 0x7f);
+  gSe.w(0xe30, gSe.r(0xe30) | 0xf); // internal AHB and DMA clock gating
   gSe.w(GENI_OUTPUT_CTRL, 0x7f);
   gSe.w(GENI_FORCE_DEFAULT, 1);
   gSe.w(GSI_EVENT_EN, 0);
@@ -165,9 +175,9 @@ bool seInit()
   gSe.w(GENI_DMA_MODE, gSe.r(GENI_DMA_MODE) & ~1u);
   gSe.w(M_IRQ_CLEAR, 0xffffffffu);
   gSe.w(S_IRQ_CLEAR, 0xffffffffu);
-  gSe.w(M_IRQ_EN, gSe.r(M_IRQ_EN) | 0x4c00003fu);
+  gSe.w(M_IRQ_EN, gSe.r(M_IRQ_EN) | 0x7f00003fu);
   gSe.w(RX_WM, 0);
-  gSe.w(RX_RFR_WM, kFifoWords - 2);
+  gSe.w(RX_RFR_WM, gFifoWords - 2);
   gSe.w(TX_PACK0, 0x0007f8fe); gSe.w(TX_PACK1, 0x000ffefe);
   gSe.w(RX_PACK0, 0x0007f8fe); gSe.w(RX_PACK1, 0x000ffefe);
   gSe.w(GENI_BYTE_GRAN, 0);
@@ -183,6 +193,7 @@ bool seInit()
 // rx, when given, receives all hlen + plen bytes clocked in.
 bool spiXfer(const uint8_t *hdr, uint32_t hlen, const uint8_t *payload, uint32_t plen, uint8_t *rx)
 {
+  if(hlen>3 || plen>64*1024 || (!hdr&&hlen))return false;
   const uint32_t len = hlen + plen;
   uint64_t end = deadlineUs(5000);
   while ((gSe.r(GENI_STATUS) & 1) && mach_absolute_time() < end) { IODelay(1); }
@@ -194,7 +205,7 @@ bool spiXfer(const uint8_t *hdr, uint32_t hlen, const uint8_t *payload, uint32_t
   uint32_t tx = 0, got = 0;
   end = deadlineUs(50000 + static_cast<uint64_t>(len) * 4);
   for (;;) {
-    while (tx < len && (gSe.r(TX_FIFO_STATUS) & 0x0fffffffu) < kFifoWords) {
+    while (tx < len && (gSe.r(TX_FIFO_STATUS) & 0x0fffffffu) < gFifoWords) {
       uint32_t word = 0;
       for (uint32_t b = 0; b < 4 && tx < len; b++, tx++) {
         uint8_t v = tx < hlen ? hdr[tx] : (payload ? payload[tx - hlen] : 0);
@@ -204,6 +215,7 @@ bool spiXfer(const uint8_t *hdr, uint32_t hlen, const uint8_t *payload, uint32_t
     }
     if (rx) {
       uint32_t words = gSe.r(RX_FIFO_STATUS) & 0x1ffffffu;
+      if(words>gFifoWords)break; // bad/all-ones hardware must not spin indefinitely
       while (words--) {
         uint32_t word = gSe.r(RX_FIFO);
         for (uint32_t b = 0; b < 4 && got < len; b++, got++) { rx[got] = static_cast<uint8_t>(word >> (8 * b)); }
@@ -217,7 +229,9 @@ bool spiXfer(const uint8_t *hdr, uint32_t hlen, const uint8_t *payload, uint32_t
     }
     if (mach_absolute_time() > end) { break; }
   }
-  TLOG("spi fail len=%u tx=%u rx=%u irq=%#x status=%#x", len, tx, got, gSe.r(M_IRQ_STATUS), gSe.r(GENI_STATUS));
+  static unsigned failures = 0;
+  if (++failures <= 3 || (failures % 64) == 0)
+    TLOG("spi fail count=%u len=%u tx=%u rx=%u irq=%#x status=%#x", failures, len, tx, got, gSe.r(M_IRQ_STATUS), gSe.r(GENI_STATUS));
   gSe.w(M_CMD_CTRL, 1u << 2);
   IODelay(100);
   if (gSe.r(GENI_STATUS) & 1) { gSe.w(M_CMD_CTRL, 1u << 1); IODelay(100); }
@@ -257,19 +271,19 @@ bool ntReadAddr(uint32_t addr, uint8_t *value)
   return ntPage(addr) && ntRead(addr, value, 1);
 }
 
-void ntBootloaderReset()
+bool ntBootloaderReset()
 {
-  ntWriteAddr(0x3f0fe, 0x69);
+  if (!ntWriteAddr(0x3f0fe, 0x69)) return false;
   IOSleep(5);
-  ntWriteAddr(0x3f310, 0x00);
+  return ntWriteAddr(0x3f310, 0x00);
 }
 
 bool ntChipId()
 {
-  ntWriteAddr(0x7fff80, 0x5a);
+  if (!ntWriteAddr(0x7fff80, 0x5a)) return false;
   IOSleep(11);
   for (int attempt = 0; attempt < 5; attempt++) {
-    ntBootloaderReset();
+    if (!ntBootloaderReset()) continue;
     uint8_t id[6] = {};
     bool ok = ntPage(0x3f004) && ntRead(0x3f004, id, 6);
     TLOG("chip-id try=%d ok=%d %02x %02x %02x %02x %02x %02x", attempt, ok, id[0], id[1], id[2], id[3], id[4], id[5]);
@@ -287,16 +301,16 @@ struct Firmware {
   uint32_t bank[6] = {};             // ILM sram/size/crc, DLM sram/size/crc
 };
 
-void ntCrcBank(uint32_t des, uint32_t len, uint32_t gchk, uint32_t sram, uint32_t size, uint32_t crc)
+bool ntCrcBank(uint32_t des, uint32_t len, uint32_t gchk, uint32_t sram, uint32_t size, uint32_t crc)
 {
-  ntPage(des);
+  if (!ntPage(des)) return false;
   const uint8_t a[3] = {static_cast<uint8_t>(sram), static_cast<uint8_t>(sram >> 8), static_cast<uint8_t>(sram >> 16)};
-  ntWrite(des, a, 3);
+  if (!ntWrite(des, a, 3)) return false;
   const uint8_t l[3] = {static_cast<uint8_t>(size), static_cast<uint8_t>(size >> 8), static_cast<uint8_t>((size >> 16) & 1)};
-  ntWrite(len, l, 3);
+  if (!ntPage(len) || !ntWrite(len, l, 3)) return false;
   const uint8_t c[4] = {static_cast<uint8_t>(crc), static_cast<uint8_t>(crc >> 8), static_cast<uint8_t>(crc >> 16),
                         static_cast<uint8_t>(crc >> 24)};
-  ntWrite(gchk, c, 4);
+  return ntPage(gchk) && ntWrite(gchk, c, 4);
 }
 
 uint32_t gXMax = 1600, gYMax = 2560;
@@ -305,10 +319,10 @@ bool ntDownload(const Firmware &fw)
 {
   for (int attempt = 0; attempt < 3; attempt++) {
     uint64_t start = mach_absolute_time();
-    ntBootloaderReset();
-    ntCrcBank(0x3f128, 0x3f118, 0x3f100, fw.bank[0], fw.bank[1], fw.bank[2]);
-    ntCrcBank(0x3f12c, 0x3f130, 0x3f104, fw.bank[3], fw.bank[4], fw.bank[5]);
-    ntWriteAddr(0x3f7e8, 0x69);
+    if (!ntBootloaderReset()) continue;
+    if (!ntCrcBank(0x3f128, 0x3f118, 0x3f100, fw.bank[0], fw.bank[1], fw.bank[2]) ||
+        !ntCrcBank(0x3f12c, 0x3f130, 0x3f104, fw.bank[3], fw.bank[4], fw.bank[5]) ||
+        !ntWriteAddr(0x3f7e8, 0x69)) continue;
     bool sent = true;
     for (uint32_t p = 0; p < fw.partCount && sent; p++) {
       uint32_t sram = fw.parts[3 * p], bin = fw.parts[3 * p + 1], left = fw.parts[3 * p + 2];
@@ -324,13 +338,11 @@ bool ntDownload(const Firmware &fw)
       IOSleep(1);
     }
     uint8_t crcEn = 0;
-    ntReadAddr(0x3f30e, &crcEn);
-    ntWriteAddr(0x3f30e, crcEn | 0x80);
-    ntPage(0x2fe00);
+    if (!sent || dma != 0 || !ntReadAddr(0x3f30e, &crcEn) ||
+        !ntWriteAddr(0x3f30e, crcEn | 0x80) || !ntPage(0x2fe00)) continue;
     uint8_t zero = 0, crcCmd = 0xae;
-    ntWrite(0x2fe60, &zero, 1);
-    ntWrite(0x2fe50, &crcCmd, 1);
-    ntWriteAddr(0x3f10d, 1);
+    if (!ntWrite(0x2fe60, &zero, 1) || !ntWrite(0x2fe50, &crcCmd, 1) ||
+        !ntWriteAddr(0x3f10d, 1)) continue;
     IOSleep(5);
     uint8_t state[5] = {};
     bool booted = false;
@@ -357,7 +369,7 @@ bool ntDownload(const Firmware &fw)
     }
     uint8_t pid[2] = {};
     if (ntPage(0x2fe9a) && ntRead(0x2fe9a, pid, 2)) { TLOG("fw pid=%#x", pid[0] | (pid[1] << 8)); }
-    ntPage(0x2fe00);
+    if(!ntPage(0x2fe00)) continue;
     nabu_touch_stats[7] = nabu_touch_stats[7] + 1;
     return true;
   }
@@ -365,15 +377,15 @@ bool ntDownload(const Firmware &fw)
 }
 
 // Contact transport is shared; no iOS edge-event vtable patch is used.
+constexpr unsigned kFingers = 10;
 struct Frame {
-  unsigned count;
+  unsigned count=0;
   int ids[kFingers], xs[kFingers], ys[kFingers];   // normalised 0..32767
 };
 
 }  // namespace
 
-// --------------------------------------------------------- HID digitizer
-// Report 1: ten fingers (Tip Switch, Touch Valid, Contact Identifier, X, Y), then Contact Count.
+// --------------------------------------------------------- macOS HID pointer
 // Absolute mouse reports let the macOS desktop use the panel without an
 // iOS-only backboardd/digitizer consumer. Keep one primary contact until lift.
 #include "NabuTouchPointer.h"
@@ -425,8 +437,39 @@ namespace {
 IOService *gPlatform = nullptr;
 uint32_t gSwapXY = 0, gInvertX = 0, gInvertY = 0;
 
+// The macOS KC has IOHIDEventDriver code but no generic mouse personality
+// in IOHIDFamily's prelink dictionary. Add a native-family personality for
+// this board's SPI interface; no private IOHIDEvent object layout is used.
+bool publishPointerPersonality()
+{
+  OSDictionary *personality=OSDictionary::withCapacity(7);
+  OSDictionary *usage=OSDictionary::withCapacity(2);
+  OSArray *pairs=OSArray::withCapacity(1), *drivers=OSArray::withCapacity(1);
+  OSNumber *page=OSNumber::withNumber(1,32), *mouse=OSNumber::withNumber(2,32);
+  OSString *family=OSString::withCString("com.apple.iokit.IOHIDFamily");
+  OSString *klass=OSString::withCString("IOHIDEventDriver");
+  OSString *provider=OSString::withCString("IOHIDInterface");
+  OSString *product=OSString::withCString("NABU NT36523 desktop pointer");
+  OSDictionary *match=OSDictionary::withCapacity(1);
+  bool ok=personality && usage && pairs && drivers && page && mouse && family && klass && provider && product && match;
+  if(ok) {
+    ok=usage->setObject("DeviceUsagePage",page) && usage->setObject("DeviceUsage",mouse) && pairs->setObject(usage) &&
+       match->setObject("Product",product) && personality->setObject("CFBundleIdentifier",family) &&
+       personality->setObject("IOClass",klass) && personality->setObject("IOProviderClass",provider) &&
+       personality->setObject("IOPropertyMatch",match) && personality->setObject("DeviceUsagePairs",pairs) &&
+       drivers->setObject(personality);
+  }
+  if(ok)ok=gIOCatalogue && gIOCatalogue->addDrivers(drivers,true);
+  OSSafeReleaseNULL(personality);OSSafeReleaseNULL(usage);OSSafeReleaseNULL(pairs);OSSafeReleaseNULL(drivers);
+  OSSafeReleaseNULL(page);OSSafeReleaseNULL(mouse);OSSafeReleaseNULL(family);OSSafeReleaseNULL(klass);
+  OSSafeReleaseNULL(provider);OSSafeReleaseNULL(product);OSSafeReleaseNULL(match);
+  return ok;
+}
+
 NabuTouchHid *publishHid()
 {
+  nabu::FamilyRegistration registration;
+  if(!registration.valid()) return nullptr;
   kern_return_t result = OSKextLoadKextWithIdentifier("com.apple.iokit.IOHIDFamily");
   TLOG("IOHIDFamily load=%d", result);
   if (result != KERN_SUCCESS) { return nullptr; }
@@ -438,6 +481,7 @@ NabuTouchHid *publishHid()
     TLOG("subclass registration failed");
     return nullptr;
   }
+  if (!publishPointerPersonality()) { TLOG("native mouse personality registration failed"); return nullptr; }
   NabuTouchHid *device = new NabuTouchHid;
   if (!device) { return nullptr; }
   if (!device->init(nullptr) || !device->attach(gPlatform)) {
@@ -516,12 +560,13 @@ bool decode(const uint8_t *d, Frame &frame, bool &wdtPattern, unsigned logBudget
     if (id < 1 || id > static_cast<int>(kFingers) || (st != 1 && st != 2)) { continue; }
     int x = (p[1] << 4) | (p[3] >> 4), y = (p[2] << 4) | (p[3] & 0x0f);
     if (x > static_cast<int>(gXMax) || y > static_cast<int>(gYMax)) { continue; }
-    if (logBudget) { TLOG("finger id=%d st=%d x=%d y=%d w=%u p=%u", id, st, x, y, p[4], p[5]); }
+    
     int sx = gSwapXY ? y : x, sy = gSwapXY ? x : y;
     int mx = static_cast<int>(gSwapXY ? gYMax : gXMax), my = static_cast<int>(gSwapXY ? gXMax : gYMax);
     frame.ids[frame.count] = id;
     frame.xs[frame.count] = scale(sx, mx, gInvertX);
     frame.ys[frame.count] = scale(sy, my, gInvertY);
+    if(logBudget && frame.count==0)TLOG("contact id=%d raw(%d,%d) -> mapped(%d,%d) panel=%ux%u swap=%u invert=%u,%u",id,x,y,frame.xs[0],frame.ys[0],gXMax,gYMax,gSwapXY,gInvertX,gInvertY);
     frame.count++;
   }
   return true;
@@ -540,7 +585,7 @@ void touchThread(void *, wait_result_t)
   gSe = map(kSePa, 0x4000);
   if (!gSe.base || !clocksUp()) { TLOG("clocks not available; stopped"); return; }
   nabu_touch_stats[0] = 3;
-  pinsUp();
+  if (!pinsUp()) { TLOG("TLMM setup failed; stopped"); return; }
   if (!seInit()) { TLOG("SE18 not usable as FIFO SPI; stopped"); return; }
   nabu_touch_stats[0] = 4;
   if (!ntChipId()) { TLOG("NT36523 not identified; stopped"); return; }
@@ -550,18 +595,22 @@ void touchThread(void *, wait_result_t)
   NabuTouchHid *hid = publishHid();
   if (!hid) { TLOG("HID publication failed; stopped"); return; }
   Mmio irq = map(kTlmmIntPa, 0x1000);
-  if (irq.base) {
+  if (!irq.base) { TLOG("GPIO39 mapping failed; stopped"); return; }
+  {
     TLOG("gpio39 ctl=%#x io=%#x cfg=%#x st=%#x", irq.r(0), irq.r(4), irq.r(8), irq.r(0xc));
     irq.w(0, 0x1c1);      // input, pull-down, 16 mA
     irq.w(8, 0x16);       // rising edge latched in RAW_STATUS, no CPU interrupt
     irq.w(0xc, 0);
+    if((irq.r(0)&0x3ff)!=0x1c1 || (irq.r(8)&0x1f)!=0x16) { TLOG("GPIO39 configuration rejected"); return; }
   }
   TLOG("polling started xmax=%u ymax=%u", gXMax, gYMax);
   uint8_t event[80];
   uint8_t last[80] = {};
   bool latchSeen = false;
-  unsigned wdtRun = 0, logBudget = 24, lastFingers = 0;
+  unsigned pollRound=0, readFailures=0, reloads=0;
+  unsigned wdtRun = 0, logBudget = 5, lastFingers = 0;
   uint64_t nextStatus = deadlineUs(30000000);
+  uint64_t lastValid = mach_absolute_time();
   for (;;) {
     bool latched = irq.base && (irq.r(0xc) & 1);
     if (latched) {
@@ -569,14 +618,16 @@ void touchThread(void *, wait_result_t)
       latchSeen = true;
       nabu_touch_stats[6] = nabu_touch_stats[6] + 1;
     }
-    if (latched || !latchSeen) {
+    if (latched || !latchSeen || (++pollRound % 10)==0) {
       if (ntRead(0x2fe00, event, sizeof(event))) {
+        readFailures = 0;
         nabu_touch_stats[1] = nabu_touch_stats[1] + 1;
         Frame frame;
         bool wdtPattern = false;
         bool changed = latched || memcmp(event, last, sizeof(event)) != 0;
         if (changed && decode(event, frame, wdtPattern, logBudget)) {
           wdtRun = 0;
+          lastValid = mach_absolute_time();
           memcpy(last, event, sizeof(event));
           if (frame.count) {
             nabu_touch_stats[2] = nabu_touch_stats[2] + 1;
@@ -585,11 +636,25 @@ void touchThread(void *, wait_result_t)
           if (frame.count || lastFingers) { hid->deliver(frame); }
           lastFingers = frame.count;
         } else if (wdtPattern && ++wdtRun > 10) {
-          TLOG("firmware reset pattern; downloading again");
+          if (++reloads > 3) {
+            if(lastFingers){Frame released;hid->deliver(released);}
+            TLOG("repeated firmware resets; stopped"); return;
+          }
+          TLOG("firmware reset pattern; downloading again (%u/3)", reloads);
+          if(lastFingers){Frame released;hid->deliver(released);lastFingers=0;}
           wdtRun = 0;
           if (!ntDownload(fw)) { TLOG("re-download failed; stopped"); return; }
         }
+      } else if (++readFailures >= 8) {
+        if(lastFingers){Frame released;hid->deliver(released);}
+        TLOG("eight consecutive SPI read failures; stopped"); return;
       }
+    }
+    uint64_t staleNs=0;
+    absolutetime_to_nanoseconds(mach_absolute_time()-lastValid,&staleNs);
+    if (lastFingers && staleNs>250000000) {
+      Frame released; hid->deliver(released); lastFingers=0;
+      TLOG("transport stalled: released pointer");
     }
     if (mach_absolute_time() > nextStatus) {
       TLOG("status reads=%u fingers=%u bad-sum=%u reports=%u last=%#x latch=%u", nabu_touch_stats[1],

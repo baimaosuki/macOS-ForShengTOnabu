@@ -202,7 +202,7 @@ def arm_io_window(hardware):
     return base, top - base
 
 
-STRINGS = {'compatible', 'device_type', 'reg-names', 'interrupt-names', 'clock-names', 'method'}
+STRINGS = {'compatible', 'device_type', 'reg-names', 'interrupt-names', 'clock-names', 'method', 'maximum-speed', 'dr_mode'}
 U32 = {'phandle', 'linux,phandle', '#interrupt-cells', '#iommu-cells', '#clock-cells', 'clock-frequency', 'timebase-frequency', 'transport-encoding', 'transport-speed'}
 U64 = {'redistributor-stride'}
 FLAGS = {'interrupt-controller', 'dma-coherent'}
@@ -250,6 +250,9 @@ def hardware_properties(entry, handles, base=0):
             properties.append((key, struct.pack(f'<{len(cells)}I', *cells)))
             if 'interrupt-parent' not in entry.properties:
                 properties.append(('interrupt-parent', struct.pack('<I', handle)))
+        elif key.startswith('nabu,') and raw:
+            cells = entry.cells(key)
+            properties.append((key, struct.pack(f'<{len(cells)}I', *cells)))
         elif key == 'reg':
             pairs = [(physical(entry.parent, address, size) - base, size) for address, size in registers(entry)]
             properties.append((key, b''.join(struct.pack('<QQ', *pair) for pair in pairs)))
@@ -412,6 +415,31 @@ def generate(dtb, config, *, unique_chip_id=None, data=False, trust=False, addon
     children.append(node('arm-io', [('device_type', b'arm-io\0'), ('#address-cells', struct.pack('<I', 2)),
                          ('#size-cells', struct.pack('<I', 2)), ('ranges', struct.pack('<QQQ', 0, base, size))],
                          [node(name, hardware_properties(entry, handles, base)) for name, entry in zip(names, hardware)]))
+    roots = [entry for entry in entries if 'unixnu,adt-root' in entry.properties and entry.enabled()]
+    for entry in roots:
+        name = entry.strings('unixnu,adt-root')[0]
+        properties = hardware_properties(entry, handles)
+        if 'nabu,private-firmware' in entry.properties:
+            # Proprietary firmware stays outside Git. A production payload must
+            # supply the board-owned firmware; an empty placeholder is rejected.
+            import hashlib
+            directory = os.environ.get('NABU_TOUCH_FIRMWARE_DIR')
+            if not directory:
+                raise Error('NABU_TOUCH_FIRMWARE_DIR is required for NT36523 payload generation')
+            folder = Path(directory)
+            firmware = (folder / 'novatek_nt36523_k82_fw01.bin').read_bytes()
+            if hashlib.sha256(firmware).hexdigest() != 'd66d15f3dff35292e42e0d301bf53a7fcea6b6fc1b93bca90bb66d765bcfba9b':
+                raise Error('Unqualified NABU CSOT touch firmware')
+            parts = (folder / 'partitions.bin').read_bytes()
+            banks = (folder / 'crc-bank.bin').read_bytes()
+            if len(parts) != 48 or len(banks) != 24:
+                raise Error('Invalid NT36523 firmware metadata')
+            for target, offset, length in struct.iter_unpack('<III', parts):
+                if offset + length > len(firmware) or target + length > 0x400000:
+                    raise Error('NT36523 firmware partition exceeds bounds')
+            properties += [('firmware', firmware), ('partitions', parts), ('crc-bank', banks),
+                           ('swap-xy', struct.pack('<I', 0)), ('invert-x', struct.pack('<I', 0)), ('invert-y', struct.pack('<I', 0))]
+        children.append(node(name, properties))
     for name in ('defaults', 'options', 'product', 'buttons'):
         if name in platform or name in ('defaults', 'options', 'product'):
             children.append(platform_node(name, platform.get(name, {})))

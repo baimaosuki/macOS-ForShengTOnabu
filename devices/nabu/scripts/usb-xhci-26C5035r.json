@@ -1,0 +1,2578 @@
+{
+  "build": "26C5035r",
+  "kernelcache_sha256": "d1003b5143ffd88439b4d45b6017f587171cfe6855660bed05370a2ea5db9fe9",
+  "collection_slide": "0x1f000000000",
+  "base_slots": 272,
+  "instance_size": 3976,
+  "vtable": "0xfffffe0008a0dc60",
+  "slots": [
+    {
+      "target": "0xfffffe000b4549f0",
+      "symbols": [
+        "__ZN12AppleUSBXHCID1Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000b4549f8",
+      "symbols": [
+        "__ZN12AppleUSBXHCID0Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c291be8",
+      "symbols": [
+        "__ZNK8OSObject7releaseEi"
+      ]
+    },
+    {
+      "target": "0xfffffe000c291bdc",
+      "symbols": [
+        "__ZNK8OSObject14getRetainCountEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000c291bac",
+      "symbols": [
+        "__ZNK8OSObject6retainEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000c291b7c",
+      "symbols": [
+        "__ZNK8OSObject7releaseEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000c2919e4",
+      "symbols": [
+        "__ZNK8OSObject9serializeEP11OSSerialize"
+      ]
+    },
+    {
+      "target": "0xfffffe000b454a58",
+      "symbols": [
+        "__ZNK12AppleUSBXHCI12getMetaClassEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000c28e570",
+      "symbols": [
+        "__ZNK15OSMetaClassBase9isEqualToEPKS_"
+      ]
+    },
+    {
+      "target": "0xfffffe000c291954",
+      "symbols": [
+        "__ZNK8OSObject12taggedRetainEPKv"
+      ]
+    },
+    {
+      "target": "0xfffffe000c291924",
+      "symbols": [
+        "__ZNK8OSObject13taggedReleaseEPKv"
+      ]
+    },
+    {
+      "target": "0xfffffe000c2917c4",
+      "symbols": [
+        "__ZNK8OSObject13taggedReleaseEPKvi"
+      ]
+    },
+    {
+      "target": "0xfffffe000c2edb3c",
+      "symbols": [
+        "__ZN9IOService8DispatchE5IORPC"
+      ]
+    },
+    {
+      "target": "0xfffffe000c49443c",
+      "symbols": [
+        "__ZN15OSMetaClassBase25_RESERVEDOSMetaClassBase0Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c494408",
+      "symbols": [
+        "__ZN15OSMetaClassBase25_RESERVEDOSMetaClassBase1Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c4943d4",
+      "symbols": [
+        "__ZN15OSMetaClassBase25_RESERVEDOSMetaClassBase2Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c3d3c4c",
+      "symbols": [
+        "__ZN15OSMetaClassBase8DispatchE5IORPC"
+      ]
+    },
+    {
+      "target": "0xfffffe000c49436c",
+      "symbols": [
+        "__ZN15OSMetaClassBase25_RESERVEDOSMetaClassBase4Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c494338",
+      "symbols": [
+        "__ZN15OSMetaClassBase25_RESERVEDOSMetaClassBase5Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c494304",
+      "symbols": [
+        "__ZN15OSMetaClassBase25_RESERVEDOSMetaClassBase6Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c4942d0",
+      "symbols": [
+        "__ZN15OSMetaClassBase25_RESERVEDOSMetaClassBase7Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c2917b8",
+      "symbols": [
+        "__ZN8OSObject4initEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b458294",
+      "symbols": [
+        "__ZN12AppleUSBXHCI4freeEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000c4948b8",
+      "symbols": [
+        "__ZN8OSObject18_RESERVEDOSObject0Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c49489c",
+      "symbols": [
+        "__ZN8OSObject18_RESERVEDOSObject1Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c494880",
+      "symbols": [
+        "__ZN8OSObject18_RESERVEDOSObject2Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c494864",
+      "symbols": [
+        "__ZN8OSObject18_RESERVEDOSObject3Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c494848",
+      "symbols": [
+        "__ZN8OSObject18_RESERVEDOSObject4Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c49482c",
+      "symbols": [
+        "__ZN8OSObject18_RESERVEDOSObject5Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c494810",
+      "symbols": [
+        "__ZN8OSObject18_RESERVEDOSObject6Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c4947f4",
+      "symbols": [
+        "__ZN8OSObject18_RESERVEDOSObject7Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c4947d8",
+      "symbols": [
+        "__ZN8OSObject18_RESERVEDOSObject8Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c4947bc",
+      "symbols": [
+        "__ZN8OSObject18_RESERVEDOSObject9Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c4947a0",
+      "symbols": [
+        "__ZN8OSObject19_RESERVEDOSObject10Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c494784",
+      "symbols": [
+        "__ZN8OSObject19_RESERVEDOSObject11Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c494768",
+      "symbols": [
+        "__ZN8OSObject19_RESERVEDOSObject12Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c49474c",
+      "symbols": [
+        "__ZN8OSObject19_RESERVEDOSObject13Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c494730",
+      "symbols": [
+        "__ZN8OSObject19_RESERVEDOSObject14Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c494714",
+      "symbols": [
+        "__ZN8OSObject19_RESERVEDOSObject15Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c3160b4",
+      "symbols": [
+        "__ZNK15IORegistryEntry12copyPropertyEPKcPK15IORegistryPlanej"
+      ]
+    },
+    {
+      "target": "0xfffffe000c315ecc",
+      "symbols": [
+        "__ZNK15IORegistryEntry12copyPropertyEPK8OSStringPK15IORegistryPlanej"
+      ]
+    },
+    {
+      "target": "0xfffffe000c315ce4",
+      "symbols": [
+        "__ZNK15IORegistryEntry12copyPropertyEPK8OSSymbolPK15IORegistryPlanej"
+      ]
+    },
+    {
+      "target": "0xfffffe000c315c20",
+      "symbols": [
+        "__ZNK15IORegistryEntry15copyParentEntryEPK15IORegistryPlane"
+      ]
+    },
+    {
+      "target": "0xfffffe000c315b5c",
+      "symbols": [
+        "__ZNK15IORegistryEntry14copyChildEntryEPK15IORegistryPlane"
+      ]
+    },
+    {
+      "target": "0xfffffe000c315a8c",
+      "symbols": [
+        "__ZN15IORegistryEntry17runPropertyActionEPFiP8OSObjectPvS2_S2_S2_ES1_S2_S2_S2_S2_"
+      ]
+    },
+    {
+      "target": "0xfffffe000c4960b4",
+      "symbols": [
+        "__ZN15IORegistryEntry25_RESERVEDIORegistryEntry0Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c496098",
+      "symbols": [
+        "__ZN15IORegistryEntry25_RESERVEDIORegistryEntry1Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c49607c",
+      "symbols": [
+        "__ZN15IORegistryEntry25_RESERVEDIORegistryEntry2Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c496060",
+      "symbols": [
+        "__ZN15IORegistryEntry25_RESERVEDIORegistryEntry3Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c496044",
+      "symbols": [
+        "__ZN15IORegistryEntry25_RESERVEDIORegistryEntry4Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c496028",
+      "symbols": [
+        "__ZN15IORegistryEntry25_RESERVEDIORegistryEntry5Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c49600c",
+      "symbols": [
+        "__ZN15IORegistryEntry25_RESERVEDIORegistryEntry6Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c495ff0",
+      "symbols": [
+        "__ZN15IORegistryEntry25_RESERVEDIORegistryEntry7Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c495fd4",
+      "symbols": [
+        "__ZN15IORegistryEntry25_RESERVEDIORegistryEntry8Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c495fb8",
+      "symbols": [
+        "__ZN15IORegistryEntry25_RESERVEDIORegistryEntry9Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c495f9c",
+      "symbols": [
+        "__ZN15IORegistryEntry26_RESERVEDIORegistryEntry10Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c495f80",
+      "symbols": [
+        "__ZN15IORegistryEntry26_RESERVEDIORegistryEntry11Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c495f64",
+      "symbols": [
+        "__ZN15IORegistryEntry26_RESERVEDIORegistryEntry12Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c495f48",
+      "symbols": [
+        "__ZN15IORegistryEntry26_RESERVEDIORegistryEntry13Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c495f2c",
+      "symbols": [
+        "__ZN15IORegistryEntry26_RESERVEDIORegistryEntry14Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c495f10",
+      "symbols": [
+        "__ZN15IORegistryEntry26_RESERVEDIORegistryEntry15Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c495ef4",
+      "symbols": [
+        "__ZN15IORegistryEntry26_RESERVEDIORegistryEntry16Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c495ed8",
+      "symbols": [
+        "__ZN15IORegistryEntry26_RESERVEDIORegistryEntry17Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c495ebc",
+      "symbols": [
+        "__ZN15IORegistryEntry26_RESERVEDIORegistryEntry18Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c495ea0",
+      "symbols": [
+        "__ZN15IORegistryEntry26_RESERVEDIORegistryEntry19Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c495e84",
+      "symbols": [
+        "__ZN15IORegistryEntry26_RESERVEDIORegistryEntry20Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c495e68",
+      "symbols": [
+        "__ZN15IORegistryEntry26_RESERVEDIORegistryEntry21Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c495e4c",
+      "symbols": [
+        "__ZN15IORegistryEntry26_RESERVEDIORegistryEntry22Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c495e30",
+      "symbols": [
+        "__ZN15IORegistryEntry26_RESERVEDIORegistryEntry23Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c495e14",
+      "symbols": [
+        "__ZN15IORegistryEntry26_RESERVEDIORegistryEntry24Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c495df8",
+      "symbols": [
+        "__ZN15IORegistryEntry26_RESERVEDIORegistryEntry25Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c495ddc",
+      "symbols": [
+        "__ZN15IORegistryEntry26_RESERVEDIORegistryEntry26Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c495dc0",
+      "symbols": [
+        "__ZN15IORegistryEntry26_RESERVEDIORegistryEntry27Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c495da4",
+      "symbols": [
+        "__ZN15IORegistryEntry26_RESERVEDIORegistryEntry28Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c495d88",
+      "symbols": [
+        "__ZN15IORegistryEntry26_RESERVEDIORegistryEntry29Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c495d6c",
+      "symbols": [
+        "__ZN15IORegistryEntry26_RESERVEDIORegistryEntry30Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c495d50",
+      "symbols": [
+        "__ZN15IORegistryEntry26_RESERVEDIORegistryEntry31Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000b454ad4",
+      "symbols": [
+        "__ZN12AppleUSBXHCI4initEP12OSDictionary"
+      ]
+    },
+    {
+      "target": "0xfffffe000c315654",
+      "symbols": [
+        "__ZN15IORegistryEntry16setPropertyTableEP12OSDictionary"
+      ]
+    },
+    {
+      "target": "0xfffffe000c3154d4",
+      "symbols": [
+        "__ZN15IORegistryEntry11setPropertyEPK8OSSymbolP8OSObject"
+      ]
+    },
+    {
+      "target": "0xfffffe000c315444",
+      "symbols": [
+        "__ZN15IORegistryEntry11setPropertyEPK8OSStringP8OSObject"
+      ]
+    },
+    {
+      "target": "0xfffffe000c3153b4",
+      "symbols": [
+        "__ZN15IORegistryEntry11setPropertyEPKcP8OSObject"
+      ]
+    },
+    {
+      "target": "0xfffffe000c3152f4",
+      "symbols": [
+        "__ZN15IORegistryEntry11setPropertyEPKcS1_"
+      ]
+    },
+    {
+      "target": "0xfffffe000c31522c",
+      "symbols": [
+        "__ZN15IORegistryEntry11setPropertyEPKcb"
+      ]
+    },
+    {
+      "target": "0xfffffe000c315100",
+      "symbols": [
+        "__ZN15IORegistryEntry11setPropertyEPKcyj"
+      ]
+    },
+    {
+      "target": "0xfffffe000c314fd4",
+      "symbols": [
+        "__ZN15IORegistryEntry11setPropertyEPKcPvj"
+      ]
+    },
+    {
+      "target": "0xfffffe000c314f24",
+      "symbols": [
+        "__ZN15IORegistryEntry14removePropertyEPK8OSSymbol"
+      ]
+    },
+    {
+      "target": "0xfffffe000c314ea0",
+      "symbols": [
+        "__ZN15IORegistryEntry14removePropertyEPK8OSString"
+      ]
+    },
+    {
+      "target": "0xfffffe000c314e1c",
+      "symbols": [
+        "__ZN15IORegistryEntry14removePropertyEPKc"
+      ]
+    },
+    {
+      "target": "0xfffffe000c314d68",
+      "symbols": [
+        "__ZNK15IORegistryEntry11getPropertyEPK8OSSymbol"
+      ]
+    },
+    {
+      "target": "0xfffffe000c314ce8",
+      "symbols": [
+        "__ZNK15IORegistryEntry11getPropertyEPK8OSString"
+      ]
+    },
+    {
+      "target": "0xfffffe000c314c68",
+      "symbols": [
+        "__ZNK15IORegistryEntry11getPropertyEPKc"
+      ]
+    },
+    {
+      "target": "0xfffffe000c314a80",
+      "symbols": [
+        "__ZNK15IORegistryEntry11getPropertyEPK8OSSymbolPK15IORegistryPlanej"
+      ]
+    },
+    {
+      "target": "0xfffffe000c314898",
+      "symbols": [
+        "__ZNK15IORegistryEntry11getPropertyEPK8OSStringPK15IORegistryPlanej"
+      ]
+    },
+    {
+      "target": "0xfffffe000c3146b0",
+      "symbols": [
+        "__ZNK15IORegistryEntry11getPropertyEPKcPK15IORegistryPlanej"
+      ]
+    },
+    {
+      "target": "0xfffffe000c3145d4",
+      "symbols": [
+        "__ZNK15IORegistryEntry12copyPropertyEPK8OSSymbol"
+      ]
+    },
+    {
+      "target": "0xfffffe000c3144f8",
+      "symbols": [
+        "__ZNK15IORegistryEntry12copyPropertyEPK8OSString"
+      ]
+    },
+    {
+      "target": "0xfffffe000c31441c",
+      "symbols": [
+        "__ZNK15IORegistryEntry12copyPropertyEPKc"
+      ]
+    },
+    {
+      "target": "0xfffffe000c3142d8",
+      "symbols": [
+        "__ZNK15IORegistryEntry24dictionaryWithPropertiesEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000c32cae8",
+      "symbols": [
+        "__ZNK9IOService19serializePropertiesEP11OSSerialize"
+      ]
+    },
+    {
+      "target": "0xfffffe000b24cf38",
+      "symbols": [
+        "__ZN22AppleUSBHostController13setPropertiesEP8OSObject"
+      ]
+    },
+    {
+      "target": "0xfffffe000c313f88",
+      "symbols": [
+        "__ZNK15IORegistryEntry17getParentIteratorEPK15IORegistryPlane"
+      ]
+    },
+    {
+      "target": "0xfffffe000c313dc8",
+      "symbols": [
+        "__ZNK15IORegistryEntry14applyToParentsEPFvPS_PvES1_PK15IORegistryPlane"
+      ]
+    },
+    {
+      "target": "0xfffffe000c313d60",
+      "symbols": [
+        "__ZNK15IORegistryEntry14getParentEntryEPK15IORegistryPlane"
+      ]
+    },
+    {
+      "target": "0xfffffe000c313b28",
+      "symbols": [
+        "__ZNK15IORegistryEntry16getChildIteratorEPK15IORegistryPlane"
+      ]
+    },
+    {
+      "target": "0xfffffe000c313968",
+      "symbols": [
+        "__ZNK15IORegistryEntry15applyToChildrenEPFvPS_PvES1_PK15IORegistryPlane"
+      ]
+    },
+    {
+      "target": "0xfffffe000c313900",
+      "symbols": [
+        "__ZNK15IORegistryEntry13getChildEntryEPK15IORegistryPlane"
+      ]
+    },
+    {
+      "target": "0xfffffe000c313720",
+      "symbols": [
+        "__ZNK15IORegistryEntry7isChildEPS_PK15IORegistryPlaneb"
+      ]
+    },
+    {
+      "target": "0xfffffe000c313540",
+      "symbols": [
+        "__ZNK15IORegistryEntry8isParentEPS_PK15IORegistryPlaneb"
+      ]
+    },
+    {
+      "target": "0xfffffe000c313320",
+      "symbols": [
+        "__ZNK15IORegistryEntry7inPlaneEPK15IORegistryPlane"
+      ]
+    },
+    {
+      "target": "0xfffffe000c313160",
+      "symbols": [
+        "__ZNK15IORegistryEntry8getDepthEPK15IORegistryPlane"
+      ]
+    },
+    {
+      "target": "0xfffffe000c312d58",
+      "symbols": [
+        "__ZN15IORegistryEntry14attachToParentEPS_PK15IORegistryPlane"
+      ]
+    },
+    {
+      "target": "0xfffffe000c312b9c",
+      "symbols": [
+        "__ZN15IORegistryEntry16detachFromParentEPS_PK15IORegistryPlane"
+      ]
+    },
+    {
+      "target": "0xfffffe000c312a04",
+      "symbols": [
+        "__ZN15IORegistryEntry13attachToChildEPS_PK15IORegistryPlane"
+      ]
+    },
+    {
+      "target": "0xfffffe000c312848",
+      "symbols": [
+        "__ZN15IORegistryEntry15detachFromChildEPS_PK15IORegistryPlane"
+      ]
+    },
+    {
+      "target": "0xfffffe000c312728",
+      "symbols": [
+        "__ZN15IORegistryEntry11detachAboveEPK15IORegistryPlane"
+      ]
+    },
+    {
+      "target": "0xfffffe000c311b64",
+      "symbols": [
+        "__ZN15IORegistryEntry9detachAllEPK15IORegistryPlane"
+      ]
+    },
+    {
+      "target": "0xfffffe000c311a38",
+      "symbols": [
+        "__ZNK15IORegistryEntry7getNameEPK15IORegistryPlane"
+      ]
+    },
+    {
+      "target": "0xfffffe000c311910",
+      "symbols": [
+        "__ZNK15IORegistryEntry8copyNameEPK15IORegistryPlane"
+      ]
+    },
+    {
+      "target": "0xfffffe000c311704",
+      "symbols": [
+        "__ZNK15IORegistryEntry12compareNamesEP8OSObjectPP8OSString"
+      ]
+    },
+    {
+      "target": "0xfffffe000c311624",
+      "symbols": [
+        "__ZNK15IORegistryEntry11compareNameEP8OSStringPS1_"
+      ]
+    },
+    {
+      "target": "0xfffffe000c311518",
+      "symbols": [
+        "__ZN15IORegistryEntry7setNameEPK8OSSymbolPK15IORegistryPlane"
+      ]
+    },
+    {
+      "target": "0xfffffe000c311470",
+      "symbols": [
+        "__ZN15IORegistryEntry7setNameEPKcPK15IORegistryPlane"
+      ]
+    },
+    {
+      "target": "0xfffffe000c3113dc",
+      "symbols": [
+        "__ZNK15IORegistryEntry11getLocationEPK15IORegistryPlane"
+      ]
+    },
+    {
+      "target": "0xfffffe000c311308",
+      "symbols": [
+        "__ZNK15IORegistryEntry12copyLocationEPK15IORegistryPlane"
+      ]
+    },
+    {
+      "target": "0xfffffe000c311260",
+      "symbols": [
+        "__ZN15IORegistryEntry11setLocationEPK8OSSymbolPK15IORegistryPlane"
+      ]
+    },
+    {
+      "target": "0xfffffe000c3111b8",
+      "symbols": [
+        "__ZN15IORegistryEntry11setLocationEPKcPK15IORegistryPlane"
+      ]
+    },
+    {
+      "target": "0xfffffe000c310828",
+      "symbols": [
+        "__ZNK15IORegistryEntry7getPathEPcPiPK15IORegistryPlane"
+      ]
+    },
+    {
+      "target": "0xfffffe000c3106e8",
+      "symbols": [
+        "__ZNK15IORegistryEntry16getPathComponentEPcPiPK15IORegistryPlane"
+      ]
+    },
+    {
+      "target": "0xfffffe000c30ff24",
+      "symbols": [
+        "__ZN15IORegistryEntry13childFromPathEPKcPK15IORegistryPlanePcPi"
+      ]
+    },
+    {
+      "target": "0xfffffe000c32ca80",
+      "symbols": [
+        "__ZN9IOService4initEP15IORegistryEntryPK15IORegistryPlane"
+      ]
+    },
+    {
+      "target": "0xfffffe000c32c9dc",
+      "symbols": [
+        "__ZN9IOService16requestTerminateEPS_j"
+      ]
+    },
+    {
+      "target": "0xfffffe000c32c94c",
+      "symbols": [
+        "__ZN9IOService13willTerminateEPS_j"
+      ]
+    },
+    {
+      "target": "0xfffffe000b24c1a8",
+      "symbols": [
+        "__ZN22AppleUSBHostController12didTerminateEP9IOServicejPb"
+      ]
+    },
+    {
+      "target": "0xfffffe000c357184",
+      "symbols": [
+        "__ZN9IOService15nextIdleTimeoutEyyj"
+      ]
+    },
+    {
+      "target": "0xfffffe000b250528",
+      "symbols": [
+        "__ZN22AppleUSBHostController18systemWillShutdownEj"
+      ]
+    },
+    {
+      "target": "0xfffffe000c32c658",
+      "symbols": [
+        "__ZN9IOService22copyClientWithCategoryEPK8OSSymbol"
+      ]
+    },
+    {
+      "target": "0xfffffe000c32c384",
+      "symbols": [
+        "__ZN9IOService15configureReportEP19IOReportChannelListjPvS2_"
+      ]
+    },
+    {
+      "target": "0xfffffe000c32c0ac",
+      "symbols": [
+        "__ZN9IOService12updateReportEP19IOReportChannelListjPvS2_"
+      ]
+    },
+    {
+      "target": "0xfffffe000c4965f4",
+      "symbols": [
+        "__ZN9IOService19_RESERVEDIOService0Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c4965d8",
+      "symbols": [
+        "__ZN9IOService19_RESERVEDIOService1Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c4965bc",
+      "symbols": [
+        "__ZN9IOService19_RESERVEDIOService2Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c4965a0",
+      "symbols": [
+        "__ZN9IOService19_RESERVEDIOService3Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c496584",
+      "symbols": [
+        "__ZN9IOService19_RESERVEDIOService4Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c496568",
+      "symbols": [
+        "__ZN9IOService19_RESERVEDIOService5Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c49654c",
+      "symbols": [
+        "__ZN9IOService19_RESERVEDIOService6Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c496530",
+      "symbols": [
+        "__ZN9IOService19_RESERVEDIOService7Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c496514",
+      "symbols": [
+        "__ZN9IOService19_RESERVEDIOService8Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c4964f8",
+      "symbols": [
+        "__ZN9IOService19_RESERVEDIOService9Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c4964dc",
+      "symbols": [
+        "__ZN9IOService20_RESERVEDIOService10Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c4964c0",
+      "symbols": [
+        "__ZN9IOService20_RESERVEDIOService11Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c4964a4",
+      "symbols": [
+        "__ZN9IOService20_RESERVEDIOService12Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c496488",
+      "symbols": [
+        "__ZN9IOService20_RESERVEDIOService13Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c49646c",
+      "symbols": [
+        "__ZN9IOService20_RESERVEDIOService14Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c496450",
+      "symbols": [
+        "__ZN9IOService20_RESERVEDIOService15Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c496434",
+      "symbols": [
+        "__ZN9IOService20_RESERVEDIOService16Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c496418",
+      "symbols": [
+        "__ZN9IOService20_RESERVEDIOService17Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c4963fc",
+      "symbols": [
+        "__ZN9IOService20_RESERVEDIOService18Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c4963e0",
+      "symbols": [
+        "__ZN9IOService20_RESERVEDIOService19Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c4963c4",
+      "symbols": [
+        "__ZN9IOService20_RESERVEDIOService20Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c4963a8",
+      "symbols": [
+        "__ZN9IOService20_RESERVEDIOService21Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c49638c",
+      "symbols": [
+        "__ZN9IOService20_RESERVEDIOService22Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c496370",
+      "symbols": [
+        "__ZN9IOService20_RESERVEDIOService23Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c496354",
+      "symbols": [
+        "__ZN9IOService20_RESERVEDIOService24Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c496338",
+      "symbols": [
+        "__ZN9IOService20_RESERVEDIOService25Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c49631c",
+      "symbols": [
+        "__ZN9IOService20_RESERVEDIOService26Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c496300",
+      "symbols": [
+        "__ZN9IOService20_RESERVEDIOService27Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c4962e4",
+      "symbols": [
+        "__ZN9IOService20_RESERVEDIOService28Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c4962c8",
+      "symbols": [
+        "__ZN9IOService20_RESERVEDIOService29Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c4962ac",
+      "symbols": [
+        "__ZN9IOService20_RESERVEDIOService30Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c496290",
+      "symbols": [
+        "__ZN9IOService20_RESERVEDIOService31Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c496274",
+      "symbols": [
+        "__ZN9IOService20_RESERVEDIOService32Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c496258",
+      "symbols": [
+        "__ZN9IOService20_RESERVEDIOService33Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c49623c",
+      "symbols": [
+        "__ZN9IOService20_RESERVEDIOService34Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c496220",
+      "symbols": [
+        "__ZN9IOService20_RESERVEDIOService35Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c496204",
+      "symbols": [
+        "__ZN9IOService20_RESERVEDIOService36Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c4961e8",
+      "symbols": [
+        "__ZN9IOService20_RESERVEDIOService37Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c4961cc",
+      "symbols": [
+        "__ZN9IOService20_RESERVEDIOService38Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c4961b0",
+      "symbols": [
+        "__ZN9IOService20_RESERVEDIOService39Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c496194",
+      "symbols": [
+        "__ZN9IOService20_RESERVEDIOService40Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c496178",
+      "symbols": [
+        "__ZN9IOService20_RESERVEDIOService41Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c49615c",
+      "symbols": [
+        "__ZN9IOService20_RESERVEDIOService42Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c496140",
+      "symbols": [
+        "__ZN9IOService20_RESERVEDIOService43Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c496124",
+      "symbols": [
+        "__ZN9IOService20_RESERVEDIOService44Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c496108",
+      "symbols": [
+        "__ZN9IOService20_RESERVEDIOService45Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c4960ec",
+      "symbols": [
+        "__ZN9IOService20_RESERVEDIOService46Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c4960d0",
+      "symbols": [
+        "__ZN9IOService20_RESERVEDIOService47Ev"
+      ]
+    },
+    {
+      "target": "0xfffffe000c32c0a0",
+      "symbols": [
+        "__ZNK9IOService8getStateEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b24ac5c",
+      "symbols": [
+        "__ZN22AppleUSBHostController15registerServiceEj"
+      ]
+    },
+    {
+      "target": "0xfffffe000c32562c",
+      "symbols": [
+        "__ZN9IOService5probeEPS_Pi"
+      ]
+    },
+    {
+      "target": "0xfffffe000b454b24",
+      "symbols": [
+        "__ZN12AppleUSBXHCI5startEP9IOService"
+      ]
+    },
+    {
+      "target": "0xfffffe000b249d20",
+      "symbols": [
+        "__ZN22AppleUSBHostController4stopEP9IOService"
+      ]
+    },
+    {
+      "target": "0xfffffe000b24c6cc",
+      "symbols": [
+        "__ZN22AppleUSBHostController4openEP9IOServicejPv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b24cc1c",
+      "symbols": [
+        "__ZN22AppleUSBHostController5closeEP9IOServicej"
+      ]
+    },
+    {
+      "target": "0xfffffe000c3250b8",
+      "symbols": [
+        "__ZNK9IOService6isOpenEPKS_"
+      ]
+    },
+    {
+      "target": "0xfffffe000b24ca58",
+      "symbols": [
+        "__ZN22AppleUSBHostController10handleOpenEP9IOServicejPv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b24ce64",
+      "symbols": [
+        "__ZN22AppleUSBHostController11handleCloseEP9IOServicej"
+      ]
+    },
+    {
+      "target": "0xfffffe000b24cb50",
+      "symbols": [
+        "__ZNK22AppleUSBHostController12handleIsOpenEPK9IOService"
+      ]
+    },
+    {
+      "target": "0xfffffe000b249ca0",
+      "symbols": [
+        "__ZN22AppleUSBHostController9terminateEj"
+      ]
+    },
+    {
+      "target": "0xfffffe000c3239ac",
+      "symbols": [
+        "__ZN9IOService8finalizeEj"
+      ]
+    },
+    {
+      "target": "0xfffffe000c323474",
+      "symbols": [
+        "__ZN9IOService18lockForArbitrationEb"
+      ]
+    },
+    {
+      "target": "0xfffffe000c323228",
+      "symbols": [
+        "__ZN9IOService20unlockForArbitrationEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000c323180",
+      "symbols": [
+        "__ZN9IOService15terminateClientEPS_j"
+      ]
+    },
+    {
+      "target": "0xfffffe000c323170",
+      "symbols": [
+        "__ZN9IOService12getBusyStateEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000c3230ec",
+      "symbols": [
+        "__ZN9IOService10adjustBusyEi"
+      ]
+    },
+    {
+      "target": "0xfffffe000b24dfa8",
+      "symbols": [
+        "__ZN22AppleUSBHostController18matchPropertyTableEP12OSDictionaryPi"
+      ]
+    },
+    {
+      "target": "0xfffffe000c3230ac",
+      "symbols": [
+        "__ZN9IOService18matchPropertyTableEP12OSDictionary"
+      ]
+    },
+    {
+      "target": "0xfffffe000c323024",
+      "symbols": [
+        "__ZN9IOService13matchLocationEPS_"
+      ]
+    },
+    {
+      "target": "0xfffffe000c322d8c",
+      "symbols": [
+        "__ZN9IOService17addNeededResourceEPKc"
+      ]
+    },
+    {
+      "target": "0xfffffe000c322ca0",
+      "symbols": [
+        "__ZN9IOService15comparePropertyEP12OSDictionaryPKc"
+      ]
+    },
+    {
+      "target": "0xfffffe000c322bb4",
+      "symbols": [
+        "__ZN9IOService15comparePropertyEP12OSDictionaryPK8OSString"
+      ]
+    },
+    {
+      "target": "0xfffffe000c322a24",
+      "symbols": [
+        "__ZN9IOService17comparePropertiesEP12OSDictionaryP12OSCollection"
+      ]
+    },
+    {
+      "target": "0xfffffe000b248804",
+      "symbols": [
+        "__ZN22AppleUSBHostController6attachEP9IOService"
+      ]
+    },
+    {
+      "target": "0xfffffe000c31c2e4",
+      "symbols": [
+        "__ZN9IOService6detachEPS_"
+      ]
+    },
+    {
+      "target": "0xfffffe000c31c260",
+      "symbols": [
+        "__ZNK9IOService11getProviderEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b24ac50",
+      "symbols": [
+        "__ZNK22AppleUSBHostController11getWorkLoopEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000c31c1b0",
+      "symbols": [
+        "__ZNK9IOService19getProviderIteratorEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000c31c058",
+      "symbols": [
+        "__ZNK9IOService23getOpenProviderIteratorEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000c31c01c",
+      "symbols": [
+        "__ZNK9IOService9getClientEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000c31bfe0",
+      "symbols": [
+        "__ZNK9IOService17getClientIteratorEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000c31bb1c",
+      "symbols": [
+        "__ZNK9IOService21getOpenClientIteratorEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000c31b4e0",
+      "symbols": [
+        "__ZN9IOService20callPlatformFunctionEPK8OSSymbolbPvS3_S3_S3_"
+      ]
+    },
+    {
+      "target": "0xfffffe000c31b410",
+      "symbols": [
+        "__ZN9IOService20callPlatformFunctionEPKcbPvS2_S2_S2_"
+      ]
+    },
+    {
+      "target": "0xfffffe000c31b404",
+      "symbols": [
+        "__ZN9IOService12getResourcesEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000c31b33c",
+      "symbols": [
+        "__ZN9IOService20getDeviceMemoryCountEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000c31b260",
+      "symbols": [
+        "__ZN9IOService24getDeviceMemoryWithIndexEj"
+      ]
+    },
+    {
+      "target": "0xfffffe000c31b1d8",
+      "symbols": [
+        "__ZN9IOService24mapDeviceMemoryWithIndexEjj"
+      ]
+    },
+    {
+      "target": "0xfffffe000c31b14c",
+      "symbols": [
+        "__ZN9IOService15getDeviceMemoryEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000c31b10c",
+      "symbols": [
+        "__ZN9IOService15setDeviceMemoryEP7OSArray"
+      ]
+    },
+    {
+      "target": "0xfffffe000c31afe8",
+      "symbols": [
+        "__ZN9IOService17registerInterruptEiP8OSObjectPFvS1_PvPS_iES2_"
+      ]
+    },
+    {
+      "target": "0xfffffe000c31aef8",
+      "symbols": [
+        "__ZN9IOService19unregisterInterruptEi"
+      ]
+    },
+    {
+      "target": "0xfffffe000c31adf0",
+      "symbols": [
+        "__ZN9IOService16getInterruptTypeEiPi"
+      ]
+    },
+    {
+      "target": "0xfffffe000c31ad30",
+      "symbols": [
+        "__ZN9IOService15enableInterruptEi"
+      ]
+    },
+    {
+      "target": "0xfffffe000c31ac70",
+      "symbols": [
+        "__ZN9IOService16disableInterruptEi"
+      ]
+    },
+    {
+      "target": "0xfffffe000c31a88c",
+      "symbols": [
+        "__ZN9IOService14causeInterruptEi"
+      ]
+    },
+    {
+      "target": "0xfffffe000c31a87c",
+      "symbols": [
+        "__ZN9IOService12requestProbeEj"
+      ]
+    },
+    {
+      "target": "0xfffffe000b24c170",
+      "symbols": [
+        "__ZN22AppleUSBHostController7messageEjP9IOServicePv"
+      ]
+    },
+    {
+      "target": "0xfffffe000c31a4b0",
+      "symbols": [
+        "__ZN9IOService13messageClientEjP8OSObjectPvm"
+      ]
+    },
+    {
+      "target": "0xfffffe000c31a3d4",
+      "symbols": [
+        "__ZN9IOService14messageClientsEjPvm"
+      ]
+    },
+    {
+      "target": "0xfffffe000c319ac0",
+      "symbols": [
+        "__ZN9IOService16registerInterestEPK8OSSymbolPFiPvS3_jPS_S3_mES3_S3_"
+      ]
+    },
+    {
+      "target": "0xfffffe000c319a84",
+      "symbols": [
+        "__ZN9IOService16applyToProvidersEPFvPS_PvES1_"
+      ]
+    },
+    {
+      "target": "0xfffffe000c319a48",
+      "symbols": [
+        "__ZN9IOService14applyToClientsEPFvPS_PvES1_"
+      ]
+    },
+    {
+      "target": "0xfffffe000c319624",
+      "symbols": [
+        "__ZN9IOService17applyToInterestedEPK8OSSymbolPFvP8OSObjectPvES5_"
+      ]
+    },
+    {
+      "target": "0xfffffe000c319614",
+      "symbols": [
+        "__ZN9IOService23acknowledgeNotificationEPvj"
+      ]
+    },
+    {
+      "target": "0xfffffe000c319288",
+      "symbols": [
+        "__ZN9IOService13newUserClientEP4taskPvjP12OSDictionaryPP12IOUserClient"
+      ]
+    },
+    {
+      "target": "0xfffffe000c319278",
+      "symbols": [
+        "__ZN9IOService13newUserClientEP4taskPvjPP12IOUserClient"
+      ]
+    },
+    {
+      "target": "0xfffffe000c3191f8",
+      "symbols": [
+        "__ZN9IOService16stringFromReturnEi"
+      ]
+    },
+    {
+      "target": "0xfffffe000c319004",
+      "symbols": [
+        "__ZN9IOService15errnoFromReturnEi"
+      ]
+    },
+    {
+      "target": "0xfffffe000c33f864",
+      "symbols": [
+        "__ZN9IOService6PMinitEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b24f508",
+      "symbols": [
+        "__ZN22AppleUSBHostController6PMstopEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000c353e50",
+      "symbols": [
+        "__ZN9IOService10joinPMtreeEPS_"
+      ]
+    },
+    {
+      "target": "0xfffffe000c355204",
+      "symbols": [
+        "__ZN9IOService19registerPowerDriverEPS_P14IOPMPowerStatem"
+      ]
+    },
+    {
+      "target": "0xfffffe000c355f84",
+      "symbols": [
+        "__ZN9IOService23requestPowerDomainStateEmP17IOPowerConnectionm"
+      ]
+    },
+    {
+      "target": "0xfffffe000c356f34",
+      "symbols": [
+        "__ZN9IOService14activityTickleEmm"
+      ]
+    },
+    {
+      "target": "0xfffffe000c3571e8",
+      "symbols": [
+        "__ZN9IOService17setAggressivenessEmm"
+      ]
+    },
+    {
+      "target": "0xfffffe000c3571f4",
+      "symbols": [
+        "__ZN9IOService17getAggressivenessEmPm"
+      ]
+    },
+    {
+      "target": "0xfffffe000c3542d4",
+      "symbols": [
+        "__ZN9IOService13addPowerChildEPS_"
+      ]
+    },
+    {
+      "target": "0xfffffe000c354fb4",
+      "symbols": [
+        "__ZN9IOService16removePowerChildEP17IOPowerConnection"
+      ]
+    },
+    {
+      "target": "0xfffffe000c356fa0",
+      "symbols": [
+        "__ZN9IOService18setIdleTimerPeriodEm"
+      ]
+    },
+    {
+      "target": "0xfffffe000b24ea9c",
+      "symbols": [
+        "__ZN22AppleUSBHostController13setPowerStateEmP9IOService"
+      ]
+    },
+    {
+      "target": "0xfffffe000b24ff58",
+      "symbols": [
+        "__ZN22AppleUSBHostController27maxCapabilityForDomainStateEm"
+      ]
+    },
+    {
+      "target": "0xfffffe000b250314",
+      "symbols": [
+        "__ZN22AppleUSBHostController31initialPowerStateForDomainStateEm"
+      ]
+    },
+    {
+      "target": "0xfffffe000c35887c",
+      "symbols": [
+        "__ZN9IOService24powerStateForDomainStateEm"
+      ]
+    },
+    {
+      "target": "0xfffffe000b24f790",
+      "symbols": [
+        "__ZN22AppleUSBHostController22powerStateWillChangeToEmmP9IOService"
+      ]
+    },
+    {
+      "target": "0xfffffe000b24f838",
+      "symbols": [
+        "__ZN22AppleUSBHostController21powerStateDidChangeToEmmP9IOService"
+      ]
+    },
+    {
+      "target": "0xfffffe000c357300",
+      "symbols": [
+        "__ZN9IOService13askChangeDownEm"
+      ]
+    },
+    {
+      "target": "0xfffffe000c357310",
+      "symbols": [
+        "__ZN9IOService14tellChangeDownEm"
+      ]
+    },
+    {
+      "target": "0xfffffe000c357320",
+      "symbols": [
+        "__ZN9IOService16tellNoChangeDownEm"
+      ]
+    },
+    {
+      "target": "0xfffffe000c357a20",
+      "symbols": [
+        "__ZN9IOService12tellChangeUpEm"
+      ]
+    },
+    {
+      "target": "0xfffffe000c357a30",
+      "symbols": [
+        "__ZN9IOService16allowPowerChangeEm"
+      ]
+    },
+    {
+      "target": "0xfffffe000c357ac4",
+      "symbols": [
+        "__ZN9IOService17cancelPowerChangeEm"
+      ]
+    },
+    {
+      "target": "0xfffffe000c358914",
+      "symbols": [
+        "__ZN9IOService15powerChangeDoneEm"
+      ]
+    },
+    {
+      "target": "0xfffffe000b250354",
+      "symbols": [
+        "__ZN22AppleUSBHostController17getSystemWakeTimeEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b24c990",
+      "symbols": [
+        "__ZN22AppleUSBHostController9openGatedEP9IOServicejPv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b24cdac",
+      "symbols": [
+        "__ZN22AppleUSBHostController10closeGatedEP9IOServicej"
+      ]
+    },
+    {
+      "target": "0xfffffe000b24d614",
+      "symbols": [
+        "__ZN22AppleUSBHostController20controllerRegisteredEPvP9IOServiceP10IONotifier"
+      ]
+    },
+    {
+      "target": "0xfffffe000b24d910",
+      "symbols": [
+        "__ZN22AppleUSBHostController30controllerRegisteredThreadCallEP11thread_call"
+      ]
+    },
+    {
+      "target": "0xfffffe000b24c3e4",
+      "symbols": [
+        "__ZN22AppleUSBHostController22didTerminateThreadCallEPNS_32tControllerDidTerminateArgumentsE"
+      ]
+    },
+    {
+      "target": "0xfffffe000b24c5a8",
+      "symbols": [
+        "__ZN22AppleUSBHostController27didTerminateThreadCallGatedEP9IOServicej"
+      ]
+    },
+    {
+      "target": "0xfffffe000b24a164",
+      "symbols": [
+        "__ZN22AppleUSBHostController14stopThreadCallEP11thread_call"
+      ]
+    },
+    {
+      "target": "0xfffffe000b24a5c0",
+      "symbols": [
+        "__ZN22AppleUSBHostController27stopThreadCallCompleteGatedEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b458014",
+      "symbols": [
+        "__ZN12AppleUSBXHCI19stopThreadCallGatedEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b250fcc",
+      "symbols": [
+        "__ZN22AppleUSBHostController10forcePowerEmj"
+      ]
+    },
+    {
+      "target": "0xfffffe000b25bd40",
+      "symbols": [
+        "__ZNK22AppleUSBHostController16getHardwareStateEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b464e0c",
+      "symbols": [
+        "__ZN12AppleUSBXHCI18setPowerStateGatedEmP9IOService"
+      ]
+    },
+    {
+      "target": "0xfffffe000b24fbb4",
+      "symbols": [
+        "__ZN22AppleUSBHostController26powerStateDidChangeToGatedEmmP9IOService"
+      ]
+    },
+    {
+      "target": "0xfffffe000b464e9c",
+      "symbols": [
+        "__ZN12AppleUSBXHCI20lowerOnePowerStateToEm"
+      ]
+    },
+    {
+      "target": "0xfffffe000b465dfc",
+      "symbols": [
+        "__ZN12AppleUSBXHCI20raiseOnePowerStateToEm"
+      ]
+    },
+    {
+      "target": "0xfffffe000b25114c",
+      "symbols": [
+        "__ZN22AppleUSBHostController15forcePowerGatedEmj"
+      ]
+    },
+    {
+      "target": "0xfffffe000b24f704",
+      "symbols": [
+        "__ZN22AppleUSBHostController16pmStopThreadCallEP11thread_call"
+      ]
+    },
+    {
+      "target": "0xfffffe000b251fa8",
+      "symbols": [
+        "__ZN22AppleUSBHostController13setPowerFloorEm"
+      ]
+    },
+    {
+      "target": "0xfffffe000b252118",
+      "symbols": [
+        "__ZN22AppleUSBHostController18setPowerFloorGatedEm"
+      ]
+    },
+    {
+      "target": "0xfffffe000b252804",
+      "symbols": [
+        "__ZNK22AppleUSBHostController17defaultPowerStateEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b25284c",
+      "symbols": [
+        "__ZNK22AppleUSBHostController13maxPowerStateEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b252858",
+      "symbols": [
+        "__ZNK22AppleUSBHostController17applyTunablesDataEP18IOMemoryDescriptorP6OSData"
+      ]
+    },
+    {
+      "target": "0xfffffe000b24e408",
+      "symbols": [
+        "__ZN22AppleUSBHostController14tryAddressLockEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b24e440",
+      "symbols": [
+        "__ZN22AppleUSBHostController18releaseAddressLockEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b458e88",
+      "symbols": [
+        "__ZN12AppleUSBXHCI12createDeviceE31tInternalUSBHostConnectionSpeedjj"
+      ]
+    },
+    {
+      "target": "0xfffffe000b45abac",
+      "symbols": [
+        "__ZN12AppleUSBXHCI13destroyDeviceEP15IOUSBHostDevice"
+      ]
+    },
+    {
+      "target": "0xfffffe000b24e5f4",
+      "symbols": [
+        "__ZN22AppleUSBHostController21createIOUSBHostDeviceE31tInternalUSBHostConnectionSpeedtj"
+      ]
+    },
+    {
+      "target": "0xfffffe000b24e600",
+      "symbols": [
+        "__ZN22AppleUSBHostController11registerHubEP15IOUSBHostDevicePKN11StandardUSB13HubDescriptorE17tRegisterHubFlags"
+      ]
+    },
+    {
+      "target": "0xfffffe000b24e798",
+      "symbols": [
+        "__ZN22AppleUSBHostController11registerHubEP15IOUSBHostDevicePKN11StandardUSB23SuperSpeedHubDescriptorE"
+      ]
+    },
+    {
+      "target": "0xfffffe000b24e930",
+      "symbols": [
+        "__ZN22AppleUSBHostController13unregisterHubEP15IOUSBHostDevice"
+      ]
+    },
+    {
+      "target": "0xfffffe000b45c19c",
+      "symbols": [
+        "__ZN12AppleUSBXHCI16registerHubGatedEP15IOUSBHostDevicePKN11StandardUSB13HubDescriptorE17tRegisterHubFlags"
+      ]
+    },
+    {
+      "target": "0xfffffe000b45c6bc",
+      "symbols": [
+        "__ZN12AppleUSBXHCI26registerSuperSpeedHubGatedEP15IOUSBHostDevicePKN11StandardUSB23SuperSpeedHubDescriptorE"
+      ]
+    },
+    {
+      "target": "0xfffffe000b24ea90",
+      "symbols": [
+        "__ZN22AppleUSBHostController18unregisterHubGatedEP15IOUSBHostDevice"
+      ]
+    },
+    {
+      "target": "0xfffffe000b25325c",
+      "symbols": [
+        "__ZN22AppleUSBHostController10createPipeEPKN11StandardUSB18EndpointDescriptorEPKNS0_23ConfigurationDescriptorEP15IOUSBHostDeviceP18IOUSBHostInterface"
+      ]
+    },
+    {
+      "target": "0xfffffe000b253c80",
+      "symbols": [
+        "__ZN22AppleUSBHostController2ioEP19AppleUSBHostRequest"
+      ]
+    },
+    {
+      "target": "0xfffffe000b2541c8",
+      "symbols": [
+        "__ZN22AppleUSBHostController9abortPipeEP13IOUSBHostPipeiP9IOService"
+      ]
+    },
+    {
+      "target": "0xfffffe000b2546bc",
+      "symbols": [
+        "__ZN22AppleUSBHostController14clearPipeStallEP13IOUSBHostPipe"
+      ]
+    },
+    {
+      "target": "0xfffffe000b254b64",
+      "symbols": [
+        "__ZN22AppleUSBHostController12suspendPipesEP15IOUSBHostDevice"
+      ]
+    },
+    {
+      "target": "0xfffffe000b254fd0",
+      "symbols": [
+        "__ZN22AppleUSBHostController11resumePipesEP15IOUSBHostDevice"
+      ]
+    },
+    {
+      "target": "0xfffffe000b25543c",
+      "symbols": [
+        "__ZN22AppleUSBHostController10adjustPipeEP13IOUSBHostPipeRNS0_22StandardUSBDescriptorsE"
+      ]
+    },
+    {
+      "target": "0xfffffe000b2558e4",
+      "symbols": [
+        "__ZN22AppleUSBHostController9closePipeEP13IOUSBHostPipe"
+      ]
+    },
+    {
+      "target": "0xfffffe000b255d8c",
+      "symbols": [
+        "__ZN22AppleUSBHostController13enableStreamsEP13IOUSBHostPipe"
+      ]
+    },
+    {
+      "target": "0xfffffe000b2561f8",
+      "symbols": [
+        "__ZN22AppleUSBHostController14disableStreamsEP13IOUSBHostPipe"
+      ]
+    },
+    {
+      "target": "0xfffffe000b256664",
+      "symbols": [
+        "__ZN22AppleUSBHostController12createStreamEP15IOUSBHostDeviceP13IOUSBHostPipej"
+      ]
+    },
+    {
+      "target": "0xfffffe000b256b38",
+      "symbols": [
+        "__ZN22AppleUSBHostController11abortStreamEP15IOUSBHostStreami"
+      ]
+    },
+    {
+      "target": "0xfffffe000b257054",
+      "symbols": [
+        "__ZN22AppleUSBHostController11closeStreamEP15IOUSBHostStream"
+      ]
+    },
+    {
+      "target": "0xfffffe000b257550",
+      "symbols": [
+        "__ZN22AppleUSBHostController18enablePacketFilterEPFvPS_P19AppleUSBHostRequestES4_"
+      ]
+    },
+    {
+      "target": "0xfffffe000b2575bc",
+      "symbols": [
+        "__ZN22AppleUSBHostController19disablePacketFilterEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b257610",
+      "symbols": [
+        "__ZN22AppleUSBHostController12filterPacketEP19AppleUSBHostRequesti36tAppleUSBHostControllerFilterRequest"
+      ]
+    },
+    {
+      "target": "0xfffffe000b45cb74",
+      "symbols": [
+        "__ZN12AppleUSBXHCI15createPipeGatedEPN22AppleUSBHostController14CreatePipeArgsERP13IOUSBHostPipe"
+      ]
+    },
+    {
+      "target": "0xfffffe000b45ccc4",
+      "symbols": [
+        "__ZN12AppleUSBXHCI7ioGatedEP19AppleUSBHostRequest"
+      ]
+    },
+    {
+      "target": "0xfffffe000b45db34",
+      "symbols": [
+        "__ZN12AppleUSBXHCI14abortPipeGatedEP13IOUSBHostPipeiP9IOService"
+      ]
+    },
+    {
+      "target": "0xfffffe000b45de18",
+      "symbols": [
+        "__ZN12AppleUSBXHCI19clearPipeStallGatedEP13IOUSBHostPipe"
+      ]
+    },
+    {
+      "target": "0xfffffe000b45dfec",
+      "symbols": [
+        "__ZN12AppleUSBXHCI17suspendPipesGatedEP15IOUSBHostDevice"
+      ]
+    },
+    {
+      "target": "0xfffffe000b45e134",
+      "symbols": [
+        "__ZN12AppleUSBXHCI16resumePipesGatedEP15IOUSBHostDevice"
+      ]
+    },
+    {
+      "target": "0xfffffe000b45e418",
+      "symbols": [
+        "__ZN12AppleUSBXHCI15adjustPipeGatedEP13IOUSBHostPipeRNS0_22StandardUSBDescriptorsE"
+      ]
+    },
+    {
+      "target": "0xfffffe000b45e5c0",
+      "symbols": [
+        "__ZN12AppleUSBXHCI14closePipeGatedEP13IOUSBHostPipe"
+      ]
+    },
+    {
+      "target": "0xfffffe000b45e71c",
+      "symbols": [
+        "__ZN12AppleUSBXHCI18enableStreamsGatedEP13IOUSBHostPipe"
+      ]
+    },
+    {
+      "target": "0xfffffe000b45f354",
+      "symbols": [
+        "__ZN12AppleUSBXHCI19disableStreamsGatedEP13IOUSBHostPipe"
+      ]
+    },
+    {
+      "target": "0xfffffe000b45f484",
+      "symbols": [
+        "__ZN12AppleUSBXHCI17createStreamGatedEP15IOUSBHostDeviceP13IOUSBHostPipejRP15IOUSBHostStream"
+      ]
+    },
+    {
+      "target": "0xfffffe000b45f610",
+      "symbols": [
+        "__ZN12AppleUSBXHCI16abortStreamGatedEP15IOUSBHostStreami"
+      ]
+    },
+    {
+      "target": "0xfffffe000b45f7fc",
+      "symbols": [
+        "__ZN12AppleUSBXHCI16closeStreamGatedEP15IOUSBHostStream"
+      ]
+    },
+    {
+      "target": "0xfffffe000b458d18",
+      "symbols": [
+        "__ZN12AppleUSBXHCI14createIOBufferEjy"
+      ]
+    },
+    {
+      "target": "0xfffffe000b4587f8",
+      "symbols": [
+        "__ZN12AppleUSBXHCI13getDMACommandEjj"
+      ]
+    },
+    {
+      "target": "0xfffffe000b4588f4",
+      "symbols": [
+        "__ZN12AppleUSBXHCI16returnDMACommandEP12IODMACommand"
+      ]
+    },
+    {
+      "target": "0xfffffe000b45892c",
+      "symbols": [
+        "__ZN12AppleUSBXHCI19getDMASpecificationEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b25b2b0",
+      "symbols": [
+        "__ZN22AppleUSBHostController22getBufferSpecificationEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b25b4fc",
+      "symbols": [
+        "__ZN22AppleUSBHostController22getMapperSpecificationEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b25b838",
+      "symbols": [
+        "__ZN22AppleUSBHostController13alignedMapperEN12IODMACommand9Segment64Ejb"
+      ]
+    },
+    {
+      "target": "0xfffffe000b25b8f8",
+      "symbols": [
+        "__ZNK22AppleUSBHostController16getBufferOptionsEj"
+      ]
+    },
+    {
+      "target": "0xfffffe000b25b914",
+      "symbols": [
+        "__ZN22AppleUSBHostController19deferBufferTeardownEP24IOBufferMemoryDescriptor"
+      ]
+    },
+    {
+      "target": "0xfffffe000b2576b0",
+      "symbols": [
+        "__ZN22AppleUSBHostController10copyMapperEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b250360",
+      "symbols": [
+        "__ZN22AppleUSBHostController17currentMicroframeERyS0_"
+      ]
+    },
+    {
+      "target": "0xfffffe000b2504d8",
+      "symbols": [
+        "__ZN22AppleUSBHostController19referenceMicroframeERyS0_"
+      ]
+    },
+    {
+      "target": "0xfffffe000b45b38c",
+      "symbols": [
+        "__ZN12AppleUSBXHCI16getCompanionPortEP16AppleUSBHostPortj"
+      ]
+    },
+    {
+      "target": "0xfffffe000b2592cc",
+      "symbols": [
+        "__ZN22AppleUSBHostController22getCompanionControllerEjh"
+      ]
+    },
+    {
+      "target": "0xfffffe000b259608",
+      "symbols": [
+        "__ZN22AppleUSBHostController28allocateDownstreamBusCurrentEP9IOServiceRjS2_"
+      ]
+    },
+    {
+      "target": "0xfffffe000b25ba1c",
+      "symbols": [
+        "__ZN22AppleUSBHostController17getLPMExitLatencyEj13tUSBLinkState18tUSBLPMExitLatencyRj"
+      ]
+    },
+    {
+      "target": "0xfffffe000b25bbb8",
+      "symbols": [
+        "__ZN22AppleUSBHostController26adjustDeviceMaxExitLatencyEP15IOUSBHostDevicej"
+      ]
+    },
+    {
+      "target": "0xfffffe000b25bd50",
+      "symbols": [
+        "__ZN22AppleUSBHostController23setMaximumPortLinkSpeedEj31tInternalUSBHostConnectionSpeed"
+      ]
+    },
+    {
+      "target": "0xfffffe000b46c714",
+      "symbols": [
+        "__ZNK22AppleUSBHostController12getBusNumberEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b469618",
+      "symbols": [
+        "__ZN12AppleUSBXHCI17createRequestPoolEP10IOWorkLoopP17IOUSBHostIOSource"
+      ]
+    },
+    {
+      "target": "0xfffffe000b25942c",
+      "symbols": [
+        "__ZN22AppleUSBHostController27getCompanionControllerGatedEjhRPS_"
+      ]
+    },
+    {
+      "target": "0xfffffe000b2597b0",
+      "symbols": [
+        "__ZN22AppleUSBHostController33allocateDownstreamBusCurrentGatedEP9IOServiceRjS2_Ri"
+      ]
+    },
+    {
+      "target": "0xfffffe000b46b018",
+      "symbols": [
+        "__ZN12AppleUSBXHCI22getLPMExitLatencyGatedEj13tUSBLinkState18tUSBLPMExitLatencyRj"
+      ]
+    },
+    {
+      "target": "0xfffffe000b46b620",
+      "symbols": [
+        "__ZN12AppleUSBXHCI31adjustDeviceMaxExitLatencyGatedEP15IOUSBHostDevicej"
+      ]
+    },
+    {
+      "target": "0xfffffe000b259a4c",
+      "symbols": [
+        "__ZN22AppleUSBHostController17generateBusNumberERh"
+      ]
+    },
+    {
+      "target": "0xfffffe000b462ef4",
+      "symbols": [
+        "__ZN12AppleUSBXHCI11createPortsEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b45f9ac",
+      "symbols": [
+        "__ZN12AppleUSBXHCI14filterOccurredEP28IOFilterInterruptEventSource"
+      ]
+    },
+    {
+      "target": "0xfffffe000b45fab4",
+      "symbols": [
+        "__ZN12AppleUSBXHCI17interruptOccurredEP22IOInterruptEventSourcei"
+      ]
+    },
+    {
+      "target": "0xfffffe000b469a68",
+      "symbols": [
+        "__ZN12AppleUSBXHCI17hardwareExceptionEj"
+      ]
+    },
+    {
+      "target": "0xfffffe000b469dfc",
+      "symbols": [
+        "__ZN12AppleUSBXHCI27hardwareExceptionThreadCallEj"
+      ]
+    },
+    {
+      "target": "0xfffffe000b25a93c",
+      "symbols": [
+        "__ZN22AppleUSBHostController32hardwareExceptionThreadCallGatedEj"
+      ]
+    },
+    {
+      "target": "0xfffffe000b46a0e8",
+      "symbols": [
+        "__ZN12AppleUSBXHCI27stringFromHardwareExceptionEj"
+      ]
+    },
+    {
+      "target": "0xfffffe000b25771c",
+      "symbols": [
+        "__ZN22AppleUSBHostController18addMapperReferenceEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b257924",
+      "symbols": [
+        "__ZN22AppleUSBHostController21tryAddMapperReferenceEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b257b04",
+      "symbols": [
+        "__ZN22AppleUSBHostController21removeMapperReferenceEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b257d08",
+      "symbols": [
+        "__ZN22AppleUSBHostController20blockMapperReferenceEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b257d70",
+      "symbols": [
+        "__ZN22AppleUSBHostController22unblockMapperReferenceEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b257dd4",
+      "symbols": [
+        "__ZN22AppleUSBHostController12enableMapperEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b258300",
+      "symbols": [
+        "__ZN22AppleUSBHostController13disableMapperEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b258884",
+      "symbols": [
+        "__ZN22AppleUSBHostController17addClockReferenceEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b2588fc",
+      "symbols": [
+        "__ZN22AppleUSBHostController20removeClockReferenceEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b258aec",
+      "symbols": [
+        "__ZN22AppleUSBHostController11enableClockEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b258ed8",
+      "symbols": [
+        "__ZN22AppleUSBHostController12disableClockEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b259e70",
+      "symbols": [
+        "__ZN22AppleUSBHostController19serializeStatisticsEPvP11OSSerialize"
+      ]
+    },
+    {
+      "target": "0xfffffe000b25a024",
+      "symbols": [
+        "__ZN22AppleUSBHostController24serializeStatisticsGatedEP12OSDictionaryP11OSSerialize"
+      ]
+    },
+    {
+      "target": "0xfffffe000b25a330",
+      "symbols": [
+        "__ZN22AppleUSBHostController21updatePowerStatisticsEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b458b30",
+      "symbols": [
+        "__ZN12AppleUSBXHCI21getRawMicroFrameCountEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b458b78",
+      "symbols": [
+        "__ZNK12AppleUSBXHCI20makeMicroframeNumberEyy"
+      ]
+    },
+    {
+      "target": "0xfffffe000b458b84",
+      "symbols": [
+        "__ZN12AppleUSBXHCI30generateRawReferenceMicroframeERy"
+      ]
+    },
+    {
+      "target": "0xfffffe000b25a3d0",
+      "symbols": [
+        "__ZN22AppleUSBHostController15getNvramOptionsEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b46a18c",
+      "symbols": [
+        "__ZN12AppleUSBXHCI8testModeEjN15StandardUSBXHCI13tXHCITestModeE"
+      ]
+    },
+    {
+      "target": "0xfffffe000b46aea8",
+      "symbols": [
+        "__ZNK12AppleUSBXHCI13hasCapabilityENS_11tCapabilityE"
+      ]
+    },
+    {
+      "target": "0xfffffe000b45b308",
+      "symbols": [
+        "__ZN12AppleUSBXHCI16getSlotForDeviceEP15IOUSBHostDevice"
+      ]
+    },
+    {
+      "target": "0xfffffe000b45b348",
+      "symbols": [
+        "__ZN12AppleUSBXHCI16getSlotForDeviceEP18AppleUSBXHCIDevice"
+      ]
+    },
+    {
+      "target": "0xfffffe000b45b50c",
+      "symbols": [
+        "__ZN12AppleUSBXHCI21getCompanionPortGatedEP16AppleUSBHostPortjRS1_"
+      ]
+    },
+    {
+      "target": "0xfffffe000b45fd30",
+      "symbols": [
+        "__ZN12AppleUSBXHCI26isochronousFilterInterruptEP28IOFilterInterruptEventSource"
+      ]
+    },
+    {
+      "target": "0xfffffe000b46010c",
+      "symbols": [
+        "__ZN12AppleUSBXHCI20isochronousInterruptEP22IOInterruptEventSourcei"
+      ]
+    },
+    {
+      "target": "0xfffffe000b46061c",
+      "symbols": [
+        "__ZN12AppleUSBXHCI17ioFilterInterruptEP28IOFilterInterruptEventSource"
+      ]
+    },
+    {
+      "target": "0xfffffe000b4606ac",
+      "symbols": [
+        "__ZN12AppleUSBXHCI11ioInterruptEP22IOInterruptEventSourcei"
+      ]
+    },
+    {
+      "target": "0xfffffe000b460f48",
+      "symbols": [
+        "__ZN12AppleUSBXHCI22primaryFilterInterruptEP28IOFilterInterruptEventSource"
+      ]
+    },
+    {
+      "target": "0xfffffe000b460f8c",
+      "symbols": [
+        "__ZN12AppleUSBXHCI16primaryInterruptEP22IOInterruptEventSourcei"
+      ]
+    },
+    {
+      "target": "0xfffffe000b462420",
+      "symbols": [
+        "__ZN12AppleUSBXHCI13portInterruptEPKN15StandardUSBXHCI18StandardUSBXHCITRBE"
+      ]
+    },
+    {
+      "target": "0xfffffe000b4629b0",
+      "symbols": [
+        "__ZN12AppleUSBXHCI25manuallyProcessInterruptsEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b462a5c",
+      "symbols": [
+        "__ZN12AppleUSBXHCI12ringDoorbellEjj"
+      ]
+    },
+    {
+      "target": "0xfffffe000b464580",
+      "symbols": [
+        "__ZN12AppleUSBXHCI10createPortEPN15StandardUSBXHCI33StandardUSBXHCIProtocolCapabilityEjj"
+      ]
+    },
+    {
+      "target": "0xfffffe000b467818",
+      "symbols": [
+        "__ZN12AppleUSBXHCI5resetEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b46815c",
+      "symbols": [
+        "__ZN12AppleUSBXHCI9saveStateEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b4689e0",
+      "symbols": [
+        "__ZN12AppleUSBXHCI12restoreStateEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b4584ac",
+      "symbols": [
+        "__ZN12AppleUSBXHCI24cacheCapabilityRegistersEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b4585e8",
+      "symbols": [
+        "__ZN12AppleUSBXHCI17getNextCapabilityEPv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b458678",
+      "symbols": [
+        "__ZN12AppleUSBXHCI23getNextLegacyCapabilityEPv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b458738",
+      "symbols": [
+        "__ZN12AppleUSBXHCI25getNextProtocolCapabilityEPv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b46933c",
+      "symbols": [
+        "__ZN12AppleUSBXHCI20createInternalDeviceEj"
+      ]
+    },
+    {
+      "target": "0xfffffe000b4693d4",
+      "symbols": [
+        "__ZN12AppleUSBXHCI22createInternalEndpointEP18AppleUSBXHCIDevicePKN11StandardUSB18EndpointDescriptorEPKNS2_23ConfigurationDescriptorE"
+      ]
+    },
+    {
+      "target": "0xfffffe000b4695d8",
+      "symbols": [
+        "__ZN12AppleUSBXHCI18createTransferRingEP20AppleUSBXHCIEndpointj"
+      ]
+    },
+    {
+      "target": "0xfffffe000b4695ec",
+      "symbols": [
+        "__ZN12AppleUSBXHCI29createIsochronousTransferRingEP20AppleUSBXHCIEndpoint"
+      ]
+    },
+    {
+      "target": "0xfffffe000b4695fc",
+      "symbols": [
+        "__ZN12AppleUSBXHCI12createTDPoolEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b469610",
+      "symbols": [
+        "__ZN12AppleUSBXHCI17createCommandRingEP23AppleUSBXHCIInterrupterjP8IOMapper"
+      ]
+    },
+    {
+      "target": "0xfffffe000b46c0e8",
+      "symbols": [
+        "__ZN12AppleUSBXHCI28registerPeriodicTransferRingEP24AppleUSBXHCITransferRing"
+      ]
+    },
+    {
+      "target": "0xfffffe000b46c3c8",
+      "symbols": [
+        "__ZN12AppleUSBXHCI30unregisterPeriodicTransferRingEP24AppleUSBXHCITransferRing"
+      ]
+    },
+    {
+      "target": "0xfffffe000b46c6f8",
+      "symbols": [
+        "__ZN12AppleUSBXHCI25getPeriodicBandwidthUsageEv"
+      ]
+    },
+    {
+      "target": "0xfffffe000b46c704",
+      "symbols": [
+        "__ZN12AppleUSBXHCI27updateSystemPowerManagementENS_26XHCIPeriodicBandwidthUsageE"
+      ]
+    },
+    {
+      "target": "0xfffffe000b46c720",
+      "symbols": [
+        "__ZN12AppleUSBXHCI9regRead16Eyj"
+      ]
+    },
+    {
+      "target": "0xfffffe000b46c760",
+      "symbols": [
+        "__ZN12AppleUSBXHCI9regRead32Eyj"
+      ]
+    },
+    {
+      "target": "0xfffffe000b46c76c",
+      "symbols": [
+        "__ZN12AppleUSBXHCI9regRead64Eyj"
+      ]
+    },
+    {
+      "target": "0xfffffe000b46c778",
+      "symbols": [
+        "__ZN12AppleUSBXHCI10regWrite32Eyjj"
+      ]
+    },
+    {
+      "target": "0xfffffe000b46c788",
+      "symbols": [
+        "__ZN12AppleUSBXHCI10regWrite64Eyjy"
+      ]
+    },
+    {
+      "target": "0xfffffe000b46c798",
+      "symbols": [
+        "__ZN12AppleUSBXHCI7regOr32Eyjj"
+      ]
+    },
+    {
+      "target": "0xfffffe000b46c848",
+      "symbols": [
+        "__ZN12AppleUSBXHCI7regOr64Eyjy"
+      ]
+    },
+    {
+      "target": "0xfffffe000b46c8f8",
+      "symbols": [
+        "__ZN12AppleUSBXHCI8regAnd32Eyjj"
+      ]
+    },
+    {
+      "target": "0xfffffe000b46c9a8",
+      "symbols": [
+        "__ZN12AppleUSBXHCI8regAnd64Eyjy"
+      ]
+    },
+    {
+      "target": "0xfffffe000b46bd40",
+      "symbols": [
+        "__ZN12AppleUSBXHCI22executePendingCommandsEP18AppleUSBXHCIDevice"
+      ]
+    }
+  ],
+  "bindings": {
+    "__ZN12AppleUSBXHCIC2EPK11OSMetaClass": "0xfffffe000b454978",
+    "__ZN12AppleUSBXHCID2Ev": "0xfffffe000b4549e8",
+    "__ZN12AppleUSBXHCI10gMetaClassE": "0xfffffe000cc7c3f8",
+    "__ZTV12AppleUSBXHCI": "0xfffffe0008a0dc60"
+  }
+}

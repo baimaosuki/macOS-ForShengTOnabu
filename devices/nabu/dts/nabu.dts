@@ -14,3 +14,58 @@
         framebuffer@9c000000 { reg = <0 0x9c000000 0 0x1000000>; no-map; };
     };
 };
+
+/ {
+    // Low-address resources cannot live in arm-io's nonzero SoC window.
+    nabu_inputs@100000 {
+        unixnu,adt-root = "nabu-input";
+        compatible = "xiaomi,nabu-input";
+        #address-cells = <2>; #size-cells = <2>;
+        reg = <0 0x00100000 0 0x100000>, <0 0x00c84000 0 0x4000>,
+              <0 0x03517000 0 0x4000>, <0 0x03927000 0 0x1000>;
+        reg-names = "gcc", "geni-se18", "spi-tlmm", "touch-irq-tlmm";
+        interrupts = <0 583 4>;
+        clock-frequency = <9600000>;
+        nabu,irq-pin = <39>;
+        nabu,irq-flags = <1>;
+        nabu,spi-pins = <23 24 25 26>;
+        nabu,panel-size = <1600 2560>;
+        nabu,software-reset = <0x3f0fe>;
+        nabu,fast-read = <0x3f310>;
+    };
+    nabu_touch {
+        unixnu,adt-root = "nabu-touch";
+        compatible = "novatek,nt36523";
+        nabu,private-firmware;
+    };
+    soc {
+        usb_host: usb@a600000 {
+            unixnu,adt-name = "usb-host0";
+            compatible = "xiaomi,nabu-dwc3", "snps,dwc3";
+            reg = <0 0x0a600000 0 0xcd00>, <0 0x0a6f8800 0 0x400>;
+            reg-names = "core", "qscratch";
+            interrupts = <0 133 4>;
+            iommus = <&apps_smmu 0x140 0>;
+            dma-coherent;
+            maximum-speed = "high-speed";
+            dr_mode = "host";
+        };
+        usb_phy: phy@88e2000 {
+            unixnu,adt-name = "usb-hsphy";
+            compatible = "qcom,usb-hsphy-snps-femto";
+            reg = <0 0x088e2000 0 0x110>;
+            nabu,rail-millivolts = <880 1800 3072>;
+            nabu,phy-overrides = <4 0x70 0x2c 0x74>;
+        };
+        spmi: spmi@c440000 {
+            unixnu,adt-name = "spmi";
+            compatible = "qcom,spmi-pmic-arb";
+            reg = <0 0x0c440000 0 0x1100>, <0 0x0c600000 0 0x2000000>,
+                  <0 0x0e600000 0 0x100000>, <0 0x0c40a000 0 0x26000>;
+            reg-names = "core", "chnls", "obsrvr", "cnfg";
+            nabu,ee = <0>;
+            nabu,power-key = <0 0x0800 0x10 1>;
+            nabu,vbus-regs = <2 0x1140 0x1153 0x150b 0x1310>;
+        };
+    };
+};

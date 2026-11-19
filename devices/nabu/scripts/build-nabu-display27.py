@@ -570,7 +570,7 @@ if MACOS:
 # Board-owned NT36523 transport; bind this OS's native HID base, never 21H16 offsets.
 if MACOS:
     import importlib.util
-    touch_spec=importlib.util.spec_from_file_location('nabu_touch27',Path(__file__).with_name('build-nabu-touch27.py'))
+    touch_spec=importlib.util.spec_from_file_location('nabu_input27',Path(__file__).with_name('build-nabu-input27.py'))
     touch=importlib.util.module_from_spec(touch_spec);touch_spec.loader.exec_module(touch)
     input_objects += touch.build(ROOT,OUT,compile_cpp,run,llvm,TRIPLE,sdk,macho)
 
@@ -582,7 +582,7 @@ sources = [ROOT / 'drivers/GopFramebuffer/NativeLegacyDisplay.cpp', ROOT / 'driv
            ROOT / 'drivers/GopFramebuffer/NativeGOPPresenter.cpp', ROOT / 'drivers/GopFramebuffer/NativeGOPWire.h', ROOT / 'drivers/GopFramebuffer/NativeHalfCodes.h',
            source, ABI_PATH, keystore_source, ROOT / 'drivers/AppleKeyStoreState/NativeKeyStoreEvents.cpp',
            KITS / 'ShengEthernet.cpp', KITS / 'SoftwareAesProbe.cpp', ROOT / 'drivers/SoftwareAES/NativeAES.cpp', Path(__file__)]
-sources += [KITS/'NabuTouch.cpp',KITS/'NabuTouchPointer.h',Path(__file__).with_name('build-nabu-touch27.py'),Path(__file__).with_name('hid-device-26C5035r.json')]
+sources += [KITS/'NabuInputHardware.cpp',KITS/'NabuInputHardware.h',KITS/'NabuInputStart.cpp',KITS/'NabuPowerKey.cpp',KITS/'NabuPowerReport.h',KITS/'NabuSpmiV5.h',KITS/'NabuUsbHost.cpp',KITS/'NabuUsb2Core.h',KITS/'NabuUsbRole.h',KITS/'NabuUsbSmmu.h',KITS/'NabuUsbDma.h',KITS/'NabuRpmh.h',Path(__file__).with_name('build-nabu-input27.py'),Path(__file__).with_name('build-nabu-usb27.py'),Path(__file__).with_name('usb-xhci-26C5035r.json'),KITS/'NabuTouch.cpp',KITS/'NabuTouchPointer.h',Path(__file__).with_name('build-nabu-touch27.py'),Path(__file__).with_name('hid-device-26C5035r.json')]
 sources += sorted((ROOT / 'drivers/GopFramebuffer').glob('nabu_*.h'))
 sources += sorted((ROOT / 'drivers/GopFramebuffer').glob('nabu_*.inc'))
 sources += [ROOT / 'drivers/GopFramebuffer/gop_layers.h']

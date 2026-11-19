@@ -24,8 +24,10 @@ jobs:
       - name: Require Intel host and report SDK
         run: |
           test "$(uname -m)" = x86_64
+          sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
           xcodebuild -version
           xcrun --sdk macosx --show-sdk-version
+          test "$(xcrun --sdk macosx --show-sdk-version)" = 26.5
       - name: Build and verify signed standard arm64 boot tools
         run: python3 devices/nabu/scripts/build-boot-tools.py --output out/nabu27-boot-tools
       - uses: actions/upload-artifact@v4
@@ -47,9 +49,12 @@ jobs:
       - name: Require Intel host and report SDKs
         run: |
           test "$(uname -m)" = x86_64
+          sudo xcode-select -s /Applications/Xcode_26.6.app/Contents/Developer
           xcodebuild -version
           xcrun --sdk iphoneos --show-sdk-version
+          test "$(xcrun --sdk iphoneos --show-sdk-version)" = 26.5
           xcrun --sdk macosx --show-sdk-version
+          test "$(xcrun --sdk macosx --show-sdk-version)" = 26.5
       - name: Install upstream build tools
         run: |
           brew install cmake ninja unifdef llvm lld dtc

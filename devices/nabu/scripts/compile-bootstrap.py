@@ -31,6 +31,12 @@ def main():
                         str(ROOT / 'devices/nabu/tests/test_touch_pointer27.cpp'),
                         '-o', str(pointer_test)], check=True)
         subprocess.run([str(pointer_test)], check=True)
+    with tempfile.TemporaryDirectory(prefix='nabu-input-host-') as temporary:
+        test = Path(temporary) / 'hardware-test'
+        subprocess.run(['c++', '-std=c++17', '-Wall', '-Wextra', '-Werror',
+                        '-I', str(ROOT / 'devices/nabu/package'),
+                        str(ROOT / 'devices/nabu/tests/test_input_hardware27.cpp'), '-o', str(test)], check=True)
+        subprocess.run([str(test)], check=True)
     subprocess.run([sys.executable, str(ROOT / 'devices/nabu/tests/test_power_hold27.py')], check=True)
     args = cli.parser().parse_args([
         "build", "kernel", "-D", str(ROOT / "devices/nabu"), "--os", "macos-27"
