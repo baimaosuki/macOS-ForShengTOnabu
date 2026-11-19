@@ -217,6 +217,9 @@ def hardware_properties(entry, handles, base=0):
             properties.append((key, raw))
         elif key in U32:
             properties.append((key, struct.pack('<I', entry.scalar(key))))
+            if key == 'phandle' or (key == 'linux,phandle' and 'phandle' not in entry.properties):
+                # XNU AddPHandle/FindPHandle index AAPL,phandle, not Linux phandle.
+                properties.append(('AAPL,phandle', struct.pack('<I', entry.scalar(key))))
         elif key in U64:
             cells = entry.cells(key)
             if len(cells) not in (1, 2):

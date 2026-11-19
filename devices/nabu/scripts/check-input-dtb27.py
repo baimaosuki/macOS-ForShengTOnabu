@@ -53,6 +53,21 @@ def main():
         props,children=item;path+='/'+props['name'].rstrip(b'\0').decode();nodes[path]=props
         for child in children:walk(child,path)
     walk(parsed)
+    # Replay XNU AddPHandle: only controllers carrying AAPL,phandle are indexed.
+    controllers={struct.unpack('<I',props['AAPL,phandle'])[0]:path for path,props in nodes.items()
+                 if '#interrupt-cells' in props and 'AAPL,phandle' in props}
+    interrupt_links=[]
+    for path,props in nodes.items():
+        if 'interrupts' not in props:continue
+        assert 'interrupt-parent' in props,path
+        parent=struct.unpack('<I',props['interrupt-parent'])[0]
+        assert parent in controllers,(path,parent,'XNU FindPHandle would return NULL')
+        controller=nodes[controllers[parent]]
+        cells=struct.unpack('<I',controller['#interrupt-cells'])[0]
+        assert cells>0 and len(props['interrupts'])%(cells*4)==0,path
+        assert 'interrupt-controller' in controller,path
+        interrupt_links.append(dict(node=path,parent=controllers[parent],handle=parent))
+    assert len(interrupt_links)>=2
     chosen=nodes['/device-tree/chosen'];assert 'ephemeral-storage' not in chosen
     board=nodes['/device-tree/nabu-input'];assert struct.unpack('<4I',board['nabu,spi-pins'])==(23,24,25,26)
     arm=nodes['/device-tree/arm-io'];_,base,_=struct.unpack('<3Q',arm['ranges'])
@@ -61,7 +76,7 @@ def main():
     assert struct.unpack('<3I',usb['interrupts'])==(0,133,4)
     assert struct.unpack('<3I',usb['iommus'])[1]==0x140
     touch=nodes['/device-tree/nabu-touch'];assert len(touch['firmware'])==196608
-    result=dict(result='pass',vendor_sha256=hashlib.sha256(a.vendor_dtb.read_bytes()).hexdigest(),
+    result=dict(result='pass',xnu_interrupt_links=interrupt_links,vendor_sha256=hashlib.sha256(a.vendor_dtb.read_bytes()).hexdigest(),
         checks=checks,adt_bytes=len(adt),adt_sha256=hashlib.sha256(adt).hexdigest(),
         firmware_sha256=hashlib.sha256(touch['firmware']).hexdigest(),ephemeral_storage=False,device_tested=False)
     (a.output/'adt-check.json').write_text(json.dumps(result,indent=2)+'\n');print('Vendor DTB and emitted production ADT: PASS')
