@@ -5,6 +5,15 @@
 #include <IOKit/IOLib.h>
 #include <IOKit/IOMemoryDescriptor.h>
 
+static IOReturn nabuMaintainImportedResource(NativeAdrenoVm *vm,uint64_t handle,bool completed)
+{
+    const NativeAdrenoMemory *backing=vm->resourceBacking(handle);
+    if(!backing)return kIOReturnBadArgument;
+    if(!backing->maintainedImport())return kIOReturnSuccess;
+    NativeAdrenoMemory *memory=const_cast<NativeAdrenoMemory *>(backing);
+    return completed?memory->acquireDeviceWrites(0,memory->bytes()):memory->publishForDevice(0,memory->bytes());
+}
+
 /* CP_INDIRECT_BUFFER is opcode 0x3f with a 3-word payload: 64-bit GPU address
  * and IB_SIZE in dwords (bits 0..19), exactly as the pinned adreno_pm4.xml
  * domain states and Linux msm_gem_submit.c converts the userspace byte size. */
@@ -811,6 +820,7 @@ IOReturn NativeAdrenoSubmit::release(Job &job)
             if(!job.resources[at].owns_reference) {
                 continue;
             }
+            if(nabuMaintainImportedResource(vm_,job.resources[at].handle,true))return poison();
             if(vm_->retireJobAfterCompletion(job.resources[at].handle)) {
                 return poison();
             }
@@ -1061,6 +1071,10 @@ IOReturn NativeAdrenoSubmit::submitResources(const NativeAdrenoSubmitBuffer *buf
     uint32_t import_count=0;
     for(size_t at=0;at<resource_count;++at) {
         const NativeAdrenoSubmitResource &resource=held[at];
+        if(resource.owns_reference) {
+            status=nabuMaintainImportedResource(vm_,resource.handle,false);
+            if(status)break;
+        }
         if(vm_->resourceImported(resource.handle)) {
             import_count+=resource.owns_reference;
             import_bytes+=resource.bytes;

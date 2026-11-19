@@ -71,7 +71,7 @@ static NativeGOPPresenter *gHandoff;
 '''
 test=r'''
 int main(){
- NativeGOPPresenter p;gHandoff=&p;int ownerA,ownerB,task;NGPMode mode{};
+ NativeGOPPresenter p;gHandoff=&p;int ownerA=0,ownerB=0,task=0;NGPMode mode{};
  assert(!p.ownedCall(0,&task,&ownerA,nullptr,0,&mode,sizeof mode));assert(mode.width==1600 && mode.bytes==16384000);
  assert(p.ownedCall(0,&task,&ownerB,nullptr,0,&mode,sizeof mode)==kIOReturnBusy);
  assert(p.ownedCall(0,&task,&ownerA,nullptr,1,&mode,sizeof mode)==kIOReturnBadArgument);

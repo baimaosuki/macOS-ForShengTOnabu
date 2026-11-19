@@ -100,6 +100,7 @@ jobs:
             out/nabu27-gpu-profile-host/verification.json
             out/nabu27-gpu-wire-host/
             out/nabu27-gpu-bo-host/
+            out/nabu27-gpu-cache-host/
             out/nabu27-gpu-handoff-host/
             out/nabu/**/zeta-pac-verification/verification.json
             out/nabu/**/esp-log-verification/*.log
