@@ -82,5 +82,6 @@ and CodeResources stay unchanged. Other addon destinations are preserved.
 WindowServer and backboardd share render-server export/diagnostics policy.
 Submit caps report KernelCacheMaintenance rather than hardware coherence, and
 legacy, V2 and async submissions apply the same foreground/background priority.
-Host replays cover the routing and all three submission paths. These corrections
-still require a new full native build and device validation.
+Host replays cover the routing and all three submission paths. Full native CI
+44640851880 at 49d151a, final prelink/replays and FAT/ZIP verification passed.
+Device validation is still pending.
