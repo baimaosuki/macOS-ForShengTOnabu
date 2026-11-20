@@ -548,7 +548,7 @@ class AGXDeviceUserClient : public IOUserClient {
      * the descriptor again and unmaps only a mapping that belongs to THAT descriptor (kIOMapReference); a fresh descriptor per call made the
      * unmap a silent no-op, the user PTEs outlived BoCpuUnmap, and BoFree handed pages with a live user mapping to the VM:
      * pmap_assert_free panicked the freeing core and the panic screen parked it (the "BoFree hang", dead touch). */
-    struct View {uint32_t token;IOMemoryDescriptor *descriptor;};
+    struct View {uint32_t token;IOMemoryDescriptor *descriptor;IOOptionBits options;};
     /* One view per live BO token. The cache must hold every BO the client can have (NativeAdrenoClientMaxObjects): a BO whose view is not
      * cached makes IOConnectUnmapMemory64 (which asks clientMemoryForType again) a no-op, the user mapping outlives BoFree and the freed pages panic
      * pmap_assert_free. A cache of 64 held until the render server's hundreds of mapped BOs (int-087). */
@@ -1155,7 +1155,7 @@ IOReturn AGXDeviceUserClient::legacyMemoryForType(UInt32 type,IOOptionBits *opti
     if(!views_)views_=IONewZero(View,MaxViews);
     if(!views_) {IOLockUnlock(g.lock);return kIOReturnNoMemory;}
     for(size_t i=0;i<MaxViews;++i)if(views_[i].descriptor && views_[i].token==type) {
-        views_[i].descriptor->retain();*memory=views_[i].descriptor;*options=kIOMapAnywhere;
+        views_[i].descriptor->retain();*memory=views_[i].descriptor;*options=views_[i].options;
         native_adreno_view_diag[2]=native_adreno_view_diag[2]+1;
         IOLockUnlock(g.lock);
         return kIOReturnSuccess;
@@ -1182,14 +1182,16 @@ IOReturn AGXDeviceUserClient::legacyMemoryForType(UInt32 type,IOOptionBits *opti
                 if(!descriptor)status=kIOReturnNoMemory;
                 else {
                     bool cached=false;
-                    for(size_t i=0;i<MaxViews;++i)if(!views_[i].descriptor) {views_[i].token=type;views_[i].descriptor=descriptor;descriptor->retain();cached=true;break;}
+                    const IOOptionBits cacheOptions=kIOMapAnywhere|
+                        (backing->writeCombined()?kIOMapWriteCombineCache:kIOMapCopybackCache);
+                    for(size_t i=0;i<MaxViews;++i)if(!views_[i].descriptor) {views_[i].token=type;views_[i].descriptor=descriptor;views_[i].options=cacheOptions;descriptor->retain();cached=true;break;}
                     if(!cached) {
                         /* Never hand out a view that cannot be torn down again. */
                         descriptor->release();
                         status=kIOReturnNoResources;
                     } else {
                         *memory=descriptor;
-                        *options=kIOMapAnywhere|(backing->writeCombined()?kIOMapWriteCombineCache:kIOMapCopybackCache);
+                        *options=cacheOptions;
                         native_adreno_view_diag[1]=native_adreno_view_diag[1]+1;
                         status=kIOReturnSuccess;
                     }

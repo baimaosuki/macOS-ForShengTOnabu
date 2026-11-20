@@ -27,14 +27,13 @@ template<class Read> nabu_usb::smmu::Plan usbIdentityPlan(Read read,const nabu_u
         if(used || b<info.num_s2_cb)continue;
         const uint32_t control=read(sm::context_offset(info.global_pages,b));
         const uint32_t cbar=read(sm::kCbarBase+4*b),cba2r=read(sm::kCba2rBase+4*b);
-        // Firmware initializes unused AArch64 S1 banks too: CBAR=1f000,
-        // CBA2R=1 and disabled SCTLR=9f00e0 are not reset zeros. An unreferenced
-        // bank with M=0 and that qualified S1/S2-bypass type can be programmed
-        // while USB is halted. Never reuse an enabled or stream-owned bank.
-        const bool reset=!control && !cbar && !cba2r;
-        const bool disabled=!(control&sm::kSctlrM) &&
-            cbar==0x0001f000 && cba2r==sm::kCba2rVa64;
-        if(!reset && !disabled)continue;
+        // NUMS2CB excludes stage-2-only banks. For the remaining S1 banks,
+        // ownership is determined by live stream routes and SCTLR.M, not by
+        // reset values of CBAR/CBA2R or unrelated SCTLR bits. Disabled banks
+        // may retain firmware state (or architecturally UNKNOWN reset bits).
+        // The halted controller programs the complete context and checks it
+        // before enabling the exact USB SID. Never take an enabled/used bank.
+        if(control&sm::kSctlrM)continue;
         sm::Plan plan={};plan.valid=true;plan.index=slot;plan.bank=b;plan.global_pages=info.global_pages;
         plan.sctlr=control;plan.cbar=cbar;plan.cba2r=cba2r;return plan;
     }

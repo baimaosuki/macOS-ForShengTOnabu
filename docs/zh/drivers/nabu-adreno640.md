@@ -79,3 +79,21 @@ WindowServer 的未完成任务。回归用旧生产函数复现错误，修正�
 真实 ARM64 ring 回放扩展到 400 次带 IB 的提交、包校验、上下文前导和一次环回绕；
 该 Host 测试不执行固件或着色器。首个 CP 故障按原厂 SQE selector 抓取 opcode，
 并保留有效位与 live fence，避免后续空 IRQ 覆盖；P025 具体坏命令仍待真机定位。
+
+
+P026 hardware follow-up (2026-11-20): the installed publish marker is present,
+and the production source identity matches P030 despite the unchanged logger
+build ID. Scratch/fence 1 succeeds, but the first framed IB submission fails
+with CP_OPCODE_ERROR (opcode register 0, RPTR=WPTR=51, submitted/completed=2/1).
+WindowServer subsequently aborts in WSSystemCanCompositeWithMetal; no rendered
+GPU desktop is established. This log has no ring/IB snapshot and cannot identify
+the actual offending instruction from opcode 0 alone.
+
+Legacy BO view reuse now preserves the same WC/WB map options as the first
+mapping. The previous cached-view branch returned default cache flags, allowing
+a second mapping to disagree with its allocation on this NC GPU path. Host
+regression executes the production method and reproduces the prior failure;
+this does not prove it caused the P026 first-submission fault. The production
+resource-submit path now retains a bounded first-IB head, and a CP failure prints
+only the latest ring/IB snapshot once, including read status and captured length.
+No arbitrary physical alias or per-frame pixel scan is added.

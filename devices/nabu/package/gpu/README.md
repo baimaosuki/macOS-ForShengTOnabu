@@ -77,3 +77,21 @@ profiling request, not in static BSS. This keeps the native DATA segment below
 the first retained 26C5035r kext (Libm at DATA + 0x284000). Allocation failures
 and concurrent requests are exercised against the production recorder with
 ASan/UBSan; no request or partial allocation can enable profiling.
+
+
+P026 hardware follow-up (2026-11-20): the installed publish marker is present,
+and the production source identity matches P030 despite the unchanged logger
+build ID. Scratch/fence 1 succeeds, but the first framed IB submission fails
+with CP_OPCODE_ERROR (opcode register 0, RPTR=WPTR=51, submitted/completed=2/1).
+WindowServer subsequently aborts in WSSystemCanCompositeWithMetal; no rendered
+GPU desktop is established. This log has no ring/IB snapshot and cannot identify
+the actual offending instruction from opcode 0 alone.
+
+Legacy BO view reuse now preserves the same WC/WB map options as the first
+mapping. The previous cached-view branch returned default cache flags, allowing
+a second mapping to disagree with its allocation on this NC GPU path. Host
+regression executes the production method and reproduces the prior failure;
+this does not prove it caused the P026 first-submission fault. The production
+resource-submit path now retains a bounded first-IB head, and a CP failure prints
+only the latest ring/IB snapshot once, including read status and captured length.
+No arbitrary physical alias or per-frame pixel scan is added.

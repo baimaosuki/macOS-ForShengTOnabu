@@ -87,6 +87,8 @@ struct Hardware {
         uint32_t cb=sm::context_offset(info.global_pages,plan.bank);
         // Disable only USB's exact stream; UFS and all other firmware mappings survive.
         smmu.write(sm::kSmrBase+4*plan.index,0);
+        smmu.write(cb,0);
+        if(smmu.read(cb)!=0){IOLog("NABU USB: SMMU context disable readback failed CB=%u\n",plan.bank);return false;}
         smmu.write(sm::kCba2rBase+4*plan.bank,1);
         smmu.write(sm::kCbarBase+4*plan.bank,(1u<<16)|(15u<<12)|(3u<<8));
         smmu.write(cb+0x10,1u|(7u<<15)); // 36-bit output, matching SM8150 DRAM

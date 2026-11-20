@@ -123,3 +123,17 @@ streams, stage-2 banks, reserved UFS CB1/slot2 and unknown configurations remain
 excluded. The candidate is rechecked immediately before programming. Host tests
 cover these states; P025 does not contain every candidate CB value, so actual
 USB enumeration and the selected candidate still require a new device log.
+
+
+P026 still stops USB after successful HCRST at no-free-context-bank. The planner
+now tests actual ownership of S1-capable banks: SCTLR.M must be clear and no valid
+stream may reference the bank. Requiring reset values or one UFS CBAR/CBA2R
+pattern incorrectly rejected other disabled contexts. Context registers can
+retain firmware state or UNKNOWN reset bits; they are completely reprogrammed
+while the controller is halted. CB0/CB1, UFS slot2, stage-2-only banks, live routes
+and enabled banks remain excluded. SCTLR disable is explicitly written and read
+back before installing the table. The candidate is still rechecked before writes;
+there is no global SMMU reset. Actual candidate selection and native USB/HID
+enumeration remain unverified on hardware. P026 touch data includes valid HID
+reports but many idle checksum drops; no blanket acceptance of invalid packets
+has been introduced.

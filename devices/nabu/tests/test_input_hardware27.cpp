@@ -190,7 +190,20 @@ int main(){
     plan=nabu::usbIdentityPlan(read,info,0x140);assert(plan.valid && plan.bank==54);
     mmio[sm::kSmrBase+12]=sm::kSmrValid|0x222;mmio[sm::kS2crBase+12]=54;
     plan=nabu::usbIdentityPlan(read,info,0x140);assert(plan.valid && plan.bank==53);
-    for(unsigned b=2;b<info.num_cb;++b)mmio[sm::kCbarBase+4*b]=0x20000;
+    // Disabled, unreferenced S1-capable banks need not contain reset zeros or
+    // the one previously observed UFS firmware template. Old code rejects all.
+    for(unsigned b=2;b<info.num_cb;++b){
+        mmio[sm::context_offset(info.global_pages,b)]=0x362a211e;
+        mmio[sm::kCbarBase+4*b]=0;mmio[sm::kCba2rBase+4*b]=0;
+    }
+    plan=nabu::usbIdentityPlan(read,info,0x140);assert(plan.valid && plan.bank==55);
+    mmio[sm::kCbarBase+4*55]=0x20000; // previous disabled type is overwritten
+    plan=nabu::usbIdentityPlan(read,info,0x140);assert(plan.valid && plan.bank==55);
+    info.num_s2_cb=55;plan=nabu::usbIdentityPlan(read,info,0x140);assert(plan.valid && plan.bank==55);
+    mmio[sm::context_offset(info.global_pages,55)]|=1;
+    assert(!nabu::usbIdentityPlan(read,info,0x140).valid); // never borrow a stage-2-only bank
+    info.num_s2_cb=0;
+    for(unsigned b=2;b<info.num_cb;++b)mmio[sm::context_offset(info.global_pages,b)]|=1;
     assert(!nabu::usbIdentityPlan(read,info,0x140).valid);
     assert(!nabu::usbIdentityBlock(0)&&!nabu::usbIdentityBlock(1)&&!nabu::usbIdentityBlock(8));
     assert((nabu::usbIdentityBlock(3)&~0x3fffffffull)==0xc0000000ull);

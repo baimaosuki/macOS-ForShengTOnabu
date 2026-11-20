@@ -91,6 +91,9 @@ extern "C" void nabu_capture_append(const char *,unsigned);
 extern "C" {
 volatile uint64_t native_adreno_fence_phys=0;
 volatile uint32_t native_adreno_a6xx_stats[24];
+extern volatile uint32_t native_adreno_ring_log[4][4+112],native_adreno_ring_log_count;
+extern volatile uint32_t native_adreno_ib_log[4][4+28],native_adreno_ib_log_count;
+extern volatile uint32_t native_adreno_ib_log_words[4],native_adreno_ib_log_status[4];
 }
 
 namespace {
@@ -1150,6 +1153,33 @@ IOReturn A640State::fail(IOReturn status)
         IOLog("NabuGPU: first-cp-fault irq=%08x cp=%08x protect=%08x valid=%x opcode=%08x rptr=%u wptr=%u hw=%08x live_fence=%u/%u\n",
             cpFault.irq,cpFault.cp,cpFault.protect,cpFault.valid,cpFault.opcode,
             cpFault.rptr,cpFault.wptr,cpFault.hw_fault,ring_.lastSubmitted(),ring_.completedFence());
+        // native_adreno_fault() has closed admission under the publication
+        // lock. These fixed software snapshots survive BO teardown and need
+        // no new mapping or MMIO. Print only the latest submission, once.
+        if(native_adreno_ring_log_count) {
+            const auto *record=native_adreno_ring_log[(native_adreno_ring_log_count-1)&3];
+            const unsigned count=record[3]<112?record[3]:112;
+            IOLog("NabuGPU: fault-ring fence=%u start=%u end=%u words=%u captured=%u\n",
+                record[0],record[1],record[2],record[3],count);
+            for(unsigned i=0;i<count;i+=4) {
+                IOLog("NabuGPU: fault-ring at=%u n=%u data=%08x/%08x/%08x/%08x\n",
+                    i,count-i<4?count-i:4,record[4+i],i+1<count?record[5+i]:0,
+                    i+2<count?record[6+i]:0,i+3<count?record[7+i]:0);
+            }
+        }
+        if(native_adreno_ib_log_count) {
+            const unsigned slot=(native_adreno_ib_log_count-1)&3;
+            const auto *record=native_adreno_ib_log[slot];
+            const unsigned words=native_adreno_ib_log_words[slot];
+            const unsigned count=words<28?words:28;
+            IOLog("NabuGPU: fault-ib fence=%u iova=%08x:%08x bytes=%u status=%08x captured=%u\n",
+                record[0],record[2],record[1],record[3],native_adreno_ib_log_status[slot],count);
+            for(unsigned i=0;i<count;i+=4) {
+                IOLog("NabuGPU: fault-ib at=%u n=%u data=%08x/%08x/%08x/%08x\n",
+                    i,count-i<4?count-i:4,record[4+i],i+1<count?record[5+i]:0,
+                    i+2<count?record[6+i]:0,i+3<count?record[7+i]:0);
+            }
+        }
     }
     native_adreno_checkpoint("failed");
     bool stopped=true;
