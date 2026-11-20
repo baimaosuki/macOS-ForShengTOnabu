@@ -42,7 +42,7 @@ def main():
                     '--output', str(ROOT / 'out/nabu27-gpu-smmu-host')], check=True)
     subprocess.run([sys.executable, str(ROOT / 'devices/nabu/tests/check-gpu-profile27.py'),
                     '--output', str(ROOT / 'out/nabu27-gpu-profile-host')], check=True)
-    for name in ('wire','bo','cache','ownership','fault','view-cache'):
+    for name in ('wire','bo','cache','ownership','fault','view-cache','cpumap'):
         subprocess.run([sys.executable,str(ROOT / ('devices/nabu/tests/check-gpu-'+name+'27.py')),
                         '--output',str(ROOT / ('out/nabu27-gpu-'+name+'-host'))],check=True)
     subprocess.run([sys.executable,str(ROOT / 'devices/nabu/tests/check-touch-events27.py'),

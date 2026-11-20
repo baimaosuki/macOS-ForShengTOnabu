@@ -857,10 +857,11 @@ IOReturn NativeAdrenoMemory::publishForDevice(size_t offset,size_t bytes)
 {
     if(!backed() || !storage_.prepared || storage_.quarantined)return kIOReturnNotReady;
     if(!bytes || offset>storage_.bytes || bytes>storage_.bytes-offset)return kIOReturnBadArgument;
-    if(maintainedImport())return maintainImported(offset,bytes,false);
+    if(maintainedImport())return maintainCpuRange(offset,bytes,false);
     const IOReturn status=ensureOwnedPageCache();
     if(status)return status;
-    __asm__ volatile("dsb st" ::: "memory");
+    if(storage_.descriptor && storage_.write_combined)return maintainCpuRange(offset,bytes,false);
+    __asm__ volatile("dsb sy" ::: "memory");
     return kIOReturnSuccess;
 }
 IOReturn NativeAdrenoMemory::ensureOwnedPageCache()
@@ -870,36 +871,57 @@ IOReturn NativeAdrenoMemory::ensureOwnedPageCache()
     uint32_t changed=0;
     const IOReturn status=NativeAdrenoSetOwnedPageCache(storage_.spans,storage_.span_count,true,&changed);
     if(changed)native_adreno_backing_cache_stats[10]+=changed;
-    static uint32_t reports;
-    if(reports++<8 || status)IOLog("[bo cache] pages=%llu changed=%u status=%08x verified_nc=%u\n",
-        uint64_t(storage_.bytes/4096),changed,uint32_t(status),!status);
+    static uint32_t reports,kernelReports;
+    const bool user=storage_.diagnostic_source==NativeAdrenoMemorySource::UserOwned;
+    const bool report=user?reports++<6:kernelReports++<3;
+    if(report || status) {
+        IOLog(user?"[bo user-cache] pages=%llu page_bytes=4096 changed=%u status=%08x verified_nc=%u\n":
+            "[bo cache] pages=%llu page_bytes=4096 changed=%u status=%08x verified_nc=%u\n",
+            uint64_t(storage_.bytes/4096),changed,uint32_t(status),!status);
+        cacheSnapshot(user?"user-allocation":"kernel-allocation");
+    }
     return status;
 }
 IOReturn NativeAdrenoMemory::acquireDeviceWrites(size_t offset,size_t bytes)
 {
     if(!backed() || !storage_.prepared || storage_.quarantined)return kIOReturnNotReady;
     if(!bytes || offset>storage_.bytes || bytes>storage_.bytes-offset)return kIOReturnBadArgument;
-    if(maintainedImport())return maintainImported(offset,bytes,true);
+    if(maintainedImport() || (storage_.descriptor && storage_.write_combined))return maintainCpuRange(offset,bytes,true);
     __asm__ volatile("dsb sy" ::: "memory");
     return kIOReturnSuccess;
 }
 extern "C" uint64_t gVirtBase,gPhysBase,gPhysSize;
-IOReturn NativeAdrenoMemory::maintainImported(size_t offset,size_t bytes,bool invalidate)
+IOReturn NativeAdrenoMemory::maintainCpuRange(size_t offset,size_t bytes,bool invalidate)
 {
-    // Only prepared RAM pages already validated at import are touched. The
-    // caller excludes CPU writes until the actual CP completion is observed.
+    // The descriptor pins the pages. Validate the complete range before any
+    // mutation; completion invalidation is allowed only after a real fence.
+    if(!bytes || offset>storage_.bytes || bytes>storage_.bytes-offset)return kIOReturnBadArgument;
     const uint64_t end=offset+bytes;
+    uint64_t covered=offset;
+    for(size_t i=0;i<storage_.span_count;++i) {
+        const auto &span=storage_.spans[i];
+        if(span.offset>UINT64_MAX-span.bytes)return kIOReturnUnsupported;
+        const uint64_t first=offset>span.offset?offset:span.offset;
+        const uint64_t last=end<span.offset+span.bytes?end:span.offset+span.bytes;
+        if(first>=last)continue;
+        if(first!=covered || span.physical>UINT64_MAX-(first-span.offset))return kIOReturnUnsupported;
+        const uint64_t physical=span.physical+first-span.offset;
+        if(physical<gPhysBase || physical-gPhysBase>=gPhysSize || last-first>gPhysSize-(physical-gPhysBase) ||
+            gVirtBase>UINT64_MAX-(physical-gPhysBase) || last-first>UINT64_MAX-(gVirtBase+physical-gPhysBase))
+            return kIOReturnUnsupported;
+        covered=last;
+    }
+    if(covered!=end)return kIOReturnUnsupported;
     for(size_t i=0;i<storage_.span_count;++i) {
         const auto &span=storage_.spans[i];
         const uint64_t first=offset>span.offset?offset:span.offset;
         const uint64_t last=end<span.offset+span.bytes?end:span.offset+span.bytes;
         if(first>=last)continue;
-        const uint64_t physical=span.physical+first-span.offset;
-        if(physical<gPhysBase || physical-gPhysBase>=gPhysSize || last-first>gPhysSize-(physical-gPhysBase))
-            return kIOReturnUnsupported;
-        const uint64_t start=gVirtBase+physical-gPhysBase;
+        const uint64_t start=gVirtBase+span.physical+first-span.offset-gPhysBase;
         const uint64_t stop=start+last-first;
         for(uint64_t va=start&~UINT64_C(63);va<stop;va+=64) {
+            // Do not skip this when pp_attr already says WCOMB: publish dirty
+            // aliases to PoC before the GPU sees WPTR. Acquire invalidates only.
             if(invalidate)__asm__ volatile("dc ivac, %0" :: "r"(va):"memory");
             else __asm__ volatile("dc civac, %0" :: "r"(va):"memory");
         }

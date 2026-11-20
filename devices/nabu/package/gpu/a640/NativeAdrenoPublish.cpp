@@ -912,9 +912,10 @@ IOReturn AGXDeviceUserClient::mapCpu(const NativeAdrenoAbiBoCpuMapV2 &request,
     IOMemoryDescriptor *descriptor=backing?backing->descriptor():nullptr;
     IOMemoryMap *map=nullptr;
     if(descriptor && request.address<=UINT64_MAX-lease.bytes) {
-        /* Default cache flags preserve the allocation's mode in its memory entry.
-         * A unique map gives each returned ID an independent unmap lifetime. */
-        const IOOptionBits options=kIOMapUnique|(request.address?0:kIOMapAnywhere);
+        /* Match the legacy mapping's explicit cache contract. Each returned ID
+         * still owns an independent unique mapping lifetime. */
+        const IOOptionBits options=kIOMapUnique|(request.address?0:kIOMapAnywhere)|
+            (backing->writeCombined()?kIOMapWriteCombineCache:kIOMapCopybackCache);
         map=descriptor->createMappingInTask(current_task(),request.address,options,0,lease.bytes);
     }
     if(map && map->getAddress() && map->getLength()==lease.bytes &&
@@ -924,6 +925,8 @@ IOReturn AGXDeviceUserClient::mapCpu(const NativeAdrenoAbiBoCpuMapV2 &request,
         destination->token=lease.token;
         destination->map=map;
         reply={destination->map_id,map->getAddress(),map->getLength()};
+        static uint32_t userMapReports;
+        if(userMapReports++<4)backing->cacheSnapshot("user-v2-map",0,map->getAddress());
         IOLockUnlock(g.lock);
         return kIOReturnSuccess;
     }

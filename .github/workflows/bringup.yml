@@ -108,6 +108,7 @@ jobs:
             out/nabu27-gpu-ownership-host/
             out/nabu27-gpu-fault-host/
             out/nabu27-gpu-view-cache-host/
+            out/nabu27-gpu-cpumap-host/
             out/nabu27-touch-events-host/
             out/nabu27-gpu-handoff-host/
             out/nabu/**/zeta-pac-verification/verification.json

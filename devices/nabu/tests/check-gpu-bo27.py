@@ -84,7 +84,7 @@ struct {IOBufferMemoryDescriptor *descriptor=nullptr;size_t bytes=0;uint64_t phy
 static bool poolTake(size_t,size_t *){return false;}
 static void poolGive(size_t,size_t){}
 static void hostBarrier(){}
-IOReturn NativeAdrenoSetOwnedPageCache(const NativeAdrenoPhysicalSpan *s,size_t n,bool wc,uint32_t *changed){
+IOReturn NativeAdrenoSetOwnedPageCache(const NativeAdrenoPhysicalSpan *s,size_t n,bool wc,uint32_t *changed,bool){
  assert(s && n);*changed=0;
  if(wc){++policies;cacheOwned=true;if(failPolicy)return kIOReturnIOError;}
  else{++restores;if(failRestore)return kIOReturnIOError;cacheOwned=false;}
@@ -94,6 +94,7 @@ static void hostZero(void *p,size_t n){assert(cacheOwned);memset(p,0,n);}
 #define bzero hostZero
 static void PE_parse_boot_argn(const char *,int *,unsigned){}
 static void IOLog(const char *,...){}
+void NativeAdrenoMemory::cacheSnapshot(const char *,size_t,uint64_t)const{}
 IOReturn NativeAdrenoMemory::trimBackingCache(NativeAdrenoBackingTrimReason){return 0;}
 '''
 test=r'''

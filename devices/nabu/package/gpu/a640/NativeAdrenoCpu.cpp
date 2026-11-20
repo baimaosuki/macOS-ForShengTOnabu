@@ -6,6 +6,7 @@
 extern "C" void _disable_preemption(void);
 extern "C" void _enable_preemption(void);
 #include <vm/vm_map.h>
+#include <IOKit/IOLib.h>
 extern "C" vm_map_t kernel_map;
 // XNU osfmk/vm/vm_map.h; hidden by the SDK kernel-private include fence.
 extern "C" int vm_map_page_size(vm_map_t map);
@@ -66,7 +67,7 @@ NativeAdrenoCpuCacheMode NativeAdrenoQueryPageCacheMode(uint64_t physical)
 }
 
 IOReturn NativeAdrenoSetOwnedPageCache(const NativeAdrenoPhysicalSpan *spans,size_t count,
-    bool writeCombined,uint32_t *changed)
+    bool writeCombined,uint32_t *changed,bool forceSync)
 {
     struct Ops {
         unsigned attribute(uint32_t page){return pmap_cache_attributes(page)&VM_WIMG_MASK;}
@@ -74,8 +75,45 @@ IOReturn NativeAdrenoSetOwnedPageCache(const NativeAdrenoPhysicalSpan *spans,siz
         void sync(uint32_t page){pmap_sync_page_attributes_phys(page);}
     } ops;
     const auto result=nabuGpuApplyPagePolicy(spans,count,gPhysBase,gPhysSize,
-        writeCombined?VM_WIMG_WCOMB:VM_WIMG_DEFAULT,ops,changed);
+        writeCombined?VM_WIMG_WCOMB:VM_WIMG_DEFAULT,ops,changed,forceSync);
     __asm__ volatile("dsb sy" ::: "memory");
     return result==NabuGpuPagePolicyResult::Ok?kIOReturnSuccess:
         result==NabuGpuPagePolicyResult::Argument?kIOReturnBadArgument:kIOReturnIOError;
+}
+
+// Selected XNU pmap_pt_geometry.h supplies this exact private function ABI.
+// Snapshot only retained BO/kernel mappings: no arbitrary task address walks,
+// no PTE writes, and no physical/cache alias is created by this diagnostic.
+struct pmap;
+extern "C" struct pmap *kernel_pmap;
+extern "C" uint64_t *pmap_pte(struct pmap *,uint64_t);
+extern "C" uint64_t gVirtBase;
+void NativeAdrenoMemory::cacheSnapshot(const char *phase,size_t offset,uint64_t userAddress) const
+{
+    if(!storage_.prepared || offset>=storage_.bytes || !storage_.mapping)return;
+    uint64_t physical=0;
+    for(size_t i=0;i<storage_.span_count;++i) {
+        const auto &span=storage_.spans[i];
+        if(offset>=span.offset && offset-span.offset<span.bytes) {
+            physical=span.physical+offset-span.offset;break;
+        }
+    }
+    if(physical<gPhysBase || physical-gPhysBase>=gPhysSize)return;
+    const uint64_t kva=reinterpret_cast<uintptr_t>(storage_.mapping)+offset;
+    const uint64_t direct=gVirtBase+physical-gPhysBase;
+    uint64_t mair=0,mpidr=0;
+    _disable_preemption();
+    __asm__ volatile("mrs %0, mair_el1" : "=r"(mair));
+    __asm__ volatile("mrs %0, mpidr_el1" : "=r"(mpidr));
+    _enable_preemption();
+    const uint64_t *kp=pmap_pte(kernel_pmap,kva),*dp=pmap_pte(kernel_pmap,direct);
+    // The caller may independently vm_deallocate a user mapping. Do not walk
+    // its unprotected page-table pointer. Sample the retained kernel mapping
+    // and stable physmap instead, and label the user address as unqueried.
+    const uint64_t k=kp?__atomic_load_n(kp,__ATOMIC_RELAXED):0;
+    const uint64_t d=dp?__atomic_load_n(dp,__ATOMIC_RELAXED):0;
+    IOLog("[bo pte] phase=%s cpu=%llx mair=%016llx wc_byte=%02x pn=%llx wimg=%x kva=%llx pte=%016llx valid=%u attr=%u sh=%u direct=%llx direct_pte=%016llx direct_valid=%u direct_attr=%u direct_sh=%u uva=%llx user_pte=unqueried physmap_sample=1\n",
+        phase,mpidr,mair,unsigned((mair>>8)&255),physical>>12,pmap_cache_attributes(ppnum_t(physical>>12)),
+        kva,k,unsigned((k&3)==3),unsigned((k>>2)&7),unsigned((k>>8)&3),direct,d,unsigned((d&3)==3),unsigned((d>>2)&7),unsigned((d>>8)&3),
+        userAddress);
 }

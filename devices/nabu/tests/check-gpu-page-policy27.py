@@ -53,6 +53,11 @@ int main(){
  assert((o.batches==std::vector<unsigned>{128,2}) && o.syncs==130);
  assert(o.pages[base>>12].dram==0x70460001 && !o.pages[base>>12].dirty);
  o.batches.clear();o.syncs=0;assert(apply(1)==NabuGpuPagePolicyResult::Ok && !changed && o.batches.empty() && !o.syncs);
+ // Already-NC pages can still contain dirty aliases: explicit forceSync must
+ // publish them without another PTE/TLB batch or a false changed-page count.
+ o.pages[base>>12].cpu=0x70d58003;o.pages[base>>12].dirty=true;
+ uint32_t synced=0;assert(nabuGpuApplyPagePolicy(&s,1,base,ram,1,o,&changed,true,&synced)==NabuGpuPagePolicyResult::Ok);
+ assert(changed==0 && synced==130 && o.syncs==130 && o.batches.empty() && o.pages[base>>12].dram==0x70d58003);
  assert(apply(3)==NabuGpuPagePolicyResult::Ok && changed==130 && o.pages[base>>12].attr==3);
  // Whole request validation must precede any mutation, including a bad later span.
  const Span bad[][2]={{{0,base,4096},{8192,base+4096,4096}},{{0,base,4096},{4096,base+1,4096}},

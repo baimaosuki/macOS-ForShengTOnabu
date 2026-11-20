@@ -12,7 +12,7 @@ struct NativeAdrenoPhysicalSpan {
     uint64_t offset,physical,bytes;
     unsigned writeback=1; // CPU cached pages use coherent GPU WB; Normal NC pages use GPU NC.
 };
-IOReturn NativeAdrenoSetOwnedPageCache(const NativeAdrenoPhysicalSpan *,size_t,bool,uint32_t *);
+IOReturn NativeAdrenoSetOwnedPageCache(const NativeAdrenoPhysicalSpan *,size_t,bool,uint32_t *,bool forceSync=false);
 struct NativeAdrenoCpuState {
     uint64_t tcr,ttbr0,ttbr1,sctlr;
     uint64_t kernel_page_bytes,kernel_map_page_bytes;
@@ -193,7 +193,8 @@ public:
     bool cpuCacheCoherent() const {return cpu_cache_mode_==NativeAdrenoCpuCacheMode::Cached;}
     bool maintainedImport() const {return imported_ &&
         (cpu_cache_mode_==NativeAdrenoCpuCacheMode::Cached || cpu_cache_mode_==NativeAdrenoCpuCacheMode::Mixed);}
-    IOReturn maintainImported(size_t offset,size_t bytes,bool invalidate);
+    IOReturn maintainCpuRange(size_t offset,size_t bytes,bool invalidate);
+    void cacheSnapshot(const char *phase,size_t offset=0,uint64_t userAddress=0) const;
     IOReturn ensureOwnedPageCache();
     /* An import of memory the owner maps read-only (the kernel could pin it for reading only): the GPU may read it, never write it. */
     bool readOnly() const {return read_only_;}

@@ -6,14 +6,61 @@
 #include <IOKit/IOLib.h>
 #include <IOKit/IOMemoryDescriptor.h>
 
-static IOReturn nabuMaintainResource(NativeAdrenoVm *vm,uint64_t handle,bool completed)
+static IOReturn nabuMaintainResource(NativeAdrenoVm *vm,uint64_t handle,bool completed,
+    size_t offset=0,size_t bytes=0)
 {
     const NativeAdrenoMemory *backing=vm->resourceBacking(handle);
     if(!backing)return kIOReturnBadArgument;
+    if(!bytes)bytes=backing->bytes();
+    if(offset>backing->bytes() || bytes>backing->bytes()-offset)return kIOReturnBadArgument;
     if(!backing->maintainedImport() && !backing->writeCombined())return kIOReturnSuccess;
     NativeAdrenoMemory *memory=const_cast<NativeAdrenoMemory *>(backing);
-    return completed?memory->acquireDeviceWrites(0,memory->bytes()):memory->publishForDevice(0,memory->bytes());
+    return completed?memory->acquireDeviceWrites(offset,bytes):memory->publishForDevice(offset,bytes);
 }
+static IOReturn nabuPublishIb(NativeAdrenoVm *vm,const NativeAdrenoSubmitBuffer &buffer)
+{
+    uint64_t base=0;size_t bytes=0;unsigned permissions=0;
+    IOReturn status=vm->describe(buffer.handle,&base,&bytes,&permissions);
+    if(status || !(permissions&1) || buffer.iova<base || buffer.iova-base>bytes ||
+        !buffer.bytes || buffer.bytes>bytes-(buffer.iova-base))return kIOReturnBadArgument;
+    const size_t offset=size_t(buffer.iova-base);
+    NativeAdrenoMemory *memory=const_cast<NativeAdrenoMemory *>(vm->resourceBacking(buffer.handle));
+    if(!memory)return kIOReturnBadArgument;
+    static uint32_t reports;
+    const bool sample=memory->writeCombined() && __atomic_fetch_add(&reports,1,__ATOMIC_RELAXED)<2;
+    uint32_t before[16]={},after[16]={};
+    const size_t words=buffer.bytes/4<16?buffer.bytes/4:16;
+    IOReturn pre=kIOReturnNotReady,post=kIOReturnNotReady;
+    if(sample){pre=vm->peekWords(buffer.iova,before,words);memory->cacheSnapshot("ib-before-clean",offset);}
+    // Every IB, even one not owning the deduplicated resource reference,
+    // publishes its complete command range before a snapshot or WPTR update.
+    status=memory->publishForDevice(offset,buffer.bytes);
+    if(sample) {
+        post=vm->peekWords(buffer.iova,after,words);
+        unsigned changed=0,zeroBefore=0,zeroAfter=0;
+        for(size_t i=0;i<words;++i){changed+=before[i]!=after[i];zeroBefore+=before[i]==0;zeroAfter+=after[i]==0;}
+        IOLog("[ib cache] handle=%llx iova=%llx offset=%llu bytes=%llu status=%08x pre=%08x post=%08x words=%u changed=%u zeros=%u/%u before=%08x/%08x/%08x/%08x after=%08x/%08x/%08x/%08x\n",
+            buffer.handle,buffer.iova,uint64_t(offset),uint64_t(buffer.bytes),uint32_t(status),uint32_t(pre),uint32_t(post),unsigned(words),changed,zeroBefore,zeroAfter,
+            before[0],before[1],before[2],before[3],after[0],after[1],after[2],after[3]);
+        memory->cacheSnapshot("ib-after-clean",offset);
+    }
+    return status;
+}
+static IOReturn nabuPublishJobRanges(NativeAdrenoVm *vm,const NativeAdrenoSubmitBuffer *buffers,size_t count,
+    const NativeAdrenoSubmitResource *resources,size_t resourceCount)
+{
+    for(size_t i=0;i<count;++i) {
+        const IOReturn status=nabuPublishIb(vm,buffers[i]);
+        if(status)return status;
+    }
+    for(size_t i=0;i<resourceCount;++i) {
+        const auto &r=resources[i];
+        const IOReturn status=nabuMaintainResource(vm,r.handle,false,r.offset,r.bytes);
+        if(status)return status;
+    }
+    return kIOReturnSuccess;
+}
+
 
 /* CP_INDIRECT_BUFFER is opcode 0x3f with a 3-word payload: 64-bit GPU address
  * and IB_SIZE in dwords (bits 0..19), exactly as the pinned adreno_pm4.xml
@@ -819,10 +866,13 @@ IOReturn NativeAdrenoSubmit::release(Job &job)
     __asm__ volatile("dsb sy" ::: "memory");
     if(job.resources) {
         for(size_t at=0;at<job.resource_count;++at) {
+            const auto &r=job.resources[at];
+            if(nabuMaintainResource(vm_,r.handle,true,r.offset,r.bytes))return poison();
+        }
+        for(size_t at=0;at<job.resource_count;++at) {
             if(!job.resources[at].owns_reference) {
                 continue;
             }
-            if(nabuMaintainResource(vm_,job.resources[at].handle,true))return poison();
             if(vm_->retireJobAfterCompletion(job.resources[at].handle)) {
                 return poison();
             }
@@ -836,6 +886,7 @@ IOReturn NativeAdrenoSubmit::release(Job &job)
     }
     IOReturn status=kIOReturnSuccess;
     for(size_t i=0;i<job.count;++i) {
+        if(nabuMaintainResource(vm_,job.handles[i],true))return poison();
         IOReturn retired=vm_->retireJobAfterCompletion(job.handles[i]);
         if(retired)status=retired;else ++stats_.references_retired;
     }
@@ -929,6 +980,11 @@ IOReturn NativeAdrenoSubmit::submit(const NativeAdrenoSubmitBuffer *buffers,size
         }
         ++stats_.references_held;
     }
+    const IOReturn published=nabuPublishJobRanges(vm_,buffers,count,nullptr,0);
+    if(published) {
+        for(size_t k=0;k<handle_count;++k){vm_->retireJobAfterCompletion(handles[k]);++stats_.references_retired;}
+        return published;
+    }
     uint32_t value=0;
     __asm__ volatile("dsb sy":::"memory");
     profileT2=profileNow();
@@ -1015,6 +1071,14 @@ IOReturn NativeAdrenoSubmit::submitResources(const NativeAdrenoSubmitBuffer *buf
                 uint32_t(at),uint32_t(count),uint32_t(resource_count));
             return kIOReturnBadArgument;
         }
+        bool covered=false;
+        for(size_t ri=0;ri<resource_count;++ri) {
+            const auto &r=resources[ri];
+            const uint64_t off=buffer.iova-iova;
+            if(r.handle==buffer.handle && (r.access&1) && r.offset<=off && off-r.offset<=r.bytes &&
+                buffer.bytes<=r.bytes-(off-r.offset)){covered=true;break;}
+        }
+        if(!covered)return kIOReturnBadArgument;
         uint32_t header=0;
         if(AdrenoPM4Type7(SubmitIndirectBuffer,SubmitIbWords,&header)!=AdrenoPM4Success) {
             return poison();
@@ -1072,14 +1136,11 @@ IOReturn NativeAdrenoSubmit::submitResources(const NativeAdrenoSubmitBuffer *buf
         return status;
     }
 
+    status=nabuPublishJobRanges(vm_,buffers,count,held,resource_count);
     uint64_t import_bytes=0;
     uint32_t import_count=0;
-    for(size_t at=0;at<resource_count;++at) {
+    for(size_t at=0;!status && at<resource_count;++at) {
         const NativeAdrenoSubmitResource &resource=held[at];
-        if(resource.owns_reference) {
-            status=nabuMaintainResource(vm_,resource.handle,false);
-            if(status)break;
-        }
         if(vm_->resourceImported(resource.handle)) {
             import_count+=resource.owns_reference;
             import_bytes+=resource.bytes;

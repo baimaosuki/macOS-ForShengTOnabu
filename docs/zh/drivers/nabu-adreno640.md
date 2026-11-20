@@ -117,3 +117,14 @@ the previous production function fails the object-identity regression. Whether
 this resolves the P027 CP failure remains a hardware question. Fault records now
 include the A6xx IB1/IB2 base/remaining registers and up to 256 IB words. Remaining
 counts exclude prefetched words and are not labeled as an exact faulting PC.
+
+
+P030 真机已运行 a9f3265：bootstrap fence1 完成，生产 fence2 在首个 IB 失败。
+提交前快照的前448字节（7条64B缓存行）为零，words144..165 也为零；
+此前只在页属性变化时同步缓存，changed=0 时遗漏了实际写入发布。
+现在 owned WC 和 cached imports 都按 job 的实际 IB/resource 字节区间执行
+CIVAC+DSB SY，完成后 IVAC；legacy、V2 和直接提交共用发布函数，多区间
+同 handle 不再被引用去重逻辑漏掉。V2 CPU 映射显式指定 WC/WB。
+首批用户 BO/IB 独立限量记录 MAIR、真实 kernel/physmap PTE 的 ATTRINDX/SH
+以及 clean 前后数据。用户页表不作无锁遍历；V2 地址仅记录，实际采样 physmap。
+这些修复不能从旧日志证明哪一条用户 PTE 产生了脏行，真机结果仍需验证。

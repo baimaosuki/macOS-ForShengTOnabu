@@ -179,3 +179,17 @@ and quarantine the allocation. Imported page attributes remain owned by their
 callers and use the existing maintenance path. Host tests compile the private
 page-list ABI from the selected XNU headers and model dirty-line publication;
 actual A640 cache visibility and GPU rendering still require device validation.
+
+
+P030 ran a9f3265 on hardware: bootstrap fence1 succeeds; production fence2
+still faults. The pre-submit IB snapshot has a448-byte zero prefix (seven64B
+lines), plus zero words144..165. Prior cache synchronization only ran when page
+attributes changed, missing dirty aliases when changed=0. Owned WC publication
+now always CIVACs the actual job IB/resource byte ranges and DSB SY; completion
+IVACs after a real fence. Direct, legacy and V2 submissions share one publisher;
+reference deduplication no longer drops separate ranges of the same handle.
+V2 CPU mapping explicitly specifies WC/WB. Independently limited user BO/IB
+samples record MAIR, real kernel/physmap ATTRINDX/SH and before/after-clean words.
+User page tables are not walked without their lock; V2 records its address while
+the snapshot uses the retained kernel mapping and physmap. The old log cannot
+identify the precise user PTE/alias responsible; hardware validation remains due.

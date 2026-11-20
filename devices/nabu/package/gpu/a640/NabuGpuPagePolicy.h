@@ -29,9 +29,10 @@ enum class NabuGpuPagePolicyResult {Ok,Argument,Readback};
  * COPYBACK->WCOMB clean. Synchronize every changed page explicitly after it. */
 template<class Span,class Ops>
 NabuGpuPagePolicyResult nabuGpuApplyPagePolicy(const Span *spans,size_t count,
-    uint64_t physicalBase,uint64_t physicalBytes,unsigned target,Ops &ops,uint32_t *changed)
+    uint64_t physicalBase,uint64_t physicalBytes,unsigned target,Ops &ops,uint32_t *changed,bool forceSync=false,uint32_t *synchronized=nullptr)
 {
     if(changed)*changed=0;
+    if(synchronized)*synchronized=0;
     if(!spans || !count || !changed || !physicalBytes || physicalBase>UINT64_MAX-physicalBytes)
         return NabuGpuPagePolicyResult::Argument;
     size_t total=0;
@@ -52,13 +53,17 @@ NabuGpuPagePolicyResult nabuGpuApplyPagePolicy(const Span *spans,size_t count,
         bool valid=true;
         for(unsigned i=0;i<used;++i) {
             ops.sync(pages[i].physicalPage);
+            if(synchronized)++*synchronized;
             valid=valid && ops.attribute(pages[i].physicalPage)==target;
         }
         *changed+=used;used=0;return valid;
     };
     for(size_t i=0;i<count;++i)for(uint64_t offset=0;offset<spans[i].bytes;offset+=4096) {
         const uint32_t page=uint32_t((spans[i].physical+offset)>>12);
-        if(ops.attribute(page)==target)continue;
+        if(ops.attribute(page)==target) {
+            if(forceSync){ops.sync(page);if(synchronized)++*synchronized;}
+            continue;
+        }
         pages[used++]={page,0};
         if(used==128 && !flush())return NabuGpuPagePolicyResult::Readback;
     }
