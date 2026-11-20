@@ -31,7 +31,7 @@ static IOReturn nabuPublishIb(NativeAdrenoVm *vm,const NativeAdrenoSubmitBuffer 
     uint32_t before[NabuGpuIbHeadWords]={},after[NabuGpuIbHeadWords]={};
     const size_t words=buffer.bytes/4<NabuGpuIbHeadWords?buffer.bytes/4:NabuGpuIbHeadWords;
     IOReturn pre=kIOReturnNotReady,post=kIOReturnNotReady;
-    if(sample){pre=vm->peekWords(buffer.iova,before,words);memory->cacheSnapshot("ib-before-clean",offset);}
+    if(sample){pre=vm->peekWords(buffer.iova,before,words);memory->cacheSnapshot("ib-before-publish",offset);}
     // Every IB, even one not owning the deduplicated resource reference,
     // publishes its complete command range before a snapshot or WPTR update.
     status=memory->publishForDevice(offset,buffer.bytes);
@@ -50,7 +50,7 @@ static IOReturn nabuPublishIb(NativeAdrenoVm *vm,const NativeAdrenoSubmitBuffer 
             IOLog("[ib line] iova=%llx byte=%u bytes=%u before_hash=%08x after_hash=%08x changed=%u zeros=%u/%u\n",
                 buffer.iova,unsigned(first*4),unsigned((last-first)*4),bh,ah,diff,bz,az);
         }
-        memory->cacheSnapshot("ib-after-clean",offset);
+        memory->cacheSnapshot("ib-after-publish",offset);
     }
     return status;
 }

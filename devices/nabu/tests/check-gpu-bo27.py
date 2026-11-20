@@ -9,10 +9,10 @@ def body(signature):
     while depth:
         depth+=(source[end]=='{')-(source[end]=='}');end+=1
     return source[start:end]
-methods='\n'.join(body(x) for x in ['IOReturn destroyOwnedStorage(',
+methods='\n'.join(body(x) for x in ['__attribute__((noinline)) static void nabuInitializeOwnedMemory(', 'IOReturn destroyOwnedStorage(',
     'IOReturn NativeAdrenoMemory::ensureOwnedPageCache(', 'IOReturn NativeAdrenoMemory::allocate(size_t', 'IOReturn NativeAdrenoMemory::release(',
     'IOReturn NativeAdrenoMemory::holdForDevice(', 'IOReturn NativeAdrenoMemory::retireAfterQuiescence('])
-methods=methods.replace('__asm__ volatile("dsb sy":::"memory");','hostBarrier();')
+methods=methods.replace('__asm__ volatile("dsb sy":::"memory");','hostBarrier();').replace('__asm__ volatile("dsb sy" ::: "memory");','hostBarrier();')
 peer=r'''
 #include <cassert>
 #include <cstdint>
@@ -83,10 +83,12 @@ enum {BackingRejectQuarantined,BackingRejectBusy,BackingRejectPressure,BackingRe
 struct {IOBufferMemoryDescriptor *descriptor=nullptr;size_t bytes=0;uint64_t physical=0;char *virt=nullptr;} pool;
 static bool poolTake(size_t,size_t *){return false;}
 static void poolGive(size_t,size_t){}
-static void hostBarrier(){}
-IOReturn NativeAdrenoSetOwnedPageCache(const NativeAdrenoPhysicalSpan *s,size_t n,bool wc,uint32_t *changed,bool){
+static unsigned initializationBarriers=0;static void hostBarrier(){++initializationBarriers;}
+using ppnum_t=uint32_t;enum{VM_WIMG_MASK=255,VM_WIMG_WCOMB=6};
+static unsigned pmap_cache_attributes(ppnum_t){return cacheOwned?6:2;}
+IOReturn NativeAdrenoSetOwnedPageCache(const NativeAdrenoPhysicalSpan *s,size_t n,bool wc,uint32_t *changed,bool forceSync){
  assert(s && n);*changed=0;
- if(wc){++policies;cacheOwned=true;if(failPolicy)return kIOReturnIOError;}
+ if(wc){assert(forceSync);++policies;cacheOwned=true;if(failPolicy)return kIOReturnIOError;}
  else{++restores;if(failRestore)return kIOReturnIOError;cacheOwned=false;}
  *changed=unsigned(n);return 0;
 }
@@ -101,7 +103,9 @@ test=r'''
 int main(){
  {
   NativeAdrenoMemory b;assert(!b.allocate(8192,40,false,8192,true,false));
-  assert(policies==1 && cacheOwned);
+  assert(policies==1 && cacheOwned && initializationBarriers==1);
+  unsigned p=policies;assert(!b.ensureOwnedPageCache() && policies==p);
+  cacheOwned=false;assert(b.ensureOwnedPageCache()==kIOReturnIOError && policies==p);cacheOwned=true;
   assert(descriptors==1 && mappings==1 && prepares==1 && b.writeCombined() && b.spanCount()==2);
   for(size_t i=0;i<b.bytes();++i)assert(!((uint8_t *)b.mapping())[i]);
   assert(!b.holdForDevice() && b.release()==kIOReturnBusy && descriptors==1 && mappings==1);
@@ -141,5 +145,5 @@ with tempfile.TemporaryDirectory(prefix='nabu-bo-host-') as temp:
     subprocess.run(cmd,check=True);q=subprocess.run([str(root/'test')],capture_output=True,text=True,check=True)
     (a.output/'run.log').write_text(q.stdout);print(q.stdout,end='')
 (a.output/'verification.json').write_text(json.dumps(dict(passed=True,production_allocation_release_bodies=True,
-    no_task_pageable_wc=True,failure_controls=['allocation','prepare','CPU map','physical width','cache apply','cache restore','complete'],
+    no_task_pageable_wc=True,volatile_nc_zero_before_exposure=True,initialization_completion_barrier=True,live_cache_mode_change_rejected=True,failure_controls=['allocation','prepare','CPU map','physical width','cache apply','cache restore','complete'],
     sanitizers=['ASan','UBSan'],hardware_tested=False),indent=2)+'\n')

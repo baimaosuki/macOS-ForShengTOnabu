@@ -143,3 +143,22 @@ P032 已通过 P031 快照 Panic，bootstrap fence1 成功，生产 fence2 仍 o
 块映射，未随WC BO改变。nabu现使用4KiB无hint物理直映并启用原生逐页
 属性/TLB维护，统一physmap和BO映射。PTE日志拆成短行避免256B截断，前两次
 IB clean对比覆盖最多256dwords。Host/编译通过不证明真机已消除CP故障。
+
+
+P034 ownership follow-up (2026-11-21): the P032 physical-aperture correction is
+confirmed on device: both retained kernel and direct IB PTEs are4KiB leaves with
+ATTRINDX1/SH0, and MAIR byte1 is44. Fence1 still succeeds. During the first
+728-byte production IB publication,85 nonzero words disappear and all182 words
+read back as zero; fence2 then reports opcode0. The before/after capture brackets
+the entire publication call, not an individual DC or DSB instruction.
+
+Owned Normal-NC allocation now drains pre-existing aliases exclusively before
+initialization, uses volatile ordinary stores rather than cache-zero bzero for
+WC memory, and completes initialization with DSB SY before client exposure.
+Owned NC publish/acquire use full-system barriers; they do not clean a possible
+older alias over newer NC data. Live cache-attribute drift is an error, not an
+in-place ownership transition. Cached imports retain precise CIVAC/IVAC and
+physmap-range splitting. ASan/UBSan production-body tests and actual ARM64 replay
+cover these paths, including an old-code destructive-alias model. The model does
+not prove which instruction caused the P034 change, and the correction still
+requires hardware verification of fence2 and desktop rendering.

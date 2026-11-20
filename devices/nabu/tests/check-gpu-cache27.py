@@ -2,7 +2,7 @@
 """Run actual publication/acquire and all-IB/all-resource submit helpers."""
 import argparse,json,subprocess,tempfile
 from pathlib import Path
-p=argparse.ArgumentParser();p.add_argument('--output',type=Path,required=True);a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--output',type=Path,required=True);p.add_argument('--baseline-source',type=Path);a=p.parse_args()
 g=Path(__file__).resolve().parents[1]/'package/gpu/a640'
 def body(t,s):
  start=t.index(s);end=t.index('{',start)+1;depth=1
@@ -35,7 +35,7 @@ static uint64_t phystokv_range(uint64_t pa,vm_size_t *n){
  return va+offset;
 }
 static unsigned barriers=0;struct Op{uint64_t va;bool inv;};static std::vector<Op> operations;
-static uint32_t cpu=0x70460001,dram=0;static bool dirty=true;
+static uint32_t cpu=0,dram=0x70460001;static bool dirty=true;
 static void hostCache(uint64_t va,bool inv){operations.push_back({va,inv});if(!inv && dirty){dram=cpu;dirty=false;}}
 struct Span{uint64_t offset,physical,bytes;};
 struct NativeAdrenoMemory {
@@ -62,36 +62,47 @@ static void IOLog(const char*,...){}
 test=r'''
 int main(){
  NativeAdrenoMemory m;
- // Actual publish body must clean even when ensureOwnedPageCache changes zero
- // attributes. It also handles non-page-aligned ranges crossing physical spans.
- assert(!m.publishForDevice(4000,200) && m.checks==1 && dram==cpu && !dirty);
+ // Reproduce P034: DRAM has newer NC command stores, while an older dirty
+ // alias contains zero. A late CIVAC is destructive, not publication.
+ assert(!m.publishForDevice(4000,200) && m.checks==1);
+#ifdef BASELINE
+ assert(!dram && !dirty && operations.size()==4);
+ assert(!nabuPublishJobRanges(nullptr,nullptr,0,nullptr,0));
+ puts("REPRODUCED old owned-NC publication overwriting newer commands with stale zero alias (modeled cache)");
+ return 0;
+#else
+ assert(dram==0x70460001 && dirty && operations.empty() && barriers==1);
+ assert(!m.acquireDeviceWrites(4000,200) && operations.empty() && barriers==2);
+ // Cached imports still require real clean/invalidate of all referenced lines.
+ m.imported=true;cpu=0x70d58003;dram=0;dirty=true;
+ assert(!m.publishForDevice(4000,200) && dram==cpu && !dirty);
  assert(operations.size()==4 && operations[0].va==0x100000f80 && operations.back().va==0x900000040);
  assert(!m.acquireDeviceWrites(4000,200));for(size_t i=4;i<8;++i)assert(operations[i].inv);
- // A physically contiguous8K span must still remap at its physmap break.
  operations.clear();m.storage_.span_count=1;m.storage_.spans[0].bytes=8192;
  unsigned calls=apertureCalls;assert(!m.publishForDevice(4000,200));
- assert(operations.size()==4 && operations[0].va==0x100000f80 && operations[2].va==0x700000000 && apertureCalls-calls==2);
+ assert(operations.size()==4 && operations[2].va==0x700000000 && apertureCalls-calls==2);
  m.storage_.span_count=2;m.storage_.spans[0].bytes=4096;
  operations.clear();m.storage_.spans[1].physical=0x40000000;
- assert(m.publishForDevice(4000,200)==1 && operations.empty()); // validate all before mutation
- m.storage_.spans[1].physical=0x30008000;m.ensureFail=7;
+ assert(m.publishForDevice(4000,200)==1 && operations.empty());
+ m.storage_.spans[1].physical=0x30008000;m.imported=false;m.ensureFail=7;
  assert(m.publishForDevice(0,64)==7 && operations.empty());m.ensureFail=0;
  m.storage_.write_combined=false;assert(!m.publishForDevice(0,64) && operations.empty());
- m.imported=true;assert(!m.publishForDevice(0,64) && operations.size()==1);
  NativeAdrenoVm vm;NativeAdrenoSubmitBuffer ibs[]={{1,0x20010000+128,64},{2,0x20020000+256,128}};
  NativeAdrenoSubmitResource resources[]={{1,1024,64},{1,2048,64},{3,3072,128}};
- dirty=true;dram=0;operations.clear();
+ cpu=0;dram=0x70460001;dirty=true;operations.clear();unsigned before=barriers;
  assert(!nabuPublishJobRanges(&vm,ibs,2,resources,3));
- assert(operations.size()==1+2+1+1+2 && vm.memories[0].checks==3 && vm.memories[1].checks==1 && vm.memories[2].checks==1);
- assert(dram==cpu && !dirty); // first IB diagnostic observes actual pre/post publication
- // Direct/legacy path uses the identical complete-IB walker, even without resources.
- operations.clear();assert(!nabuPublishJobRanges(&vm,ibs,2,nullptr,0) && operations.size()==3);
- vm.memories[1].ensureFail=9;operations.clear();
- assert(nabuPublishJobRanges(&vm,ibs,2,resources,3)==9 && operations.size()==1);
+ assert(operations.empty() && barriers-before==5 && vm.memories[0].checks==3 && vm.memories[1].checks==1 && vm.memories[2].checks==1);
+ assert(dram==0x70460001 && dirty);
+ before=barriers;assert(!nabuPublishJobRanges(&vm,ibs,2,nullptr,0) && barriers-before==2);
+ vm.memories[1].ensureFail=9;before=barriers;
+ assert(nabuPublishJobRanges(&vm,ibs,2,resources,3)==9 && barriers-before==1);
  assert(nabuMaintainResource(&vm,9,false)==2);
  assert(nabuMaintainResource(&vm,1,false,8190,4)==2);
- operations.clear();assert(!nabuMaintainResource(&vm,1,true,64,64) && operations.size()==1 && operations[0].inv);
- puts("PASS actual owned-WC publish even unchanged attributes; exact CIVAC/IVAC ranges; all IBs and duplicate-handle resource intervals; legacy/V2 shared path; failure prevents ring");
+ assert(!nabuMaintainResource(&vm,1,true,64,64) && operations.empty());
+ vm.memories[0].imported=true;
+ assert(!nabuMaintainResource(&vm,1,true,64,64) && operations.size()==1 && operations[0].inv);
+ puts("PASS owned-NC barrier preserves newer commands; cached import CIVAC/IVAC and nonlinear physmap; all IB/resource ranges; failed ownership before ring");
+#endif
 }
 '''
 a.output.mkdir(parents=True,exist_ok=True)
@@ -101,4 +112,11 @@ with tempfile.TemporaryDirectory(prefix='nabu-cache-host-') as td:
  q=subprocess.run([str(r/'test')],capture_output=True,text=True);(a.output/'run.log').write_text(q.stdout+q.stderr)
  assert q.returncode==0,q.stdout+q.stderr
  print(q.stdout,end='')
-(a.output/'verification.json').write_text(json.dumps(dict(passed=True,actual_publish_acquire_bodies=True,nonlinear_physmap=True,aperture_chunk_boundaries=True,owned_wc_always_civac=True,all_ibs_and_resource_ranges=True,duplicate_handles_maintained=True,completion_invalidate=True,legacy_v2_share_publish=True,failed_publish_before_ring=True,cache_instructions_modeled=True,sanitizers=['ASan','UBSan'],hardware_tested=False),indent=2)+'\n')
+ if a.baseline_source:
+  old=a.baseline_source.read_text();oldmethods='\n'.join(body(old,'IOReturn NativeAdrenoMemory::'+x+'(') for x in ['maintainCpuRange','publishForDevice','acquireDeviceWrites'])
+  oldmethods=oldmethods.replace('__asm__ volatile("dc ivac, %0" :: "r"(va):"memory");','hostCache(va,true);').replace('__asm__ volatile("dc civac, %0" :: "r"(va):"memory");','hostCache(va,false);').replace('__asm__ volatile("dsb sy" ::: "memory");','++barriers;')
+  cpp.write_text(prefix+oldmethods+tail+helper+test)
+  subprocess.run(['c++','-std=c++17','-O1','-g','-Wall','-Wextra','-Werror','-DBASELINE','-fsanitize=address,undefined',str(cpp),'-o',str(r/'old')],check=True)
+  q=subprocess.run([str(r/'old')],capture_output=True,text=True);(a.output/'old-run.log').write_text(q.stdout+q.stderr);assert not q.returncode,q.stderr
+  print(q.stdout,end='')
+(a.output/'verification.json').write_text(json.dumps(dict(passed=True,actual_publish_acquire_bodies=True,nonlinear_physmap=True,aperture_chunk_boundaries=True,owned_nc_barrier_preserves_data=True,old_destructive_alias_model=bool(a.baseline_source),all_ibs_and_resource_ranges=True,duplicate_handles_maintained=True,completion_invalidate=True,legacy_v2_share_publish=True,failed_publish_before_ring=True,cache_instructions_modeled=True,sanitizers=['ASan','UBSan'],hardware_tested=False),indent=2)+'\n')

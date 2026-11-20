@@ -195,7 +195,7 @@ public:
         (cpu_cache_mode_==NativeAdrenoCpuCacheMode::Cached || cpu_cache_mode_==NativeAdrenoCpuCacheMode::Mixed);}
     IOReturn maintainCpuRange(size_t offset,size_t bytes,bool invalidate);
     void cacheSnapshot(const char *phase,size_t offset=0,uint64_t userAddress=0) const;
-    IOReturn ensureOwnedPageCache();
+    IOReturn ensureOwnedPageCache(bool initialize=false);
     /* An import of memory the owner maps read-only (the kernel could pin it for reading only): the GPU may read it, never write it. */
     bool readOnly() const {return read_only_;}
     bool writeCombined() const {return storage_.write_combined;}

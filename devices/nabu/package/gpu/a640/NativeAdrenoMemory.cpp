@@ -8,8 +8,25 @@ extern "C" {volatile uint32_t native_adreno_trace_stage;}
 #include <IOKit/IOLib.h>
 #include <kern/task.h>
 #include <pexpert/pexpert.h>
+#include <vm/memory_types.h>
 
 extern "C" uint64_t gPhysBase,gPhysSize;
+extern "C" unsigned int pmap_cache_attributes(ppnum_t pn);
+
+/* Run before publishing a new/reused BO to any client. WC is Normal-NC on
+ * this board: ordinary volatile stores avoid a cache-zero implementation of
+ * bzero, and DSB SY completes initialization before another PE can write it.
+ * The exclusive cache-mode setup has already drained pre-existing aliases. */
+__attribute__((noinline)) static void nabuInitializeOwnedMemory(void *memory,size_t bytes,bool wc)
+{
+    if(wc) {
+        volatile uint64_t *out=static_cast<volatile uint64_t *>(memory);
+        for(size_t i=0;i<bytes/sizeof(uint64_t);++i)out[i]=0;
+    } else {
+        bzero(memory,bytes);
+    }
+    __asm__ volatile("dsb sy" ::: "memory");
+}
 
 /* The board diagnostic layout keeps allocation, prepare, spans, zero, four
  * reserved rows, complete and descriptor release. Each row records calls,
@@ -509,13 +526,12 @@ IOReturn NativeAdrenoMemory::allocate(size_t bytes,unsigned bits,bool contiguous
     }
 
     if(reuse_backing && takeBacking(bytes,bits,contiguous,write_combined,storage_)) {
-        status=ensureOwnedPageCache();
+        status=ensureOwnedPageCache(true);
         if(status){(void)release();return status;}
         storage_.diagnostic_source=source;
         {
             MemoryStageTime elapsed(MemoryZero,bytes);
-            bzero(storage_.mapping,bytes);
-            __asm__ volatile("dsb sy":::"memory");
+            nabuInitializeOwnedMemory(storage_.mapping,bytes,storage_.write_combined);
         }
         return kIOReturnSuccess;
     }
@@ -543,7 +559,7 @@ IOReturn NativeAdrenoMemory::allocate(size_t bytes,unsigned bits,bool contiguous
                 pool_offset_=offset;
                 {
                     MemoryStageTime elapsed(MemoryZero,bytes);
-                    bzero(storage_.mapping,bytes);
+                    nabuInitializeOwnedMemory(storage_.mapping,bytes,false);
                 }
                 native_adreno_pool_stats[1]=native_adreno_pool_stats[1]+1;
                 return kIOReturnSuccess;
@@ -633,12 +649,12 @@ IOReturn NativeAdrenoMemory::allocate(size_t bytes,unsigned bits,bool contiguous
         // Flags on a descriptor are not proof of the pinned pages' effective
         // cache mode. Publish all owned CPU PTEs as NC before zeroing/use.
         storage_.page_cache_owned=true;
-        status=ensureOwnedPageCache();
+        status=ensureOwnedPageCache(true);
         if(status)goto failed;
     }
     {
         MemoryStageTime elapsed(MemoryZero,bytes);
-        bzero(storage_.mapping,bytes);
+        nabuInitializeOwnedMemory(storage_.mapping,bytes,storage_.write_combined);
     }
     native_adreno_pool_stats[5]=native_adreno_pool_stats[5]+1;
     native_adreno_pool_stats[6]=native_adreno_pool_stats[6]+(uint32_t)storage_.span_count;
@@ -861,16 +877,29 @@ IOReturn NativeAdrenoMemory::publishForDevice(size_t offset,size_t bytes)
     if(maintainedImport())return maintainCpuRange(offset,bytes,false);
     const IOReturn status=ensureOwnedPageCache();
     if(status)return status;
-    if(storage_.descriptor && storage_.write_combined)return maintainCpuRange(offset,bytes,false);
+    // Owned NC mappings publish stores with a full-system completion barrier.
+    // Cleaning a stale dirty cache alias after external NC stores can overwrite
+    // those stores (P034's182-word IB became entirely zero). Alias draining
+    // belongs to exclusive initialization, before any user/GPU access.
     __asm__ volatile("dsb sy" ::: "memory");
     return kIOReturnSuccess;
 }
-IOReturn NativeAdrenoMemory::ensureOwnedPageCache()
+IOReturn NativeAdrenoMemory::ensureOwnedPageCache(bool initialize)
 {
     if(!storage_.descriptor || !storage_.write_combined)return kIOReturnSuccess;
     if(!storage_.prepared || storage_.quarantined || !storage_.span_count)return kIOReturnNotReady;
     uint32_t changed=0;
-    const IOReturn status=NativeAdrenoSetOwnedPageCache(storage_.spans,storage_.span_count,true,&changed);
+    IOReturn status=kIOReturnSuccess;
+    if(initialize) {
+        status=NativeAdrenoSetOwnedPageCache(storage_.spans,storage_.span_count,true,&changed,true);
+    } else {
+        // A live mapping may not silently change its cache mode or clean old
+        // aliases over a client's writes. Refuse a lost ownership contract.
+        for(size_t i=0;i<storage_.span_count;++i)for(size_t n=0;n<storage_.spans[i].bytes;n+=4096) {
+            const ppnum_t page=ppnum_t((storage_.spans[i].physical+n)>>12);
+            if((pmap_cache_attributes(page)&VM_WIMG_MASK)!=VM_WIMG_WCOMB)status=kIOReturnIOError;
+        }
+    }
     if(changed)native_adreno_backing_cache_stats[10]+=changed;
     static uint32_t reports,kernelReports;
     const bool user=storage_.diagnostic_source==NativeAdrenoMemorySource::UserOwned;
@@ -887,7 +916,7 @@ IOReturn NativeAdrenoMemory::acquireDeviceWrites(size_t offset,size_t bytes)
 {
     if(!backed() || !storage_.prepared || storage_.quarantined)return kIOReturnNotReady;
     if(!bytes || offset>storage_.bytes || bytes>storage_.bytes-offset)return kIOReturnBadArgument;
-    if(maintainedImport() || (storage_.descriptor && storage_.write_combined))return maintainCpuRange(offset,bytes,true);
+    if(maintainedImport())return maintainCpuRange(offset,bytes,true);
     __asm__ volatile("dsb sy" ::: "memory");
     return kIOReturnSuccess;
 }
@@ -911,6 +940,7 @@ IOReturn NativeAdrenoMemory::maintainCpuRange(size_t offset,size_t bytes,bool in
         covered=last;
     }
     if(covered!=end)return kIOReturnUnsupported;
+    __asm__ volatile("dsb sy" ::: "memory");
     for(size_t i=0;i<storage_.span_count;++i) {
         const auto &span=storage_.spans[i];
         const uint64_t first=offset>span.offset?offset:span.offset;
