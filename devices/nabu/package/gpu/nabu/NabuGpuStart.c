@@ -1,9 +1,9 @@
 /* SPDX-License-Identifier: MIT */
-#include <kern/startup.h>
 extern void native_adreno_a6xx_start(void);
-static void nabu_gpu_start(const void *argument)
+void nabu_gpu_start_after_iobsd(void);
+/* Called only by the board's late display hook after genuine IOBSD publication.
+ * GPU workers are ordinary BSD/IOKit clients, not static startup initializers. */
+void nabu_gpu_start_after_iobsd(void)
 {
-    (void)argument;
     native_adreno_a6xx_start();
 }
-STARTUP_ARG(EARLY_BOOT,STARTUP_RANK_LAST,nabu_gpu_start,0);

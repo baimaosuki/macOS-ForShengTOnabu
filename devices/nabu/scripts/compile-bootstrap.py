@@ -65,6 +65,9 @@ def main():
                                    (m.kind != "refer" or m.name in wanted)})
     tree.assemble(ctx, modules)
     order = patches.prepare(ctx, modules)
+    subprocess.run([sys.executable,str(ROOT / 'devices/nabu/tests/check-gpu-startup27.py'),
+                    '--xnu',str(ctx.tree / '.cache/xnu-work'),
+                    '--output',str(ctx.work / 'gpu-startup-verification')],check=True)
     subprocess.run([sys.executable,str(ROOT / 'devices/nabu/tests/check-gpu-audit27.py'),
                     '--xnu',str(ctx.tree / '.cache/xnu-work'),
                     '--output',str(ctx.work / 'gpu-audit-verification')],check=True)
@@ -151,6 +154,8 @@ def main():
         (ctx.work / 'native-verification.json').write_text(json.dumps(report, indent=2) + '\n')
         subprocess.run([sys.executable, str(ROOT / 'devices/nabu/tests/check-a640-ring27.py'),
                         '--kernel', str(native), '--output', str(ctx.work / 'a640-ring-verification.json')], check=True)
+        subprocess.run([sys.executable, str(ROOT / 'devices/nabu/tests/check-gpu-startup-native27.py'),
+                        '--kernel', str(native), '--output', str(ctx.work / 'gpu-startup-native.json')], check=True)
 
 
 if __name__ == "__main__":

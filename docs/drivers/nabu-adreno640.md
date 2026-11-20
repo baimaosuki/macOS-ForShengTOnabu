@@ -85,3 +85,12 @@ legacy, V2 and async submissions apply the same foreground/background priority.
 Host replays cover the routing and all three submission paths. Full native CI
 44640851880 at 49d151a, final prelink/replays and FAT/ZIP verification passed.
 Device validation is still pending.
+
+GPU launch now belongs to the board BSD late hook, after genuine IOBSD
+publication; it has no static STARTUP registration. The worker waits up to
+120 seconds for this boot's writer state 2 and a completed fixed-snapshot
+commit before allocating A640 state or touching MMIO. Later checkpoints retain
+a 5-second bound and tolerate transient writer contention. This corrects an
+initialization race, not a proven explanation of the photographed pre-MMU bars.
+The former startup record actually used EARLY_BOOT=18, after task/thread init;
+arm_init's barrier 4 is KPRINTF. Source and binary checks keep that distinction.

@@ -50,6 +50,9 @@ extern "C" void native_adreno_poll_irqs(void);
 /* Wait at most 5 s for the current capture end to be committed. A nonzero
  * result blocks the next hardware step; this candidate requires logging. */
 extern "C" int native_adreno_checkpoint(const char *phase);
+/* Wait on the worker for this boot's verified journal and a completed snapshot
+ * before allocating hardware state or touching any GPU/GMU/SMMU register. */
+extern "C" int native_adreno_wait_log_ready(void);
 extern "C" void native_adreno_a6xx_start(void);
 extern "C" IOReturn native_adreno_a6xx_request_start(void);
 

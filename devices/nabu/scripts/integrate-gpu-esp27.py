@@ -53,7 +53,7 @@ def main():
     assert 'nabu-gpu=1' not in cpu['args'].split() and 'data-reset=1' not in cpu['args'].split()
     entry=dict(cpu);entry['id']='a640-metal';entry['title']='macOS 27.3 - A640 Metal GPU'
     tokens=[t for t in cpu['args'].split() if not t.startswith(('gpu-addon=','nabu-gpu=','nabu-gpu-delay=','fb-gpu=','fb-bgra=','gpu-metal=','dpu-scanout=','gpu-power=','vc-text=','exec-log='))]
-    tokens+=['nabu-gpu=1','nabu-gpu-delay=0','gpu-addon=1','fb-gpu=1','fb-bgra=1','dpu-scanout=2','gpu-power=9','gpu-metal=1','ca-triple-buffer=1','ca-free-wakeup=1','log-gpu=1']
+    tokens+=['nabu-gpu=1','gpu-addon=1','fb-gpu=1','fb-bgra=1','dpu-scanout=2','gpu-power=9','gpu-metal=1','ca-triple-buffer=1','ca-free-wakeup=1','log-gpu=1']
     entry['args']=' '.join(tokens)
     assert len(entry['args'].encode())<1024 and 'data-reset=1' not in tokens
     assert not any(e.get('id')==entry['id'] for e in config['entry'])

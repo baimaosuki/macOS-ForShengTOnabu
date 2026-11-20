@@ -5,6 +5,7 @@
 #include "NativeAdrenoSha256.h"
 #include "NabuGpuBuild.h"
 #include "NabuLogCore.h"
+#include "NabuGpuPersistence.h"
 #include <IOKit/IOLib.h>
 #include <IOKit/IORegistryEntry.h>
 #include <IOKit/IODeviceTreeSupport.h>
@@ -160,22 +161,27 @@ extern "C" void native_adreno_poll_irqs(void)
      * source on that same worker. No concurrent callback races a translation. */
     for(auto &s:sources)if(s.enabled && s.callback)s.callback(s.context);
 }
-extern "C" int native_adreno_checkpoint(const char *phase)
+namespace {
+struct PersistencePeer {
+    unsigned writerState() const {return __atomic_load_n(&nabu_log_writer_state,__ATOMIC_ACQUIRE);}
+    bool snapshotEnd(uint64_t &end) const {
+        nb_log_snapshot snapshot{};
+        if(!nabu_capture_snapshot(&snapshot))return false;
+        end=snapshot.end;return true;
+    }
+    uint64_t committedEnd() const {return nabu_log_committed_position();}
+    void sleepMs(unsigned ms) const {IOSleep(ms);}
+};
+int waitPersistence(const char *phase,unsigned timeoutMs)
 {
-    IOLog("NabuGPU: checkpoint=%s\n",phase);
-    nb_log_snapshot snapshot{};
-    bool captured=false;
-    for(unsigned attempt=0;attempt<20 && !captured;++attempt) {
-        captured=nabu_capture_snapshot(&snapshot)!=0;
-        if(!captured)IOSleep(1);
-    }
-    if(!captured)return 1;
-    const unsigned failures=nabu_log_writer_failures;
-    for(unsigned elapsed=0;elapsed<5000;elapsed+=20) {
-        if(nabu_log_committed_position()>=snapshot.end)return 0;
-        if(nabu_log_writer_state==3 || nabu_log_writer_failures!=failures)break;
-        IOSleep(20);
-    }
-    IOLog("NabuGPU: checkpoint=%s persistence-timeout; hardware step blocked\n",phase);
-    return 1;
+    IOLog("NabuGPU: checkpoint=%s waiting-for-persistence timeout_ms=%u\n",phase,timeoutMs);
+    PersistencePeer peer;NabuGpuPersistenceReport report;
+    const auto result=nabuGpuWaitPersistence(peer,timeoutMs,report);
+    IOLog("NabuGPU: checkpoint=%s persistence=%s waited_ms=%u writer=%u target=%llu committed=%llu\n",
+        phase,result==NabuGpuPersistenceResult::Ready?"ready":result==NabuGpuPersistenceResult::Stopped?"stopped":"timeout",
+        report.waitedMs,report.state,report.target,report.committed);
+    return result==NabuGpuPersistenceResult::Ready?0:1;
 }
+}
+extern "C" int native_adreno_wait_log_ready(void) {return waitPersistence("startup-log",120000);}
+extern "C" int native_adreno_checkpoint(const char *phase) {return waitPersistence(phase,5000);}

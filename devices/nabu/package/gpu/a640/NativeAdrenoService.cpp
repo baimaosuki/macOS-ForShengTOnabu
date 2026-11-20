@@ -1343,8 +1343,8 @@ void registrationWorker(void *,wait_result_t)
         return;
     }
     provider->release();
-    /* Start the explicitly enabled hardware diagnostic after the system settles. */
-    unsigned delay=20;
+    /* Optional owner delay is additional to the actual persistence gate below. */
+    unsigned delay=0;
     PE_parse_boot_argn("nabu-gpu-delay",&delay,sizeof(delay));
     if(delay>600) {
         delay=600;
@@ -1361,6 +1361,12 @@ void hardwareWorker(void *,wait_result_t)
 {
     thread_set_thread_name(current_thread(),"adreno-a640");
     IOLog("NativeAdrenoA6xx: hardware diagnostic worker started\n");
+    if(native_adreno_wait_log_ready()) {
+        native_adreno_a6xx_stats[1]=uint32_t(kIOReturnNotReady);
+        nabuGpuState(0,uint32_t(kIOReturnNotReady),"log-unavailable");
+        IOLog("NabuGPU: startup blocked before MMIO; verified log commit unavailable\n");
+        return;
+    }
     native_adreno_vm_now_us=vmNow;
     native_adreno_pool_mib=0;
     state=new A640State;
@@ -1395,6 +1401,11 @@ extern "C" void native_adreno_a6xx_start(void)
     if(!PE_parse_boot_argn("nabu-gpu",&enabled,sizeof(enabled)) || enabled!=1) {
         return;
     }
+    IOService *resources=IOService::getResourceService();
+    if(!resources || !resources->getProperty("IOBSD")) {
+        IOLog("NabuGPU: registration refused before genuine IOBSD\n");
+        return;
+    }
 
     uint32_t expected=0;
     if(!__atomic_compare_exchange_n(&launched,&expected,1,false,__ATOMIC_ACQ_REL,__ATOMIC_ACQUIRE)) {
@@ -1403,9 +1414,12 @@ extern "C" void native_adreno_a6xx_start(void)
     thread_t thread=nullptr;
     const kern_return_t status=kernel_thread_start(registrationEntry,nullptr,&thread);
     if(status==KERN_SUCCESS) {
+        IOLog("NabuGPU: registration launched after IOBSD; persistence gate required\n");
         thread_deallocate(thread);
     } else {
+        __atomic_store_n(&launched,0,__ATOMIC_RELEASE);
         native_adreno_a6xx_stats[1]=uint32_t(status);
+        IOLog("NabuGPU: registration thread failed status=%x\n",status);
     }
 }
 
@@ -1420,6 +1434,7 @@ extern "C" IOReturn native_adreno_a6xx_request_start(void)
     thread_t thread=nullptr;
     const kern_return_t status=kernel_thread_start(hardwareEntry,nullptr,&thread);
     if(status!=KERN_SUCCESS) {
+        __atomic_store_n(&hardwareLaunched,0,__ATOMIC_RELEASE);
         native_adreno_a6xx_stats[1]=uint32_t(status);
         nabuGpuState(0,uint32_t(status),"failed");
         return kIOReturnNoResources;

@@ -49,3 +49,10 @@ Data 对应的 `/Applications`，保留二进制、签名资源与其他 addon �
 WindowServer 与 backboardd 统一处理导出和诊断；Submit 能力报告内核
 缓存维护，legacy/V2/async 提交统一更新前后台优先级。原交付内核 CI
 44630035429 已通过，本轮修正已由内核 CI 44640851880（49d151a）和最终打包校验通过；仍未验证真机 GPU 桌面。
+
+GPU 启动移到真实 IOBSD 发布后的设备 BSD late hook，不再使用静态
+STARTUP 注册。硬件线程在分配 A640 状态或访问寄存器前等待本轮日志
+writer=2 与固定快照落盘（最多 120 秒）；后续检查点保留 5 秒上限，
+容忍暂时提交竞争。原 EARLY_BOOT 记录值为 18，在 task/thread 初始化
+之后；arm_init 中的 4 是 KPRINTF。照片中的 MMU 前色条不足以证明
+具体故障点，本轮修正的真机效果仍需日志验证。
