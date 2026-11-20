@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: MIT */
 #include "NativeAdrenoMemory.h"
 #include "NabuGpuPagePolicy.h"
+#include "NabuGpuPteSnapshot.h"
 // XNU osfmk/kern/cpu_data.h exports these C entry points. Avoid pulling
 // private cpu_data_t layouts into a driver that only needs preemption control.
 extern "C" void _disable_preemption(void);
@@ -81,12 +82,8 @@ IOReturn NativeAdrenoSetOwnedPageCache(const NativeAdrenoPhysicalSpan *spans,siz
         result==NabuGpuPagePolicyResult::Argument?kIOReturnBadArgument:kIOReturnIOError;
 }
 
-// Selected XNU pmap_pt_geometry.h supplies this exact private function ABI.
-// Snapshot only retained BO/kernel mappings: no arbitrary task address walks,
-// no PTE writes, and no physical/cache alias is created by this diagnostic.
-struct pmap;
-extern "C" struct pmap * const kernel_pmap;
-extern "C" uint64_t *pmap_pte(struct pmap *,uint64_t);
+// pmap_pte is a local inline symbol, not a driver link interface. Walk the
+// live TTBR1 translation through bounded managed table pages instead.
 extern "C" uint64_t gVirtBase;
 void NativeAdrenoMemory::cacheSnapshot(const char *phase,size_t offset,uint64_t userAddress) const
 {
@@ -101,19 +98,28 @@ void NativeAdrenoMemory::cacheSnapshot(const char *phase,size_t offset,uint64_t 
     if(physical<gPhysBase || physical-gPhysBase>=gPhysSize)return;
     const uint64_t kva=reinterpret_cast<uintptr_t>(storage_.mapping)+offset;
     const uint64_t direct=gVirtBase+physical-gPhysBase;
-    uint64_t mair=0,mpidr=0;
+    uint64_t mair=0,mpidr=0,ttbr=0,tcr=0;
     _disable_preemption();
     __asm__ volatile("mrs %0, mair_el1" : "=r"(mair));
     __asm__ volatile("mrs %0, mpidr_el1" : "=r"(mpidr));
+    __asm__ volatile("mrs %0, ttbr1_el1" : "=r"(ttbr));
+    __asm__ volatile("mrs %0, tcr_el1" : "=r"(tcr));
     _enable_preemption();
-    const uint64_t *kp=pmap_pte(kernel_pmap,kva),*dp=pmap_pte(kernel_pmap,direct);
+    auto read=[](uint64_t address,uint64_t *entry) {
+        if((address&7) || address<gPhysBase || address-gPhysBase>=gPhysSize ||
+            gPhysSize-(address-gPhysBase)<8)return false;
+        const uint64_t va=gVirtBase+address-gPhysBase;
+        *entry=__atomic_load_n(reinterpret_cast<const uint64_t *>(va),__ATOMIC_RELAXED);
+        return true;
+    };
+    const auto kp=nabuGpuKernelPte(kva,ttbr,tcr,read),dp=nabuGpuKernelPte(direct,ttbr,tcr,read);
     // The caller may independently vm_deallocate a user mapping. Do not walk
     // its unprotected page-table pointer. Sample the retained kernel mapping
     // and stable physmap instead, and label the user address as unqueried.
-    const uint64_t k=kp?__atomic_load_n(kp,__ATOMIC_RELAXED):0;
-    const uint64_t d=dp?__atomic_load_n(dp,__ATOMIC_RELAXED):0;
-    IOLog("[bo pte] phase=%s cpu=%llx mair=%016llx wc_byte=%02x pn=%llx wimg=%x kva=%llx pte=%016llx valid=%u attr=%u sh=%u direct=%llx direct_pte=%016llx direct_valid=%u direct_attr=%u direct_sh=%u uva=%llx user_pte=unqueried physmap_sample=1\n",
-        phase,mpidr,mair,unsigned((mair>>8)&255),physical>>12,pmap_cache_attributes(ppnum_t(physical>>12)),
-        kva,k,unsigned((k&3)==3),unsigned((k>>2)&7),unsigned((k>>8)&3),direct,d,unsigned((d&3)==3),unsigned((d>>2)&7),unsigned((d>>8)&3),
+    const uint64_t k=kp.descriptor;
+    const uint64_t d=dp.descriptor;
+    IOLog("[bo pte] phase=%s cpu=%llx mair=%016llx wc_byte=%02x ttbr1=%016llx tcr=%016llx pn=%llx wimg=%x kva=%llx pte=%016llx valid=%u level=%u attr=%u sh=%u direct=%llx direct_pte=%016llx direct_valid=%u direct_level=%u direct_attr=%u direct_sh=%u uva=%llx user_pte=unqueried physmap_sample=1\n",
+        phase,mpidr,mair,unsigned((mair>>8)&255),ttbr,tcr,physical>>12,pmap_cache_attributes(ppnum_t(physical>>12)),
+        kva,k,unsigned(kp.valid),kp.level,unsigned((k>>2)&7),unsigned((k>>8)&3),direct,d,unsigned(dp.valid),dp.level,unsigned((d>>2)&7),unsigned((d>>8)&3),
         userAddress);
 }

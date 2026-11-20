@@ -18,6 +18,7 @@ using ppnum_t=uint32_t;using vm_page_t=void *;
 #endif
 '''+upl+'\nusing upl_page_info_array_t=upl_page_info *;\n'+enum+'\n'+layout+'''
 #include "NabuGpuPagePolicy.h"
+#include "NabuGpuPteSnapshot.h"
 static_assert(sizeof(upl_page_info)==sizeof(NabuGpuPmapPageInfo));
 static_assert(offsetof(upl_page_info,phys_addr)==offsetof(NabuGpuPmapPageInfo,physicalPage));
 static_assert(sizeof(unified_page_list_t)==sizeof(NabuGpuPmapPageList));
@@ -43,6 +44,21 @@ struct Ops {
  void sync(uint32_t p){auto &x=pages[p];if(x.dirty){x.dram=x.cpu;x.dirty=false;}++syncs;}
 };
 int main(){
+ // Live 4K TTBR1 walker: page, block, invalid, PA range failure and wrong TG.
+ const uint64_t va=UINT64_C(0xfffffff000123000),ttbr=0x30000000,tcr=(UINT64_C(2)<<30)|(UINT64_C(25)<<16);
+ std::map<uint64_t,uint64_t> entries;
+ auto read=[&](uint64_t a,uint64_t *v){auto i=entries.find(a);if(i==entries.end())return false;*v=i->second;return true;};
+ entries[ttbr+((va>>30)&511)*8]=0x30001003;
+ entries[0x30001000+((va>>21)&511)*8]=0x30002003;
+ const uint64_t leaf=0x30002000+((va>>12)&511)*8;
+ entries[leaf]=UINT64_C(0x123450000)|3|(1<<2)|(3<<8);
+ auto pte=nabuGpuKernelPte(va,ttbr,tcr,read);assert(pte.valid && pte.level==3 && ((pte.descriptor>>2)&7)==1 && ((pte.descriptor>>8)&3)==3);
+ entries[0x30001000+((va>>21)&511)*8]=0x40000001;
+ pte=nabuGpuKernelPte(va,ttbr,tcr,read);assert(pte.valid && pte.level==2);
+ entries[ttbr+((va>>30)&511)*8]=0x80000001;pte=nabuGpuKernelPte(va,ttbr,tcr,read);assert(pte.valid && pte.level==1);
+ entries[ttbr+((va>>30)&511)*8]=0;assert(!nabuGpuKernelPte(va,ttbr,tcr,read).valid);
+ assert(!nabuGpuKernelPte(va,ttbr,tcr^(UINT64_C(1)<<30),read).valid);
+ assert(!nabuGpuKernelPte(0x123000,ttbr,tcr,read).valid);
  uint32_t changed=99;Ops o;const uint64_t base=0x100000000,ram=0x40000000;Span s{0,base,130*4096};
  // Model the exact observed failure: new user writes in CPU dirty lines,
  // GPU/kernel NC reads old zero DRAM. A PTE change alone does not publish it.
@@ -78,4 +94,4 @@ with tempfile.TemporaryDirectory(prefix='nabu-page-policy-') as td:
  subprocess.run(cmd,check=True);q=subprocess.run([str(r/'test')],capture_output=True,text=True,check=True)
  (a.output/'run.log').write_text(q.stdout);print(q.stdout,end='')
  (a.output/'selected-xnu-types.cpp').write_text(abi)
-(a.output/'verification.json').write_text(json.dumps(dict(passed=True,selected_kernel_headers={str(f.relative_to(a.xnu)):hashlib.sha256(f.read_bytes()).hexdigest() for f in [pmap,mem]},private_abi_compiled=True,production_page_policy=True,cache_instructions_modeled=True,sanitizers=['ASan','UBSan'],hardware_tested=False),indent=2)+'\n')
+(a.output/'verification.json').write_text(json.dumps(dict(passed=True,selected_kernel_headers={str(f.relative_to(a.xnu)):hashlib.sha256(f.read_bytes()).hexdigest() for f in [pmap,mem]},private_abi_compiled=True,production_page_policy=True,production_ttbr1_walker=True,cache_instructions_modeled=True,sanitizers=['ASan','UBSan'],hardware_tested=False),indent=2)+'\n')
