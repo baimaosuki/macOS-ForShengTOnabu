@@ -165,3 +165,17 @@ the previous production function fails the object-identity regression. Whether
 this resolves the P027 CP failure remains a hardware question. Fault records now
 include the A6xx IB1/IB2 base/remaining registers and up to 256 IB words. Remaining
 counts exclude prefetched words and are not labeled as an exact faulting PC.
+
+
+P028 captures all 182 words of the first production IB before its ring submission.
+The first invalid PM4 header is zero at word17, followed by large zero regions;
+CP reports opcode0 at fence2/1. This proves a malformed CPU-side snapshot, not the
+exact physical cause. Owned WC BOs now batch their actual prepared page attributes
+to Normal-NC and explicitly synchronize changed pages, both before initial use
+and before submission. The selected XNU batch path updates PTEs/TLB but only
+cleans RT transitions, so a separate page sync is required for WB-to-NC.
+Release restores default attributes before descriptor completion; failures retain
+and quarantine the allocation. Imported page attributes remain owned by their
+callers and use the existing maintenance path. Host tests compile the private
+page-list ABI from the selected XNU headers and model dirty-line publication;
+actual A640 cache visibility and GPU rendering still require device validation.

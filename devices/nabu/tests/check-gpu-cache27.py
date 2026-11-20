@@ -13,9 +13,9 @@ cache=extract((g/'NativeAdrenoMemory.cpp').read_text(),'IOReturn NativeAdrenoMem
 cache=cache.replace('__asm__ volatile("dc ivac, %0" :: "r"(va):"memory");','hostCache(va,true);')
 cache=cache.replace('__asm__ volatile("dc civac, %0" :: "r"(va):"memory");','hostCache(va,false);')
 cache=cache.replace('__asm__ volatile("dsb sy" ::: "memory");','++barriers;')
-submit=(g/'NativeAdrenoSubmit.cpp').read_text();helper=extract(submit,'static IOReturn nabuMaintainImportedResource(')
-assert 'nabuMaintainImportedResource(vm_,job.resources[at].handle,true)' in submit
-assert 'nabuMaintainImportedResource(vm_,resource.handle,false)' in submit
+submit=(g/'NativeAdrenoSubmit.cpp').read_text();helper=extract(submit,'static IOReturn nabuMaintainResource(')
+assert 'nabuMaintainResource(vm_,job.resources[at].handle,true)' in submit
+assert 'nabuMaintainResource(vm_,resource.handle,false)' in submit
 prefix=r'''
 #include <cassert>
 #include <cstddef>
@@ -38,8 +38,8 @@ int test(){NativeAdrenoMemory m{{{{0,0x30000000,4096},{4096,0x30008000,4096}},2}
  assert(!m.maintainImported(4000,200,true));assert(invalidated==cleaned && barriers==2);
  m.storage_.spans[1].physical=0x40000000;assert(m.maintainImported(4096,4096,false)==kIOReturnUnsupported);return 0;}
 }
-struct NativeAdrenoMemory {bool maintained=true;unsigned stores=0,acquires=0;int fail=0;
- bool maintainedImport()const{return maintained;}size_t bytes()const{return 8192;}
+struct NativeAdrenoMemory {bool maintained=true,wc=false;unsigned stores=0,acquires=0;int fail=0;
+ bool maintainedImport()const{return maintained;}bool writeCombined()const{return wc;}size_t bytes()const{return 8192;}
  IOReturn publishForDevice(size_t o,size_t n){assert(!o && n==8192);++stores;return fail;}
  IOReturn acquireDeviceWrites(size_t o,size_t n){assert(!o && n==8192);++acquires;return fail;}
 };
@@ -47,11 +47,13 @@ struct NativeAdrenoVm {NativeAdrenoMemory memory;const NativeAdrenoMemory *resou
 '''
 test=r'''
 int main(){ranges::test();NativeAdrenoVm vm;
- assert(!nabuMaintainImportedResource(&vm,1,false) && vm.memory.stores==1);
- assert(!nabuMaintainImportedResource(&vm,1,true) && vm.memory.acquires==1);
- vm.memory.maintained=false;assert(!nabuMaintainImportedResource(&vm,1,false) && vm.memory.stores==1);
- vm.memory.maintained=true;vm.memory.fail=7;assert(nabuMaintainImportedResource(&vm,1,false)==7);
- assert(nabuMaintainImportedResource(&vm,2,false)==kIOReturnBadArgument);
+ assert(!nabuMaintainResource(&vm,1,false) && vm.memory.stores==1);
+ assert(!nabuMaintainResource(&vm,1,true) && vm.memory.acquires==1);
+ vm.memory.maintained=false;assert(!nabuMaintainResource(&vm,1,false) && vm.memory.stores==1);
+ vm.memory.wc=true;assert(!nabuMaintainResource(&vm,1,false) && vm.memory.stores==2);
+ assert(!nabuMaintainResource(&vm,1,true) && vm.memory.acquires==2);
+ vm.memory.maintained=true;vm.memory.fail=7;assert(nabuMaintainResource(&vm,1,false)==7);
+ assert(nabuMaintainResource(&vm,2,false)==kIOReturnBadArgument);
  puts("PASS production NC import cache range validation and submit/completion maintenance hooks; cache instructions modeled");}
 '''
 a.output.mkdir(parents=True,exist_ok=True)

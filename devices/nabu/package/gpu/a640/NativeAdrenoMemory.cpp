@@ -227,6 +227,12 @@ IOReturn destroyOwnedStorage(NativeAdrenoBackingStorage &storage)
         return kIOReturnBusy;
     }
     const uint32_t release_flags=storage.write_combined?NativeAdrenoMemoryDiagnosticWriteCombined:0;
+    if(storage.page_cache_owned) {
+        uint32_t changed=0;
+        const IOReturn status=NativeAdrenoSetOwnedPageCache(storage.spans,storage.span_count,false,&changed);
+        if(status){storage.quarantined=true;return status;}
+        storage.page_cache_owned=false;
+    }
     if(storage.descriptor) {
         OSSafeReleaseNULL(storage.cpu_mapping);
         if(storage.prepared) {
@@ -502,6 +508,8 @@ IOReturn NativeAdrenoMemory::allocate(size_t bytes,unsigned bits,bool contiguous
     }
 
     if(reuse_backing && takeBacking(bytes,bits,contiguous,write_combined,storage_)) {
+        status=ensureOwnedPageCache();
+        if(status){(void)release();return status;}
         storage_.diagnostic_source=source;
         {
             MemoryStageTime elapsed(MemoryZero,bytes);
@@ -619,6 +627,13 @@ IOReturn NativeAdrenoMemory::allocate(size_t bytes,unsigned bits,bool contiguous
                 storage_.spans[storage_.span_count++]={offset,physical,4096,write_combined?0u:1u};
             }
         }
+    }
+    if(write_combined) {
+        // Flags on a descriptor are not proof of the pinned pages' effective
+        // cache mode. Publish all owned CPU PTEs as NC before zeroing/use.
+        storage_.page_cache_owned=true;
+        status=ensureOwnedPageCache();
+        if(status)goto failed;
     }
     {
         MemoryStageTime elapsed(MemoryZero,bytes);
@@ -843,8 +858,22 @@ IOReturn NativeAdrenoMemory::publishForDevice(size_t offset,size_t bytes)
     if(!backed() || !storage_.prepared || storage_.quarantined)return kIOReturnNotReady;
     if(!bytes || offset>storage_.bytes || bytes>storage_.bytes-offset)return kIOReturnBadArgument;
     if(maintainedImport())return maintainImported(offset,bytes,false);
+    const IOReturn status=ensureOwnedPageCache();
+    if(status)return status;
     __asm__ volatile("dsb st" ::: "memory");
     return kIOReturnSuccess;
+}
+IOReturn NativeAdrenoMemory::ensureOwnedPageCache()
+{
+    if(!storage_.descriptor || !storage_.write_combined)return kIOReturnSuccess;
+    if(!storage_.prepared || storage_.quarantined || !storage_.span_count)return kIOReturnNotReady;
+    uint32_t changed=0;
+    const IOReturn status=NativeAdrenoSetOwnedPageCache(storage_.spans,storage_.span_count,true,&changed);
+    if(changed)native_adreno_backing_cache_stats[10]+=changed;
+    static uint32_t reports;
+    if(reports++<8 || status)IOLog("[bo cache] pages=%llu changed=%u status=%08x verified_nc=%u\n",
+        uint64_t(storage_.bytes/4096),changed,uint32_t(status),!status);
+    return status;
 }
 IOReturn NativeAdrenoMemory::acquireDeviceWrites(size_t offset,size_t bytes)
 {

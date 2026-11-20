@@ -1,5 +1,6 @@
 /* SPDX-License-Identifier: MIT */
 #include "NativeAdrenoMemory.h"
+#include "NabuGpuPagePolicy.h"
 // XNU osfmk/kern/cpu_data.h exports these C entry points. Avoid pulling
 // private cpu_data_t layouts into a driver that only needs preemption control.
 extern "C" void _disable_preemption(void);
@@ -13,6 +14,8 @@ extern "C" int vm_map_page_size(vm_map_t map);
 #include <pexpert/pexpert.h>
 extern "C" uint64_t gPhysBase,gPhysSize;
 extern "C" unsigned int pmap_cache_attributes(ppnum_t pn);
+extern "C" void pmap_batch_set_cache_attributes(const NabuGpuPmapPageList *,unsigned);
+extern "C" void pmap_sync_page_attributes_phys(ppnum_t);
 /* The board diagnostic ABI retains these zero-valued counters. */
 extern "C" {volatile uint64_t native_adreno_cache_stats[5];}
 extern "C" {volatile uint64_t native_adreno_reassert_ticks;}
@@ -60,4 +63,19 @@ NativeAdrenoCpuCacheMode NativeAdrenoQueryPageCacheMode(uint64_t physical)
         default:
             return NativeAdrenoCpuCacheMode::Unknown;
     }
+}
+
+IOReturn NativeAdrenoSetOwnedPageCache(const NativeAdrenoPhysicalSpan *spans,size_t count,
+    bool writeCombined,uint32_t *changed)
+{
+    struct Ops {
+        unsigned attribute(uint32_t page){return pmap_cache_attributes(page)&VM_WIMG_MASK;}
+        void batch(const NabuGpuPmapPageList *list,unsigned target){pmap_batch_set_cache_attributes(list,target);}
+        void sync(uint32_t page){pmap_sync_page_attributes_phys(page);}
+    } ops;
+    const auto result=nabuGpuApplyPagePolicy(spans,count,gPhysBase,gPhysSize,
+        writeCombined?VM_WIMG_WCOMB:VM_WIMG_DEFAULT,ops,changed);
+    __asm__ volatile("dsb sy" ::: "memory");
+    return result==NabuGpuPagePolicyResult::Ok?kIOReturnSuccess:
+        result==NabuGpuPagePolicyResult::Argument?kIOReturnBadArgument:kIOReturnIOError;
 }

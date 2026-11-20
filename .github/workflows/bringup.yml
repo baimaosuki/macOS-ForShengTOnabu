@@ -104,6 +104,7 @@ jobs:
             out/nabu27-gpu-wire-host/
             out/nabu27-gpu-bo-host/
             out/nabu27-gpu-cache-host/
+            out/nabu27-gpu-page-policy-host/
             out/nabu27-gpu-ownership-host/
             out/nabu27-gpu-fault-host/
             out/nabu27-gpu-view-cache-host/

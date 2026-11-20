@@ -10,7 +10,7 @@ def body(signature):
         depth+=(source[end]=='{')-(source[end]=='}');end+=1
     return source[start:end]
 methods='\n'.join(body(x) for x in ['IOReturn destroyOwnedStorage(',
-    'IOReturn NativeAdrenoMemory::allocate(size_t', 'IOReturn NativeAdrenoMemory::release(',
+    'IOReturn NativeAdrenoMemory::ensureOwnedPageCache(', 'IOReturn NativeAdrenoMemory::allocate(size_t', 'IOReturn NativeAdrenoMemory::release(',
     'IOReturn NativeAdrenoMemory::holdForDevice(', 'IOReturn NativeAdrenoMemory::retireAfterQuiescence('])
 methods=methods.replace('__asm__ volatile("dsb sy":::"memory");','hostBarrier();')
 peer=r'''
@@ -26,17 +26,19 @@ enum {kIODirectionInOut=3,kIOMemoryMapperNone=8,kIOMapWriteCombineCache=16,kIOMa
  kIOMemoryPhysicallyContiguous=64,kIOMemoryPageable=128,kIOMapAnywhere=256};
 static void *kernel_task=(void *)1;
 static unsigned descriptors=0,mappings=0,prepares=0,completes=0;
+static class IOMemoryMap *lastMapping=nullptr;
+static unsigned policies=0,restores=0;static bool cacheOwned=false,failPolicy=false,failRestore=false;
 static bool failAllocate=false,failPrepare=false,failMap=false,failComplete=false,highPhysical=false;
 class IOMemoryMap {
 public:
- void *p;explicit IOMemoryMap(void *v):p(v){++mappings;}
+ void *p;explicit IOMemoryMap(void *v):p(v){++mappings;lastMapping=this;}
  uint64_t getVirtualAddress(){return (uintptr_t)p;}
  void release(){--mappings;delete this;}
 };
 class IOMemoryDescriptor {
 public:
  virtual ~IOMemoryDescriptor()=default;
- virtual IOReturn complete(){++completes;return failComplete?kIOReturnIOError:0;}
+ virtual IOReturn complete(){assert(!cacheOwned);++completes;return failComplete?kIOReturnIOError:0;}
  virtual void release(){delete this;}
 };
 class IOBufferMemoryDescriptor:public IOMemoryDescriptor {
@@ -82,6 +84,14 @@ struct {IOBufferMemoryDescriptor *descriptor=nullptr;size_t bytes=0;uint64_t phy
 static bool poolTake(size_t,size_t *){return false;}
 static void poolGive(size_t,size_t){}
 static void hostBarrier(){}
+IOReturn NativeAdrenoSetOwnedPageCache(const NativeAdrenoPhysicalSpan *s,size_t n,bool wc,uint32_t *changed){
+ assert(s && n);*changed=0;
+ if(wc){++policies;cacheOwned=true;if(failPolicy)return kIOReturnIOError;}
+ else{++restores;if(failRestore)return kIOReturnIOError;cacheOwned=false;}
+ *changed=unsigned(n);return 0;
+}
+static void hostZero(void *p,size_t n){assert(cacheOwned);memset(p,0,n);}
+#define bzero hostZero
 static void PE_parse_boot_argn(const char *,int *,unsigned){}
 static void IOLog(const char *,...){}
 IOReturn NativeAdrenoMemory::trimBackingCache(NativeAdrenoBackingTrimReason){return 0;}
@@ -90,10 +100,11 @@ test=r'''
 int main(){
  {
   NativeAdrenoMemory b;assert(!b.allocate(8192,40,false,8192,true,false));
+  assert(policies==1 && cacheOwned);
   assert(descriptors==1 && mappings==1 && prepares==1 && b.writeCombined() && b.spanCount()==2);
   for(size_t i=0;i<b.bytes();++i)assert(!((uint8_t *)b.mapping())[i]);
   assert(!b.holdForDevice() && b.release()==kIOReturnBusy && descriptors==1 && mappings==1);
-  assert(!b.retireAfterQuiescence() && !b.release() && !descriptors && !mappings);
+  assert(!b.retireAfterQuiescence() && !b.release() && !descriptors && !mappings && restores==1 && !cacheOwned);
  }
  for(unsigned fault=0;fault<4;++fault){
   failAllocate=fault==0;failPrepare=fault==1;failMap=fault==2;highPhysical=fault==3;
@@ -101,6 +112,16 @@ int main(){
   assert(!descriptors && !mappings);assert(!b.release());
  }
  failAllocate=failPrepare=failMap=highPhysical=false;
+ {failPolicy=true;NativeAdrenoMemory f;
+  assert(f.allocate(4096,40,false,4096,true,false)==kIOReturnIOError);
+  assert(!descriptors && !mappings && !cacheOwned);failPolicy=false;}
+ {NativeAdrenoMemory f;assert(!f.allocate(4096,40,false,4096,true,false));
+  unsigned before=completes;failRestore=true;assert(f.release()==kIOReturnIOError && f.quarantined());
+  assert(cacheOwned && completes==before && descriptors==1 && mappings==1);
+  failRestore=false;cacheOwned=false;f.descriptor()->release();delete[] f.spans();
+  // fixture terminal cleanup of retained mapping after quarantine check
+  lastMapping->release();
+ }
  NativeAdrenoMemory b;assert(!b.allocate(4096,40,false,4096,true,false));
  failComplete=true;assert(b.release()==kIOReturnIOError && b.quarantined() && descriptors==1);
  assert(b.release()==kIOReturnBusy && descriptors==1);
@@ -119,5 +140,5 @@ with tempfile.TemporaryDirectory(prefix='nabu-bo-host-') as temp:
     subprocess.run(cmd,check=True);q=subprocess.run([str(root/'test')],capture_output=True,text=True,check=True)
     (a.output/'run.log').write_text(q.stdout);print(q.stdout,end='')
 (a.output/'verification.json').write_text(json.dumps(dict(passed=True,production_allocation_release_bodies=True,
-    no_task_pageable_wc=True,failure_controls=['allocation','prepare','CPU map','physical width','complete'],
+    no_task_pageable_wc=True,failure_controls=['allocation','prepare','CPU map','physical width','cache apply','cache restore','complete'],
     sanitizers=['ASan','UBSan'],hardware_tested=False),indent=2)+'\n')

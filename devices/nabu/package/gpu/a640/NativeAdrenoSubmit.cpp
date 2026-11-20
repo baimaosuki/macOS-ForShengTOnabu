@@ -6,11 +6,11 @@
 #include <IOKit/IOLib.h>
 #include <IOKit/IOMemoryDescriptor.h>
 
-static IOReturn nabuMaintainImportedResource(NativeAdrenoVm *vm,uint64_t handle,bool completed)
+static IOReturn nabuMaintainResource(NativeAdrenoVm *vm,uint64_t handle,bool completed)
 {
     const NativeAdrenoMemory *backing=vm->resourceBacking(handle);
     if(!backing)return kIOReturnBadArgument;
-    if(!backing->maintainedImport())return kIOReturnSuccess;
+    if(!backing->maintainedImport() && !backing->writeCombined())return kIOReturnSuccess;
     NativeAdrenoMemory *memory=const_cast<NativeAdrenoMemory *>(backing);
     return completed?memory->acquireDeviceWrites(0,memory->bytes()):memory->publishForDevice(0,memory->bytes());
 }
@@ -822,7 +822,7 @@ IOReturn NativeAdrenoSubmit::release(Job &job)
             if(!job.resources[at].owns_reference) {
                 continue;
             }
-            if(nabuMaintainImportedResource(vm_,job.resources[at].handle,true))return poison();
+            if(nabuMaintainResource(vm_,job.resources[at].handle,true))return poison();
             if(vm_->retireJobAfterCompletion(job.resources[at].handle)) {
                 return poison();
             }
@@ -1077,7 +1077,7 @@ IOReturn NativeAdrenoSubmit::submitResources(const NativeAdrenoSubmitBuffer *buf
     for(size_t at=0;at<resource_count;++at) {
         const NativeAdrenoSubmitResource &resource=held[at];
         if(resource.owns_reference) {
-            status=nabuMaintainImportedResource(vm_,resource.handle,false);
+            status=nabuMaintainResource(vm_,resource.handle,false);
             if(status)break;
         }
         if(vm_->resourceImported(resource.handle)) {

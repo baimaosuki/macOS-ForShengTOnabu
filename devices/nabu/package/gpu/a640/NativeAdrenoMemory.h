@@ -12,6 +12,7 @@ struct NativeAdrenoPhysicalSpan {
     uint64_t offset,physical,bytes;
     unsigned writeback=1; // CPU cached pages use coherent GPU WB; Normal NC pages use GPU NC.
 };
+IOReturn NativeAdrenoSetOwnedPageCache(const NativeAdrenoPhysicalSpan *,size_t,bool,uint32_t *);
 struct NativeAdrenoCpuState {
     uint64_t tcr,ttbr0,ttbr1,sctlr;
     uint64_t kernel_page_bytes,kernel_map_page_bytes;
@@ -125,7 +126,7 @@ struct NativeAdrenoBackingStorage {
     NativeAdrenoPhysicalSpan *spans=nullptr;
     size_t bytes=0,span_count=0,span_capacity=0;
     unsigned output_bits=0;
-    bool contiguous=false,prepared=false,quarantined=false,write_combined=false;
+    bool contiguous=false,prepared=false,quarantined=false,write_combined=false,page_cache_owned=false;
     NativeAdrenoMemorySource diagnostic_source=NativeAdrenoMemorySource::Unknown;
     NativeAdrenoMemoryCacheResult diagnostic_cache_result=NativeAdrenoMemoryCacheResult::NotRequested;
 };
@@ -193,6 +194,7 @@ public:
     bool maintainedImport() const {return imported_ &&
         (cpu_cache_mode_==NativeAdrenoCpuCacheMode::Cached || cpu_cache_mode_==NativeAdrenoCpuCacheMode::Mixed);}
     IOReturn maintainImported(size_t offset,size_t bytes,bool invalidate);
+    IOReturn ensureOwnedPageCache();
     /* An import of memory the owner maps read-only (the kernel could pin it for reading only): the GPU may read it, never write it. */
     bool readOnly() const {return read_only_;}
     bool writeCombined() const {return storage_.write_combined;}
