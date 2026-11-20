@@ -13,7 +13,9 @@ abi='''#include <cstdint>
 #include <cstddef>
 using ppnum_t=uint32_t;using vm_page_t=void *;
 #define XNU_KERNEL_PRIVATE 1
+#ifndef __enum_decl
 #define __enum_decl(N,T,...) enum N:T __VA_ARGS__
+#endif
 '''+upl+'\nusing upl_page_info_array_t=upl_page_info *;\n'+enum+'\n'+layout+'''
 #include "NabuGpuPagePolicy.h"
 static_assert(sizeof(upl_page_info)==sizeof(NabuGpuPmapPageInfo));
