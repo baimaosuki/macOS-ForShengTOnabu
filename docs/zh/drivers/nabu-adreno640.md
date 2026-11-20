@@ -136,3 +136,10 @@ BO/页表读取调用 phystokv，CIVAC/IVAC 按 phystokv_range 返回边界分�
 推送前核对现有内核 LC_SYMTAB 的全局符号与 XNU 源码签名，Host/ARM64
 回放使用非连续 physmap 和 P031 页表地址。上机仍需先通过 BO/PTE，再验证
 fence2 和提交前后数据；P031 尚未运行到原来的 CP_OPCODE_ERROR 路径。
+
+
+P032 已通过 P031 快照 Panic，bootstrap fence1 成功，生产 fence2 仍 opcode0。
+源码/旧二进制确认非PPL下 __ARM_PTE_PHYSMAP__ 未启用，物理直映保留WB
+块映射，未随WC BO改变。nabu现使用4KiB无hint物理直映并启用原生逐页
+属性/TLB维护，统一physmap和BO映射。PTE日志拆成短行避免256B截断，前两次
+IB clean对比覆盖最多256dwords。Host/编译通过不证明真机已消除CP故障。

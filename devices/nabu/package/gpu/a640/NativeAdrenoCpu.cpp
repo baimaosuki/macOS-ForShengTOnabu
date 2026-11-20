@@ -121,8 +121,12 @@ void NativeAdrenoMemory::cacheSnapshot(const char *phase,size_t offset,uint64_t 
     // and stable physmap instead, and label the user address as unqueried.
     const uint64_t k=kp.descriptor;
     const uint64_t d=dp.descriptor;
-    IOLog("[bo pte] phase=%s cpu=%llx mair=%016llx wc_byte=%02x ttbr1=%016llx tcr=%016llx pn=%llx wimg=%x kva=%llx pte=%016llx valid=%u level=%u attr=%u sh=%u direct=%llx direct_pte=%016llx direct_valid=%u direct_level=%u direct_attr=%u direct_sh=%u uva=%llx user_pte=unqueried physmap_sample=1\n",
-        phase,mpidr,mair,unsigned((mair>>8)&255),ttbr,tcr,physical>>12,pmap_cache_attributes(ppnum_t(physical>>12)),
-        kva,k,unsigned(kp.valid),kp.level,unsigned((k>>2)&7),unsigned((k>>8)&3),direct,d,unsigned(dp.valid),dp.level,unsigned((d>>2)&7),unsigned((d>>8)&3),
-        userAddress);
+    // Each line stays below IOLog's256-byte formatting buffer. A single long
+    // record previously dropped the direct PTE's attribute bits and newline.
+    IOLog("[bo pte] phase=%s cpu=%llx mair=%016llx wc=%02x pn=%llx wimg=%x uva=%llx\n",
+        phase,mpidr,mair,unsigned((mair>>8)&255),physical>>12,pmap_cache_attributes(ppnum_t(physical>>12)),userAddress);
+    IOLog("[bo kpte] phase=%s va=%llx pte=%016llx valid=%u level=%u attr=%u sh=%u\n",
+        phase,kva,k,unsigned(kp.valid),kp.level,unsigned((k>>2)&7),unsigned((k>>8)&3));
+    IOLog("[bo dpte] phase=%s va=%llx pte=%016llx valid=%u level=%u attr=%u sh=%u\n",
+        phase,direct,d,unsigned(dp.valid),dp.level,unsigned((d>>2)&7),unsigned((d>>8)&3));
 }

@@ -203,3 +203,12 @@ and XNU prototypes are checked before pushing. Host and actual ARM64 replays
 use discontinuous mappings and P031 table addresses. Hardware must first pass
 BO/PTE startup, then validate fence2 and pre/post-clean IB data; P031 did not
 reach the original CP_OPCODE_ERROR path.
+
+
+P032 passes the P031 snapshot panic and bootstrap fence1, but production fence2
+still reports opcode0. Source/deployed binary confirm non-PPL physmap updates
+were disabled; WB block aperture aliases did not follow WC BO attributes. NABU
+now creates4KiB non-hinted aperture leaves and enables native per-page cache/TLB
+updates, unifying physmap and BO mapping policy. PTE records are split below256B
+and first-two-IB clean comparisons cover up to256dwords. Device CP/rendering
+validation remains pending; Host/build success does not prove it is fixed.

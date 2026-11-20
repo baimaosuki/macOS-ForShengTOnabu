@@ -20,6 +20,7 @@ prefix=r'''
 #include <cstdint>
 #include <cstdio>
 #include <vector>
+static constexpr size_t NabuGpuIbHeadWords=256;
 using IOReturn=int;enum{kIOReturnSuccess=0,kIOReturnUnsupported=1,kIOReturnBadArgument=2,kIOReturnNotReady=3};
 static uint64_t gPhysBase=0x30000000,gPhysSize=0x100000;
 using vm_size_t=uint64_t;

@@ -1,0 +1,45 @@
+--- a/osfmk/arm64/proc_reg.h
++++ b/osfmk/arm64/proc_reg.h
+@@ -3858,8 +3858,12 @@
+ #define MSR(reg, src)  __asm__ volatile ("msr " reg ", %0" :: "r" (src))
+ #define MRS(dest, reg) __asm__ volatile ("mrs %0, " reg : "=r" (dest))
+ 
++/* NABU has NC DMA buffers without PPL. The physical aperture must follow
++ * their per-page cache attributes too; arm_vm_physmap_init creates leaf PTEs. */
++#if XNU_MONITOR || defined(NABU)
++#define __ARM_PTE_PHYSMAP__ 1
++#endif
+ #if XNU_MONITOR
+-#define __ARM_PTE_PHYSMAP__ 1
+ #define PPL_STATE_KERNEL    0
+ #define PPL_STATE_DISPATCH  1
+ #define PPL_STATE_PANIC     2
+--- a/osfmk/arm64/arm_vm_init.c
++++ b/osfmk/arm64/arm_vm_init.c
+@@ -1983,15 +1983,23 @@
+ 	ptov_table_entry temp_ptov_table[PTOV_TABLE_SIZE];
+ 	bzero(temp_ptov_table, sizeof(temp_ptov_table));
+ 
++#if __ARM_PTE_PHYSMAP__
++	/* The cache updater addresses one4K leaf and rejects contiguous hints.
++	 * Block/hinted WB aperture aliases conflict with NC BO mappings. */
++	const unsigned aperture_granule = 0;
++#else
++	const unsigned aperture_granule = ARM64_GRANULE_ALLOW_BLOCK | ARM64_GRANULE_ALLOW_HINT;
++#endif
++
+ 	// Will be handed back to VM layer through ml_static_mfree() in arm_vm_prot_finalize()
+ 	arm_vm_physmap_slide(temp_ptov_table, gVirtBase, segLOWEST - gVirtBase, AP_RWNA,
+-	    ARM64_GRANULE_ALLOW_BLOCK | ARM64_GRANULE_ALLOW_HINT);
++	    aperture_granule);
+ 
+ 	arm_vm_page_granular_RWNX(end_kern, phystokv(args->topOfKernelData) - end_kern,
+-	    ARM64_GRANULE_ALLOW_BLOCK | ARM64_GRANULE_ALLOW_HINT); /* Device Tree (if not locked down), RAM Disk (if present), bootArgs */
++	    aperture_granule); /* Device Tree (if not locked down), RAM Disk (if present), bootArgs */
+ 
+ 	arm_vm_physmap_slide(temp_ptov_table, (args->topOfKernelData - gPhysBase + gVirtBase),
+-	    real_avail_end - args->topOfKernelData, AP_RWNA, ARM64_GRANULE_ALLOW_BLOCK | ARM64_GRANULE_ALLOW_HINT); // rest of physmem
++	    real_avail_end - args->topOfKernelData, AP_RWNA, aperture_granule); // rest of physmem
+ 
+ 	assert((temp_ptov_table[ptov_index - 1].va + temp_ptov_table[ptov_index - 1].len) <= physmap_end);
+ 

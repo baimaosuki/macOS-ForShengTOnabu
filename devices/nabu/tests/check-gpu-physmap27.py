@@ -76,18 +76,19 @@ int main(){
  addPage(kva);addPage(directVA);addPage(kva+4096,boPA+4096);addPage(directVA+0xa000,boPA+4096);
  NativeAdrenoMemory m;m.cacheSnapshot("p031-nonlinear",0,0);
  assert(logText.find("valid=1 level=3 attr=1 sh=3")!=std::string::npos);
- assert(logText.find("direct_valid=1 direct_level=3 direct_attr=1 direct_sh=3")!=std::string::npos);
- assert(logText.find("wc_byte=44")!=std::string::npos);
+ assert(logText.find("[bo dpte] phase=p031-nonlinear va=fffffff980009000 pte=00000000daddc307 valid=1 level=3 attr=1 sh=3")!=std::string::npos);
+ assert(logText.find("wc=44")!=std::string::npos);
+ size_t begin=0;while(begin<logText.size()){size_t end=logText.find('\n',begin);assert(end!=std::string::npos && end-begin<256);begin=end+1;}
  assert(!reads.empty() && reads.front()==boPA);
  bool rootOffset=false;for(auto pa:reads)if((pa&~UINT64_C(4095))==host_ttbr){rootOffset=rootOffset || (pa&4095)==0xf28;}
  assert(rootOffset);logText.clear();reads.clear();
  m.cacheSnapshot("second-page-nonlinear",4096,0);
- assert(reads.front()==boPA+4096 && logText.find("direct_valid=1")!=std::string::npos);
+ assert(reads.front()==boPA+4096 && logText.find("[bo dpte] phase=second-page-nonlinear")!=std::string::npos);
  logText.clear();reads.clear();
  // Missing kernel leaf is logged and prevents a second direct-PTE walk.
  auto root=tables[host_ttbr].get();(*root)[(kva>>30)&511]=0;
  m.cacheSnapshot("missing-kernel-leaf",0,0);assert(logText.find("valid=0")!=std::string::npos);
- assert(logText.find("direct_valid=0")!=std::string::npos);
+ assert(logText.find("[bo dpte] phase=missing-kernel-leaf")!=std::string::npos);
  puts("PASS actual cacheSnapshot on split physmap, P031 TTBR PA, MAIR/PTE output and invalid kernel mapping");
 }
 '''

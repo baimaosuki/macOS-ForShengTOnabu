@@ -28,8 +28,8 @@ static IOReturn nabuPublishIb(NativeAdrenoVm *vm,const NativeAdrenoSubmitBuffer 
     if(!memory)return kIOReturnBadArgument;
     static uint32_t reports;
     const bool sample=memory->writeCombined() && __atomic_fetch_add(&reports,1,__ATOMIC_RELAXED)<2;
-    uint32_t before[16]={},after[16]={};
-    const size_t words=buffer.bytes/4<16?buffer.bytes/4:16;
+    uint32_t before[NabuGpuIbHeadWords]={},after[NabuGpuIbHeadWords]={};
+    const size_t words=buffer.bytes/4<NabuGpuIbHeadWords?buffer.bytes/4:NabuGpuIbHeadWords;
     IOReturn pre=kIOReturnNotReady,post=kIOReturnNotReady;
     if(sample){pre=vm->peekWords(buffer.iova,before,words);memory->cacheSnapshot("ib-before-clean",offset);}
     // Every IB, even one not owning the deduplicated resource reference,
@@ -42,6 +42,14 @@ static IOReturn nabuPublishIb(NativeAdrenoVm *vm,const NativeAdrenoSubmitBuffer 
         IOLog("[ib cache] handle=%llx iova=%llx offset=%llu bytes=%llu status=%08x pre=%08x post=%08x words=%u changed=%u zeros=%u/%u before=%08x/%08x/%08x/%08x after=%08x/%08x/%08x/%08x\n",
             buffer.handle,buffer.iova,uint64_t(offset),uint64_t(buffer.bytes),uint32_t(status),uint32_t(pre),uint32_t(post),unsigned(words),changed,zeroBefore,zeroAfter,
             before[0],before[1],before[2],before[3],after[0],after[1],after[2],after[3]);
+        for(size_t first=0;first<words;first+=16) {
+            const size_t last=first+16<words?first+16:words;
+            uint32_t bh=2166136261u,ah=2166136261u;unsigned diff=0,bz=0,az=0;
+            for(size_t i=first;i<last;++i){bh=(bh^before[i])*16777619u;ah=(ah^after[i])*16777619u;
+                diff+=before[i]!=after[i];bz+=before[i]==0;az+=after[i]==0;}
+            IOLog("[ib line] iova=%llx byte=%u bytes=%u before_hash=%08x after_hash=%08x changed=%u zeros=%u/%u\n",
+                buffer.iova,unsigned(first*4),unsigned((last-first)*4),bh,ah,diff,bz,az);
+        }
         memory->cacheSnapshot("ib-after-clean",offset);
     }
     return status;
