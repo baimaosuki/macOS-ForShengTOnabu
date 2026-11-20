@@ -10,9 +10,18 @@
       "native_objects": 40,
       "local_closure_objects": 42,
       "latest_completed_ci": {
-        "run": 44640851880,
-        "commit": "49d151a4ed4fd1c45167eb9e66dce7b72456e263",
+        "run": 44694522097,
+        "commit": "8b122cca762a44c4c4dc0ceb7cb1ebd1146f0ea0",
         "result": "success"
+      },
+      "startup": {
+        "source": "BSD late hook after IOBSD",
+        "static_startup_record": false,
+        "requires_verified_log_commit": true,
+        "startup_log_timeout_ms": 120000,
+        "phase_checkpoint_timeout_ms": 5000,
+        "binary_verified": true,
+        "hardware_tested": false
       }
     },
     "m2v": {
@@ -52,12 +61,12 @@
         "installed_on_device": false,
         "shader_cache_application": "/Applications/Shader Cache.app",
         "latest_completed_delivery": {
-          "native_commit": "49d151a4ed4fd1c45167eb9e66dce7b72456e263",
-          "native_run": 44640851880,
+          "native_commit": "8b122cca762a44c4c4dc0ceb7cb1ebd1146f0ea0",
+          "native_run": 44694522097,
           "merged_addon_sha256": "532bdbd55401031826c44bc2767bdd82a3b3c37a654f21c6885392b433f02e1c",
           "trust_sha256": "eb924d4f0a6fa21c55d9731e65084060da190eb8fb77e237a351c3dcf52cc708",
-          "zip_sha256": "60c25777125b741dd0f537fbda0653c76e7ec62b0d3d21e29e3ef71248d5a657",
-          "archive": "nabu-27.3-26C5035r-esp-a640-metal-49d151a.zip"
+          "zip_sha256": "a81c067ab33b60c4b942c5b48fd23fa9f6dbd8a146c9c98bdd859cf9fdcca899",
+          "archive": "nabu-27.3-26C5035r-esp-a640-metal-8b122cc.zip"
         },
         "metadata_scope": "Latest completed host delivery; no device installation or rendering result is asserted",
         "shader_cache": {

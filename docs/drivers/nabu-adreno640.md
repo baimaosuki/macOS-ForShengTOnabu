@@ -94,3 +94,8 @@ a 5-second bound and tolerate transient writer contention. This corrects an
 initialization race, not a proven explanation of the photographed pre-MMU bars.
 The former startup record actually used EARLY_BOOT=18, after task/thread init;
 arm_init's barrier 4 is KPRINTF. Source and binary checks keep that distinction.
+
+P028 full native CI 44694522097 at 8b122cc and final-kernel startup/PAC/
+signed-text/display/log replays passed. FAT readback and ZIP CRC passed.
+The native __DATA layout remains below the retained Libm boundary. Device
+startup and visible A640 rendering remain untested.
