@@ -85,7 +85,7 @@ IOReturn NativeAdrenoSetOwnedPageCache(const NativeAdrenoPhysicalSpan *spans,siz
 // Snapshot only retained BO/kernel mappings: no arbitrary task address walks,
 // no PTE writes, and no physical/cache alias is created by this diagnostic.
 struct pmap;
-extern "C" const pmap_t kernel_pmap;
+extern "C" struct pmap * const kernel_pmap;
 extern "C" uint64_t *pmap_pte(struct pmap *,uint64_t);
 extern "C" uint64_t gVirtBase;
 void NativeAdrenoMemory::cacheSnapshot(const char *phase,size_t offset,uint64_t userAddress) const
