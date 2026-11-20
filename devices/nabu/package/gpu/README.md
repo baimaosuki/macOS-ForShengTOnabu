@@ -95,3 +95,23 @@ this does not prove it caused the P026 first-submission fault. The production
 resource-submit path now retains a bounded first-IB head, and a CP failure prints
 only the latest ring/IB snapshot once, including read status and captured length.
 No arbitrary physical alias or per-frame pixel scan is added.
+
+
+P027 hardware evidence confirms the P031 USB correction: the apps SMMU uses
+USB slot4/CB55, verifies UFS slot2/CB1 unchanged, and native AppleUSBXHCI starts
+and creates ports. External keyboard/mouse enumeration is not yet demonstrated.
+GPU source64496146 still faults at fence2/1. The complete 26-word ring is
+well-formed; the 28 captured IB words match Turnip's A6xx initialization prefix.
+Only 28 of its 182 words were captured, so the failing instruction is unknown.
+The local A630 SQE disassembly confirms handlers for the captured PM4 opcodes;
+this is static firmware evidence, not execution or memory-visibility proof.
+
+Legacy owned-BO CPU views now retain the prepared IOBufferMemoryDescriptor
+itself, preserving the VM-object/cache/lifetime relationship used by the V2
+mapping path. Physical-range descriptors remain only for borrowed/imported
+backing without an owned descriptor. Host tests cover original-object identity,
+WC/WB mapping reuse, borrowed fallback and failed-publication reference cleanup;
+the previous production function fails the object-identity regression. Whether
+this resolves the P027 CP failure remains a hardware question. Fault records now
+include the A6xx IB1/IB2 base/remaining registers and up to 256 IB words. Remaining
+counts exclude prefetched words and are not labeled as an exact faulting PC.

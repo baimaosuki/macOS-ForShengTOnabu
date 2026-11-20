@@ -1162,40 +1162,41 @@ IOReturn AGXDeviceUserClient::legacyMemoryForType(UInt32 type,IOOptionBits *opti
     }
     NativeAdrenoMemory *backing=live_?core_->memoryForToken(type):nullptr;
     if(backing) {
-        /* The descriptor describes the BO's physical spans. The caller requests
-         * the allocation's cache mode; dropViews removes each mapping before
-         * the BO releases its pages. */
-        /* A BO's pages can come scattered, one span per page (a 64 MiB BO is 16384 of them): the descriptor takes them all, as many as the GPU's
-         * own table accepts. A fixed 64-entry array made every scattered BO above 256 KiB fail to map (VK_ERROR_MEMORY_MAP_FAILED, int-084),
-         * only when memory happened to be fragmented. The descriptor copies the ranges. */
-        enum {MaxSpans=65536};
-        const size_t count=backing->spanCount();
-        if(!count || count>MaxSpans)status=kIOReturnNoResources;
+        // Owned pageable BOs must map their prepared VM object, as mapCpu(V2)
+        // already does. A new physical-range pager is a separate object: it
+        // loses the original cache-mode and page-ownership relationship.
+        IOMemoryDescriptor *descriptor=backing->descriptor();
+        if(descriptor)descriptor->retain();
         else {
-            IOAddressRange *ranges=IONewData(IOAddressRange,count);
-            if(!ranges)status=kIOReturnNoMemory;
+            // Imported/borrowed spans have no owned IOBuffer descriptor.
+            enum {MaxSpans=65536};
+            const size_t count=backing->spanCount();
+            if(!count || count>MaxSpans)status=kIOReturnNoResources;
             else {
-                for(size_t i=0;i<count;++i)ranges[i]={backing->spans()[i].physical,backing->spans()[i].bytes};
-                IOMemoryDescriptor *descriptor=IOMemoryDescriptor::withAddressRanges(ranges,(UInt32)count,
-                    static_cast<IOOptionBits>(kIODirectionInOut)|static_cast<IOOptionBits>(kIOMemoryTypePhysical64),nullptr);
-                IODeleteData(ranges,IOAddressRange,count);
-                if(!descriptor)status=kIOReturnNoMemory;
+                IOAddressRange *ranges=IONewData(IOAddressRange,count);
+                if(!ranges)status=kIOReturnNoMemory;
                 else {
-                    bool cached=false;
-                    const IOOptionBits cacheOptions=kIOMapAnywhere|
-                        (backing->writeCombined()?kIOMapWriteCombineCache:kIOMapCopybackCache);
-                    for(size_t i=0;i<MaxViews;++i)if(!views_[i].descriptor) {views_[i].token=type;views_[i].descriptor=descriptor;views_[i].options=cacheOptions;descriptor->retain();cached=true;break;}
-                    if(!cached) {
-                        /* Never hand out a view that cannot be torn down again. */
-                        descriptor->release();
-                        status=kIOReturnNoResources;
-                    } else {
-                        *memory=descriptor;
-                        *options=cacheOptions;
-                        native_adreno_view_diag[1]=native_adreno_view_diag[1]+1;
-                        status=kIOReturnSuccess;
-                    }
+                    for(size_t i=0;i<count;++i)ranges[i]={backing->spans()[i].physical,backing->spans()[i].bytes};
+                    descriptor=IOMemoryDescriptor::withAddressRanges(ranges,(UInt32)count,
+                        static_cast<IOOptionBits>(kIODirectionInOut)|static_cast<IOOptionBits>(kIOMemoryTypePhysical64),nullptr);
+                    IODeleteData(ranges,IOAddressRange,count);
+                    if(!descriptor)status=kIOReturnNoMemory;
                 }
+            }
+        }
+        if(descriptor) {
+            bool cached=false;
+            const IOOptionBits cacheOptions=kIOMapAnywhere|
+                (backing->writeCombined()?kIOMapWriteCombineCache:kIOMapCopybackCache);
+            for(size_t i=0;i<MaxViews;++i)if(!views_[i].descriptor) {views_[i].token=type;views_[i].descriptor=descriptor;views_[i].options=cacheOptions;descriptor->retain();cached=true;break;}
+            if(!cached) {
+                descriptor->release();
+                status=kIOReturnNoResources;
+            } else {
+                *memory=descriptor;
+                *options=cacheOptions;
+                native_adreno_view_diag[1]=native_adreno_view_diag[1]+1;
+                status=kIOReturnSuccess;
             }
         }
     }

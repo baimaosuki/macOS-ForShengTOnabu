@@ -30,16 +30,20 @@ using UInt32=uint32_t;using IOOptionBits=unsigned;using IOReturn=int;
 enum {kIOReturnNotFound=1,kIOReturnNotReady=2,kIOReturnNoMemory=3,kIOReturnNoResources=4,kIOReturnSuccess=0};
 enum {kIOMapAnywhere=1,kIOMapWriteCombineCache=0x400,kIOMapCopybackCache=0x500,kIODirectionInOut=3,kIOMemoryTypePhysical64=0x1000};
 struct IOAddressRange {uint64_t address,length;};
+static unsigned physicalViews=0;
 struct IOMemoryDescriptor {
  unsigned refs=1;
  void retain(){++refs;}void release(){assert(refs);if(!--refs)delete this;}
  static IOMemoryDescriptor *withAddressRanges(IOAddressRange *r,UInt32 n,IOOptionBits,void*){
-  assert(n==1 && r[0].address==0x90000000 && r[0].length==4096);return new IOMemoryDescriptor;
+  ++physicalViews;assert(n==1 && r[0].address==0x90000000 && r[0].length==4096);return new IOMemoryDescriptor;
  }
 };
 struct Span {uint64_t physical,bytes;};
 struct NativeAdrenoMemory {
- bool wc=true;Span span{0x90000000,4096};
+ bool wc=true,owned=true;Span span{0x90000000,4096};
+ IOMemoryDescriptor *original=new IOMemoryDescriptor;
+ ~NativeAdrenoMemory(){original->release();}
+ IOMemoryDescriptor *descriptor(){return owned?original:nullptr;}
  bool writeCombined(){return wc;}size_t spanCount(){return 1;}Span *spans(){return &span;}
 };
 struct Core {
@@ -64,19 +68,26 @@ public:
 '''.replace('VIEW_DECL', view)
 test = r'''
 int main(){
- for(bool wc:{true,false}){
-  AGXDeviceUserClient client;client.core.backing.wc=wc;
+ for(bool owned:{true,false})for(bool wc:{true,false}){
+  AGXDeviceUserClient client;client.core.backing.wc=wc;client.core.backing.owned=owned;
+  const unsigned before=physicalViews;
   IOMemoryDescriptor *first=nullptr,*again=nullptr;IOOptionBits one=0,two=0;
   assert(!client.legacyMemoryForType(7,&one,&first));
   assert(one==(kIOMapAnywhere|(wc?kIOMapWriteCombineCache:kIOMapCopybackCache)));
   assert(!client.legacyMemoryForType(7,&two,&again));
   assert(first==again && two==one); // no default-cache alias on reuse
+  if(owned)assert(first==client.core.backing.original && physicalViews==before);
+  else assert(first!=client.core.backing.original && physicalViews==before+1);
   first->release();again->release();
  }
  AGXDeviceUserClient unavailable;unavailable.closing_=true;
  IOMemoryDescriptor *result=nullptr;IOOptionBits options=0;
  assert(unavailable.legacyMemoryForType(7,&options,&result)==kIOReturnNotReady && !result);
- puts("PASS production legacy BO view reuses identical WC/WB options and preserves refusal/lifetime");
+ AGXDeviceUserClient full;full.views_=new AGXDeviceUserClient::View[2]();
+ for(auto i:{0,1}){full.views_[i].token=8+i;full.views_[i].descriptor=new IOMemoryDescriptor;}
+ assert(full.legacyMemoryForType(7,&options,&result)==kIOReturnNoResources && !result);
+ assert(full.core.backing.original->refs==1); // failed publication releases its temporary retain
+ puts("PASS production owned VM-object identity, borrowed physical fallback, WC/WB reuse and descriptor lifetime");
 }
 '''
 a.output.mkdir(parents=True, exist_ok=True)
@@ -93,4 +104,5 @@ with tempfile.TemporaryDirectory(prefix='nabu-gpu-view-') as temp:
     print(run.stdout, end='')
 (a.output/'verification.json').write_text(json.dumps(dict(passed=True,
     production_legacy_view_executed=True, wc_and_wb_reuse=True,
+    owned_vm_object_preserved=True, borrowed_fallback=True, full_view_failure_releases_reference=True,
     sanitizers=['ASan', 'UBSan'], hardware_tested=False), indent=2)+'\n')

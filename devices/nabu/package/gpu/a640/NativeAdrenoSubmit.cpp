@@ -2,6 +2,7 @@
 #include "NativeAdrenoSubmit.h"
 #include "NativeAdrenoScheduler.h"
 #include "AdrenoPM4.h"
+#include "NabuGpuFault.h"
 #include <IOKit/IOLib.h>
 #include <IOKit/IOMemoryDescriptor.h>
 
@@ -26,8 +27,8 @@ extern "C" {volatile uint32_t native_adreno_wc_audit[6];}
 /* Fence waits: [0] calls, [1] timeouts, [2] the fence of the last timed-out wait, [3] the fence value the GPU had written then, [4] the newest fence handed out,
  * [5] the newest completed, [6] waits for a fence no job holds (observeFence path), [7] the last fence refused as never submitted. */
 extern "C" {volatile uint32_t native_adreno_fence_wait[8];}
-/* The IBs of the last submissions: [slot] fence, iova low/high, bytes, then the first 28 dwords of the first IB (read as the kernel maps it). */
-extern "C" {volatile uint32_t native_adreno_ib_log[4][4+28];volatile uint32_t native_adreno_ib_log_count;
+/* Bounded first-IB snapshots: metadata followed by up to 256 dwords. */
+extern "C" {volatile uint32_t native_adreno_ib_log[4][4+NabuGpuIbHeadWords];volatile uint32_t native_adreno_ib_log_count;
 volatile uint32_t native_adreno_ib_log_words[4],native_adreno_ib_log_status[4];}
 extern "C" {extern uint64_t (*native_adreno_vm_now_us)(void);extern volatile uint32_t native_adreno_method_stats[20][4];}
 
@@ -939,12 +940,12 @@ IOReturn NativeAdrenoSubmit::submit(const NativeAdrenoSubmitBuffer *buffers,size
         return status;
     }
     {
-        const uint32_t slot=native_adreno_ib_log_count&3;uint32_t head[28]={};
-        const size_t words=buffers[0].bytes/4<28?buffers[0].bytes/4:28;
+        const uint32_t slot=native_adreno_ib_log_count&3;uint32_t head[NabuGpuIbHeadWords]={};
+        const size_t words=buffers[0].bytes/4<NabuGpuIbHeadWords?buffers[0].bytes/4:NabuGpuIbHeadWords;
         const IOReturn peek=vm_->peekWords(buffers[0].iova,head,words);
         native_adreno_ib_log[slot][0]=ring_->lastSubmitted()+1;native_adreno_ib_log[slot][1]=(uint32_t)buffers[0].iova;
         native_adreno_ib_log[slot][2]=(uint32_t)(buffers[0].iova>>32);native_adreno_ib_log[slot][3]=(uint32_t)buffers[0].bytes;
-        for(unsigned i=0;i<28;++i)native_adreno_ib_log[slot][4+i]=head[i];
+        for(unsigned i=0;i<NabuGpuIbHeadWords;++i)native_adreno_ib_log[slot][4+i]=head[i];
         native_adreno_ib_log_words[slot]=peek?0:uint32_t(words);
         native_adreno_ib_log_status[slot]=uint32_t(peek);
         native_adreno_ib_log_count=native_adreno_ib_log_count+1;
@@ -1094,14 +1095,14 @@ IOReturn NativeAdrenoSubmit::submitResources(const NativeAdrenoSubmitBuffer *buf
         // diagnostic submit() above. Read only this IB's bytes through its
         // retained kernel mapping; never create a physical/cache alias.
         const uint32_t slot=native_adreno_ib_log_count&3;
-        uint32_t head[28]={};
-        const size_t words=count?(buffers[0].bytes/4<28?buffers[0].bytes/4:28):0;
+        uint32_t head[NabuGpuIbHeadWords]={};
+        const size_t words=count?(buffers[0].bytes/4<NabuGpuIbHeadWords?buffers[0].bytes/4:NabuGpuIbHeadWords):0;
         const IOReturn peek=words?vm_->peekWords(buffers[0].iova,head,words):kIOReturnBadArgument;
         native_adreno_ib_log[slot][0]=ring_->lastSubmitted()+1;
         native_adreno_ib_log[slot][1]=count?uint32_t(buffers[0].iova):0;
         native_adreno_ib_log[slot][2]=count?uint32_t(buffers[0].iova>>32):0;
         native_adreno_ib_log[slot][3]=count?uint32_t(buffers[0].bytes):0;
-        for(unsigned i=0;i<28;++i)native_adreno_ib_log[slot][4+i]=peek?0:head[i];
+        for(unsigned i=0;i<NabuGpuIbHeadWords;++i)native_adreno_ib_log[slot][4+i]=peek?0:head[i];
         native_adreno_ib_log_words[slot]=peek?0:uint32_t(words);
         native_adreno_ib_log_status[slot]=uint32_t(peek);
         native_adreno_ib_log_count=native_adreno_ib_log_count+1;

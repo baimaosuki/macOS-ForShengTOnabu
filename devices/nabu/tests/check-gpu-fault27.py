@@ -34,7 +34,9 @@ struct Peer {
  static int read(void *cookie,uint32_t reg,uint32_t *out){auto &p=*static_cast<Peer *>(cookie);++p.reads;
   if(p.fail==reg)return 1;
   if(reg==0x909){assert(p.selected==1 && p.barriers==1);*out=0x70170001;}
-  else if(reg==0x806)*out=31;else if(reg==0x807)*out=57;else if(reg==0x821)*out=0x1234;else assert(false);
+  else if(reg==0x806)*out=31;else if(reg==0x807)*out=57;else if(reg==0x821)*out=0x1234;
+  else if(reg==0x928)*out=0x20027000;else if(reg==0x92a)*out=182;
+  else if(reg==0x929 || (reg>=0x92b && reg<=0x92d))*out=0;else assert(false);
   return 0;
  }
  static int write(void *cookie,uint32_t reg,uint32_t value){auto &p=*static_cast<Peer *>(cookie);++p.writes;
@@ -46,21 +48,22 @@ struct Io {void *cookie;int(*read32)(void*,uint32_t,uint32_t*);int(*write32)(voi
 static void captureTests(){
  Peer peer;Io io{&peer,Peer::read,Peer::write,Peer::barrier};NabuGpuFaultCapture fault;NabuGpuCpFault record;
  assert(!fault.snapshot(&record));assert(fault.capture(io,0x200,5,0));assert(fault.snapshot(&record));
- assert(record.irq==0x200 && record.cp==5 && record.opcode==0x70170001 && record.rptr==31 && record.wptr==57 && record.hw_fault==0x1234 && record.valid==15);
+ assert(record.irq==0x200 && record.cp==5 && record.opcode==0x70170001 && record.rptr==31 && record.wptr==57 && record.hw_fault==0x1234 && record.valid==1023);
+ assert(record.ib1_lo==0x20027000 && record.ib1_hi==0 && record.ib1_rem==182 && !record.ib2_lo && !record.ib2_hi && !record.ib2_rem);
  const unsigned reads=peer.reads,writes=peer.writes;assert(!fault.capture(io,0,0,0));
  assert(peer.reads==reads && peer.writes==writes);assert(fault.snapshot(&record) && record.cp==5);
- for(unsigned failed:{0x908u,0x909u,0x806u,0x807u,0x821u}){
+ for(unsigned failed:{0x908u,0x909u,0x806u,0x807u,0x821u,0x928u,0x929u,0x92au,0x92bu,0x92cu,0x92du}){
   Peer broken;broken.fail=failed;Io other{&broken,Peer::read,Peer::write,Peer::barrier};NabuGpuFaultCapture partial;
   assert(partial.capture(other,0x200,5,0));assert(partial.snapshot(&record));
-  const unsigned bit=(failed==0x908 || failed==0x909)?1:failed==0x806?2:failed==0x807?4:8;
+  const unsigned bit=(failed==0x908 || failed==0x909)?1:failed==0x806?2:failed==0x807?4:failed==0x821?8:16u<<(failed-0x928);
   assert(!(record.valid&bit) && record.irq==0x200 && record.cp==5);
-  assert(broken.reads<=4 && broken.writes<=1); // failures never retry or poll
+  assert(broken.reads<=10 && broken.writes<=1); // failures never retry or poll
  }
  Peer shared;Io same{&shared,Peer::read,Peer::write,Peer::barrier};NabuGpuFaultCapture one;
  std::atomic<unsigned> winners{0};std::vector<std::thread> callers;
  for(unsigned i=0;i<8;++i)callers.emplace_back([&]{if(one.capture(same,0x200,1,0))++winners;});
  for(auto &caller:callers)caller.join();assert(winners==1 && shared.writes==1);
- assert(one.snapshot(&record) && record.valid==7 && record.cp==1);
+ assert(one.snapshot(&record) && record.valid==1015 && record.cp==1);
 }
 '''
 

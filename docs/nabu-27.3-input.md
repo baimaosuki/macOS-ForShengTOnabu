@@ -137,3 +137,15 @@ there is no global SMMU reset. Actual candidate selection and native USB/HID
 enumeration remain unverified on hardware. P026 touch data includes valid HID
 reports but many idle checksum drops; no blanket acceptance of invalid packets
 has been introduced.
+
+
+P027 hardware: USB selected slot4/CB55 with residual disabled SCTLR2afea31e,
+reprogrammed the context, preserved UFS slot2/CB1, and started native AppleUSBXHCI.
+USB20/30 ports were created. VBUS reported external5V=1 and no owned source vote.
+The log does not show enumeration of an attached keyboard/mouse. Touch firmware
+196608 bytes booted in155ms and reports1600x2560; native HID received two reports.
+The bad checksum counter stops growing after the first valid-touch period, so
+its startup drops are not evidence of an indefinitely failing transport.
+Power down was delivered successfully (HID=0) and a long press was detected.
+Actual desktop pointer/key operation remains blocked by the independent GPU
+failure and must not be inferred from successful HID report calls.

@@ -92,7 +92,7 @@ extern "C" {
 volatile uint64_t native_adreno_fence_phys=0;
 volatile uint32_t native_adreno_a6xx_stats[24];
 extern volatile uint32_t native_adreno_ring_log[4][4+112],native_adreno_ring_log_count;
-extern volatile uint32_t native_adreno_ib_log[4][4+28],native_adreno_ib_log_count;
+extern volatile uint32_t native_adreno_ib_log[4][4+NabuGpuIbHeadWords],native_adreno_ib_log_count;
 extern volatile uint32_t native_adreno_ib_log_words[4],native_adreno_ib_log_status[4];
 }
 
@@ -1153,6 +1153,9 @@ IOReturn A640State::fail(IOReturn status)
         IOLog("NabuGPU: first-cp-fault irq=%08x cp=%08x protect=%08x valid=%x opcode=%08x rptr=%u wptr=%u hw=%08x live_fence=%u/%u\n",
             cpFault.irq,cpFault.cp,cpFault.protect,cpFault.valid,cpFault.opcode,
             cpFault.rptr,cpFault.wptr,cpFault.hw_fault,ring_.lastSubmitted(),ring_.completedFence());
+        IOLog("NabuGPU: fault-cp-ib valid=%x ib1=%08x:%08x rem=%u ib2=%08x:%08x rem=%u position=prefetch-not-exact\n",
+            cpFault.valid,cpFault.ib1_hi,cpFault.ib1_lo,cpFault.ib1_rem,
+            cpFault.ib2_hi,cpFault.ib2_lo,cpFault.ib2_rem);
         // native_adreno_fault() has closed admission under the publication
         // lock. These fixed software snapshots survive BO teardown and need
         // no new mapping or MMIO. Print only the latest submission, once.
@@ -1171,7 +1174,7 @@ IOReturn A640State::fail(IOReturn status)
             const unsigned slot=(native_adreno_ib_log_count-1)&3;
             const auto *record=native_adreno_ib_log[slot];
             const unsigned words=native_adreno_ib_log_words[slot];
-            const unsigned count=words<28?words:28;
+            const unsigned count=words<NabuGpuIbHeadWords?words:NabuGpuIbHeadWords;
             IOLog("NabuGPU: fault-ib fence=%u iova=%08x:%08x bytes=%u status=%08x captured=%u\n",
                 record[0],record[2],record[1],record[3],native_adreno_ib_log_status[slot],count);
             for(unsigned i=0;i<count;i+=4) {
