@@ -99,3 +99,14 @@ P028 full native CI 44694522097 at 8b122cc and final-kernel startup/PAC/
 signed-text/display/log replays passed. FAT readback and ZIP CRC passed.
 The native __DATA layout remains below the retained Libm boundary. Device
 startup and visible A640 rendering remain untested.
+
+P025 hardware logs subsequently confirmed GMU/HFI startup, PAS13 authentication,
+CP scratch readback `6401cafe` and fence completion. WindowServer nevertheless
+aborted in `WSSystemCanCompositeWithMetal`: the delivered addon omitted
+`GPUBundles/NativeAdrenoMetal.publish`, so the plugin's initializer selected its
+diagnostic path and returned nil instead of a Metal device. Production ESP
+integration now adds this readable sibling marker outside the signed bundle.
+The host regression executes the actual plugin mode gate and preserves all
+signed bytes and trust modules. A subsequent `CP_OPCODE_ERROR` in the same device
+log is a separate unresolved command fault; neither this correction nor the
+successful bootstrap proves a working Metal desktop.

@@ -2,7 +2,8 @@
 """Merge previously signed M2V artifacts into an assembled nabu ESP directory."""
 import argparse,hashlib,json,struct,tomllib,uuid,zlib
 from pathlib import Path
-from nabu_gpu_addon_contract import shader_cache_contract
+from nabu_gpu_addon_contract import (shader_cache_contract, metal_publication_contract,
+                                    METAL_PUBLISH_MARKER, METAL_PUBLISH_CONTENT)
 
 def decode(raw):
     magic,count,reserved,total=struct.unpack_from('<8sIIQ',raw)
@@ -37,7 +38,14 @@ def main():
     for name,value in gpu_entries.items():
         assert name not in merged or merged[name]==value,name
         merged[name]=value
+    # The signed input is deliberately inert before KMD integration. Enable
+    # production publication here, outside the sealed bundle, once the v2
+    # kernel and independent GPU boot entry are being assembled together.
+    assert METAL_PUBLISH_MARKER not in merged or merged[METAL_PUBLISH_MARKER]==METAL_PUBLISH_CONTENT
+    merged[METAL_PUBLISH_MARKER]=METAL_PUBLISH_CONTENT
+    publication=metal_publication_contract(merged)
     addon.write_bytes(encode(merged));readback=decode(addon.read_bytes());assert readback==merged
+    assert metal_publication_contract(readback)==publication
     assert all(readback[k]==v for k,v in original.items())
     # Preserve every existing Apple/owner trust module. Append the exact signed
     # userspace module; no new executable or entitlement is manufactured here.
@@ -61,7 +69,8 @@ def main():
     result=dict(passed=True,signed_userspace_commit=report['source_commit'],
         addon_sha256=hashlib.sha256(addon.read_bytes()).hexdigest(),trust_sha256=hashlib.sha256(trust.read_bytes()).hexdigest(),
         preserved_entries=len(original),gpu_entries=len(merged)-len(original),owner_module_preserved=True,
-        cpu_entry_preserved=True,gpu_entry=entry,shader_cache=cache_contract,hardware_tested=False)
+        cpu_entry_preserved=True,gpu_entry=entry,shader_cache=cache_contract,
+        metal_publication=publication,hardware_tested=False)
     a.output.write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result,indent=2))
 
 if __name__=='__main__':main()

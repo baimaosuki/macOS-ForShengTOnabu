@@ -60,3 +60,12 @@ writer=2 与固定快照落盘（最多 120 秒）；后续检查点保留 5 秒
 P028 内核 CI 44694522097（8b122cc）及最终内核启动顺序、PAC、
 签名页、显示、日志回放通过；FAT 读回和 ZIP CRC 通过。仍待 nabu
 真机确认能否跨过原色条卡点以及 A640 是否真正完成初始化与渲染。
+
+## P025 真机与生产模式修复
+
+P025 真机日志已确认 GMU/HFI、PAS13 认证、CP scratch `6401cafe` 和 fence
+完成。WindowServer 随后在 `WSSystemCanCompositeWithMetal` 等待 30 秒后退出。
+交付 addon 漏了 `GPUBundles/NativeAdrenoMetal.publish`，插件因此进入诊断路径并
+返回 nil。生产 ESP 整合现已补齐此可读旁置文件，不改签名 bundle。
+Host 回归执行了插件实际的模式选择函数，确认原有签名文件、trustcache 和 CPU
+入口保留。同轮后续 `CP_OPCODE_ERROR` 尚未定位到具体命令，GPU 桌面仍需真机验证。
