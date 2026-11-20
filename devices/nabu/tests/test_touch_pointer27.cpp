@@ -7,6 +7,7 @@ int main() {
     assert(!s.encode(nullptr,0,r));
     NabuPointerContact c[]={{3,100,200},{7,300,400}};
     assert(s.encode(c,2,r) && r[0]==1 && r[1]==1 && r[2]==100 && r[4]==200);
+    assert(!s.encode(c,2,r) && s.down); // identical samples retain the press without duplicate reports
     NabuPointerContact reordered[]={{7,350,450},{3,150,250}};
     assert(s.encode(reordered,2,r) && r[2]==150 && r[4]==250);
     // Lifting the primary must release the mouse, not drag to another finger.

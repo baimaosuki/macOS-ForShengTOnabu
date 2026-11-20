@@ -69,3 +69,13 @@ P025 真机日志已确认 GMU/HFI、PAS13 认证、CP scratch `6401cafe` 和 fe
 返回 nil。生产 ESP 整合现已补齐此可读旁置文件，不改签名 bundle。
 Host 回归执行了插件实际的模式选择函数，确认原有签名文件、trustcache 和 CPU
 入口保留。同轮后续 `CP_OPCODE_ERROR` 尚未定位到具体命令，GPU 桌面仍需真机验证。
+
+GPU 启动项还需 `nabu-gpu-scanout=1`，使签名 presenter 能将完整的固件 GOP
+显存导入为 no-copy Metal buffer；缺少时会走普通 RAM 属性查询并拒绝导入。
+导入仍限制为当前 GOP 完整连续可写物理范围，不允许任意设备内存。
+
+未获队列范围的客户端失败清理不再调用 owner 0 的取消操作，避免误取消
+WindowServer 的未完成任务。回归用旧生产函数复现错误，修正后通过。
+真实 ARM64 ring 回放扩展到 400 次带 IB 的提交、包校验、上下文前导和一次环回绕；
+该 Host 测试不执行固件或着色器。首个 CP 故障按原厂 SQE selector 抓取 opcode，
+并保留有效位与 live fence，避免后续空 IRQ 覆盖；P025 具体坏命令仍待真机定位。

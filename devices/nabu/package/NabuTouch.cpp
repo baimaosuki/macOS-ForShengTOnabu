@@ -543,7 +543,7 @@ int scale(int value, int maximum, bool invert)
   return static_cast<int>(static_cast<long long>(value) * 32767 / maximum);
 }
 
-// Decode one 80-byte event page; false means skip this read.
+// Decode the stock 65-byte non-pen event payload; false means skip this read.
 bool decode(const uint8_t *d, Frame &frame, bool &wdtPattern, unsigned logBudget)
 {
   wdtPattern = true;
@@ -610,8 +610,10 @@ void touchThread(void *, wait_result_t)
     if((irq.r(0)&0x3ff)!=0x1c1 || (irq.r(8)&0x1f)!=0x16) { TLOG("GPIO39 configuration rejected"); return; }
   }
   TLOG("polling started xmax=%u ymax=%u", gXMax, gYMax);
-  uint8_t event[80];
-  uint8_t last[80] = {};
+  // The stock non-pen work function reads 65 payload bytes (64 + checksum).
+  // Bytes beyond that page are pen/other state, outside this checksum.
+  uint8_t event[65];
+  uint8_t last[65] = {};
   bool latchSeen = false;
   unsigned pollRound=0, readFailures=0, reloads=0;
   unsigned wdtRun = 0, logBudget = 5, lastFingers = 0;
@@ -630,17 +632,22 @@ void touchThread(void *, wait_result_t)
         nabu_touch_stats[1] = nabu_touch_stats[1] + 1;
         Frame frame;
         bool wdtPattern = false;
-        bool changed = latched || memcmp(event, last, sizeof(event)) != 0;
-        if (changed && decode(event, frame, wdtPattern, logBudget)) {
+        const bool changed = memcmp(event, last, sizeof(event)) != 0;
+        if (decode(event, frame, wdtPattern, changed?logBudget:0)) {
           wdtRun = 0;
+          // A stationary finger still proves that the transport is alive.
+          // Updating this only on a change caused a false button-up after
+          // 250 ms when IRQs stopped and polling read the same valid packet.
           lastValid = mach_absolute_time();
-          memcpy(last, event, sizeof(event));
-          if (frame.count) {
-            nabu_touch_stats[2] = nabu_touch_stats[2] + 1;
-            if (logBudget) { logBudget--; }
+          if(changed || frame.count!=lastFingers) {
+            memcpy(last, event, sizeof(event));
+            if (frame.count) {
+              nabu_touch_stats[2] = nabu_touch_stats[2] + 1;
+              if (logBudget) { logBudget--; }
+            }
+            if (frame.count || lastFingers) { hid->deliver(frame); }
+            lastFingers = frame.count;
           }
-          if (frame.count || lastFingers) { hid->deliver(frame); }
-          lastFingers = frame.count;
         } else if (wdtPattern && ++wdtRun > 10) {
           if (++reloads > 3) {
             if(lastFingers){Frame released;hid->deliver(released);}

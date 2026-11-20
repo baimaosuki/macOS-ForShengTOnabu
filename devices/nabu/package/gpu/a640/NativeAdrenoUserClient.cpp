@@ -168,7 +168,7 @@ bool NativeAdrenoUserClient::ownRangeOutstanding() const
 }
 void NativeAdrenoUserClient::beginClose()
 {
-    if(open_) {
+    if(open_ && (scoped_ || used_)) {
         submit_->scheduler()->closeOwner(queue_base_);
     }
 }
@@ -176,7 +176,10 @@ IOReturn NativeAdrenoUserClient::close()
 {
     if(!open_)return kIOReturnNotReady;
     if(liveObjects() || ownRangeOutstanding())return kIOReturnBusy;
-    submit_->scheduler()->closeOwner(queue_base_);
+    // open() starts with queue_base_ == 0 before setScope assigns a range.
+    // A failed setScope must only dispose this client's empty allocations;
+    // it must not cancel WindowServer's pending jobs/syncs in owner range 0.
+    if(scoped_ || used_)submit_->scheduler()->closeOwner(queue_base_);
     for(size_t i=1;i<NativeAdrenoAbiMaxQueues;++i)if(queues_[i].active)return kIOReturnBusy;
     (void)NativeAdrenoMemory::trimBackingCache();
     IODeleteData(entries_,Entry,entry_count_);

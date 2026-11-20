@@ -54,3 +54,9 @@ profiling request, outside profileLock, with failed/concurrent candidates freed.
 The published pair is retained for the recorder lifetime. This removes 1,163,264
 bytes of optional BSS from the fixed 26C5035r kernelcache DATA hole without
 reducing recorder capacity or changing A640 counter programming.
+
+NabuGpuFault.h captures the first CP error before shutdown, following the A640
+stock adreno_a6xx.c opcode diagnostic (SQE_STAT_ADDR=1, then SQE_STAT_DATA), also
+present in Linux v6.12 a6xx_gpu.c. MMIO is bounded and partial reads retain valid
+bits. NativeAdrenoUserClient.cpp gates scheduler cancellation on established
+scope/default submission ownership; a failed unscoped open owns no queue range.

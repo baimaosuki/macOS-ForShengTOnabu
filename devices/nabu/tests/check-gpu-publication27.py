@@ -110,6 +110,7 @@ def main():
         new_config = tomllib.loads((esp / 'EFI/UniXNU/unixnu.toml').read_text())
         assert next(entry for entry in new_config['entry'] if entry['id'] == 'xnu') == old_cpu
         assert 'nabu-gpu=1' in next(entry for entry in new_config['entry'] if entry['id'] == 'a640-metal')['args'].split()
+        assert 'nabu-gpu-scanout=1' in next(entry for entry in new_config['entry'] if entry['id'] == 'a640-metal')['args'].split()
         assert 'data-reset=1' not in next(entry for entry in new_config['entry'] if entry['id'] == 'a640-metal')['args'].split()
         def modules(raw):
             import struct

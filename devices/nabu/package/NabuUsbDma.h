@@ -24,9 +24,19 @@ template<class Read> nabu_usb::smmu::Plan usbIdentityPlan(Read read,const nabu_u
             uint32_t v=read(sm::kSmrBase+4*i),s=read(sm::kS2crBase+4*i);
             if((v&sm::kSmrValid) && !(s&sm::kS2crTypeMask) && (s&255)==b)used=true;
         }
-        if(used || read(sm::context_offset(info.global_pages,b)) ||
-            read(sm::kCbarBase+4*b) || read(sm::kCba2rBase+4*b))continue;
-        sm::Plan plan={};plan.valid=true;plan.index=slot;plan.bank=b;plan.global_pages=info.global_pages;return plan;
+        if(used || b<info.num_s2_cb)continue;
+        const uint32_t control=read(sm::context_offset(info.global_pages,b));
+        const uint32_t cbar=read(sm::kCbarBase+4*b),cba2r=read(sm::kCba2rBase+4*b);
+        // Firmware initializes unused AArch64 S1 banks too: CBAR=1f000,
+        // CBA2R=1 and disabled SCTLR=9f00e0 are not reset zeros. An unreferenced
+        // bank with M=0 and that qualified S1/S2-bypass type can be programmed
+        // while USB is halted. Never reuse an enabled or stream-owned bank.
+        const bool reset=!control && !cbar && !cba2r;
+        const bool disabled=!(control&sm::kSctlrM) &&
+            cbar==0x0001f000 && cba2r==sm::kCba2rVa64;
+        if(!reset && !disabled)continue;
+        sm::Plan plan={};plan.valid=true;plan.index=slot;plan.bank=b;plan.global_pages=info.global_pages;
+        plan.sctlr=control;plan.cbar=cbar;plan.cba2r=cba2r;return plan;
     }
     return sm::plan_error("no-free-context-bank");
 }

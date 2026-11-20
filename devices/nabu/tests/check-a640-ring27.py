@@ -38,7 +38,7 @@ def hook(e,pc,n,unused):
  if pc==CB[0]:registers[args[1]]=args[2];writes.append((args[1],args[2]));events.append('reg');ret()
  elif pc==CB[1]:e.mem_write(args[2],struct.pack('<I',registers.get(args[1],0)));ret()
  elif pc==CB[2]:events.append('barrier');ret()
- elif pc==CB[3]:events.append('wptr');ret(1 if fail_wptr else 0)
+ elif pc==CB[3]:events.append('wptr');registers[0x807]=args[1];ret(1 if fail_wptr else 0)
  elif pc==CB[4]:e.mem_write(args[1],struct.pack('<I',0));ret()
  elif pc==CB[5]:events.append('publish');ret(1 if fail_publish else 0)
  elif pc==CB[6]:events.append('acquire');ret()
@@ -80,5 +80,48 @@ assert call(method('6detachE'),SELF)!=0 # retain resources after uncertain DMA s
 reset();assert attach()==0;fail_wptr=True
 assert call(method('6submitE'),SELF,WORDS,2,OUT)!=0
 assert call(method('6detachE'),SELF)!=0
-result=dict(passed=True,actual_arm64_object_executed=True,hardware_tested=False,a640_generation=True,a6xx_cache_flush_ts=True,publish_before_wptr=True,missing_fence_times_out=True,real_fence_completes=True,publish_failure_no_kick=True,uncertain_dma_retains_resources=True)
+
+# Bootstrap proves MEM_WRITE and CACHE_FLUSH_TS only. Execute the actual framed
+# user-IB path as well, including ring wrap, and parse exactly what it publishes.
+def packets(words):
+ out=[];at=0
+ while at<len(words):
+  word=words[at];kind=word>>28
+  if kind==7:
+   op=(word>>16)&127;n=word&0x3fff
+   expected=0x70000000|n|((1^(n.bit_count()&1))<<15)|(op<<16)|((1^(op.bit_count()&1))<<23)
+  else:
+   assert kind==4,(at,hex(word))
+   op=(word>>8)&0x3ffff;n=word&127
+   expected=0x40000000|n|((1^(n.bit_count()&1))<<7)|(op<<8)|((1^(op.bit_count()&1))<<27)
+  assert word==expected and at+1+n<=len(words),(at,hex(word),n,len(words))
+  out.append((kind,op,tuple(words[at+1:at+1+n])));at+=n+1
+ assert at==len(words)
+ return out
+reset();assert attach()==0
+# Private prologue receives the same reset=true argument as a new GPU context.
+assert call(method('12emitPrologueE'),SELF,0,1,OUT)==0
+end=struct.unpack('<I',u.mem_read(OUT,4))[0]
+assert packets(struct.unpack('<'+str(end)+'I',u.mem_read(RING,end*4)))==[
+ (7,0x65,(0x101,)),(7,0x26,()),(7,0x46,(0x31,)),(7,0x65,(0xd,))]
+u.mem_write(WORDS,struct.pack('<4I',0x70bf8003,0x20000000,0,4))
+previous=0;wraps=0
+for serial in range(1,401):
+ assert call(method('12submitFramedE'),SELF,WORDS,4,OUT)==0
+ assert struct.unpack('<I',u.mem_read(OUT,4))[0]==serial
+ end=registers[0x807]
+ if end<previous:
+  wraps+=1;raw=u.mem_read(RING+previous*4,32768-previous*4)+u.mem_read(RING,end*4)
+ else:raw=u.mem_read(RING+previous*4,(end-previous)*4)
+ stream=packets(struct.unpack('<'+str(len(raw)//4)+'I',raw))
+ if end<previous:
+  assert stream[0][0:2]==(7,0x10);stream=stream[1:]
+ assert stream==[(7,0x65,(0x101,)),(7,0x65,(0xd,)),(7,0x3f,(0x20000000,0,4)),
+  (7,0x65,(0xe,)),(7,0x46,(0x18,)),(7,0x46,(0x19,)),(4,0x885,(serial,)),
+  (7,0x46,(0x80000004,0x3000004,0,serial)),(7,0x65,(0x100,))],stream
+ # Explicit hardware peer consumption; a published packet is never treated as
+ # a completed fence until the peer supplies both RPTR and written timestamp.
+ registers[0x806]=end;u.mem_write(FENCE+4,struct.pack('<I',serial));previous=end
+assert wraps>=1
+result=dict(passed=True,actual_arm64_object_executed=True,hardware_tested=False,a640_generation=True,a6xx_cache_flush_ts=True,publish_before_wptr=True,missing_fence_times_out=True,real_fence_completes=True,publish_failure_no_kick=True,uncertain_dma_retains_resources=True,framed_ib_submissions=400,framed_packet_parity_and_lengths=True,new_context_prologue=True,ring_wraps=wraps,a7xx_only_packets_absent=True)
 a.output.parent.mkdir(parents=True,exist_ok=True);a.output.write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result,indent=2))

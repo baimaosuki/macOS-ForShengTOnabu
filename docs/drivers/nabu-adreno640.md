@@ -110,3 +110,20 @@ The host regression executes the actual plugin mode gate and preserves all
 signed bytes and trust modules. A subsequent `CP_OPCODE_ERROR` in the same device
 log is a separate unresolved command fault; neither this correction nor the
 successful bootstrap proves a working Metal desktop.
+
+The GPU entry also enables `nabu-gpu-scanout=1`: the signed presenter imports
+the complete firmware GOP allocation through a no-copy Metal buffer. Without
+this gate, memory outside managed RAM fails the ordinary import cache query.
+The gate still requires the exact current GOP physical extent, 32-bit geometry,
+contiguous pages and writable access; arbitrary device memory is not admitted.
+
+Client teardown cancels a scheduler range only after setScope or an actual
+submission establishes ownership. Previously a failed unscoped open could close
+owner 0 and cancel WindowServer's pending jobs. The regression reproduces that
+failure using the old production functions and passes with the corrected ones.
+The ARM64 ring replay now covers 400 framed IB submissions, packet parity and
+lengths, new-context entry and one ring wrap, in addition to the scratch path.
+It does not execute firmware or shaders. A640 fault capture preserves the first
+CP error and reads the stock SQE opcode selector before CP shutdown, with bounded
+MMIO and explicit read-valid bits; this adds missing evidence for the unresolved
+P025 opcode error without claiming that an offending packet is already known.

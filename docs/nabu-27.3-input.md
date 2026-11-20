@@ -104,3 +104,22 @@ P021 already fixes Apple interrupt handles. WindowServer SIGSEGV exited
 without a fault PC because prior capture only selected SIGABRT; select
 SEGV/BUS/ILL as well without changing process signal/restart behavior.
 No claim of USB enumeration or touch SPI success before new hardware logs.
+
+P025 hardware evidence confirms the NT36523 firmware download and native
+IOHIDEventDriver open. Its duplicate-coordinate traffic exposed a polling bug:
+unchanged valid packets did not refresh the transport timestamp, so a stationary
+press could be released after 250 ms. The loop now validates every read, refreshes
+the timestamp for valid stationary packets and reports only pointer transitions.
+The non-pen event read is the stock 65-byte payload (64 data plus checksum).
+Bad checksums remain rejected; a truly stale transport releases the button and
+the next valid contact can acquire it again. Host tests execute the actual loop
+with scripted IRQ/time/SPI peers and reproduce the prior failure.
+
+The same log reaches USB HCRST success and then reports no-free-context-bank.
+The USB planner previously required all candidate CB registers to be zero.
+It now also accepts an unreferenced, disabled AArch64 S1 bank with the known
+firmware CBAR=0x1f000/CBA2R=1 form. Enabled banks, banks referenced by other
+streams, stage-2 banks, reserved UFS CB1/slot2 and unknown configurations remain
+excluded. The candidate is rechecked immediately before programming. Host tests
+cover these states; P025 does not contain every candidate CB value, so actual
+USB enumeration and the selected candidate still require a new device log.

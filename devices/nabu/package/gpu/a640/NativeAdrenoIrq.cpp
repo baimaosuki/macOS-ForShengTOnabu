@@ -105,6 +105,8 @@ IOReturn NativeAdrenoIrq::handle(NativeAdrenoIrqResult *result)
     if(!attached_ || poisoned_)return kIOReturnNotReady;
     uint32_t status=0;
     if(io_.read32(io_.cookie,IrqRbbmStatus,&status))return poison();
+    // Preserve the observed source even when acknowledgement itself fails.
+    result->status=status;
     /* Linux acknowledges the whole read status before decoding it. */
     if(io_.write32(io_.cookie,IrqRbbmClear,status))return poison();
     if(io_.barrier(io_.cookie))return poison();

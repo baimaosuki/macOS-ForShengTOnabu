@@ -178,6 +178,20 @@ int main(){
     assert(!nabu::usbIdentityPlan(read,info,0x140).valid); // CB1 must stay reserved even if apparently idle
     mmio.clear();mmio[sm::kSmrBase]=sm::kSmrValid|1;mmio[sm::kSmrBase+4]=sm::kSmrValid|2;
     plan=nabu::usbIdentityPlan(read,info,0x140);assert(plan.valid&&plan.index!=2&&plan.bank!=1);
+    // Firmware preinitializes disabled AArch64 banks: zero-only selection
+    // falsely reported exhaustion even though no stream owns these banks.
+    for(unsigned b=2;b<info.num_cb;++b){
+        mmio[sm::context_offset(info.global_pages,b)]=0x009f00e0;
+        mmio[sm::kCbarBase+4*b]=0x1f000;mmio[sm::kCba2rBase+4*b]=1;
+    }
+    plan=nabu::usbIdentityPlan(read,info,0x140);assert(plan.valid && plan.bank==55 && plan.index!=2);
+    assert(plan.sctlr==0x009f00e0 && plan.cbar==0x1f000 && plan.cba2r==1);
+    mmio[sm::context_offset(info.global_pages,55)]|=1;
+    plan=nabu::usbIdentityPlan(read,info,0x140);assert(plan.valid && plan.bank==54);
+    mmio[sm::kSmrBase+12]=sm::kSmrValid|0x222;mmio[sm::kS2crBase+12]=54;
+    plan=nabu::usbIdentityPlan(read,info,0x140);assert(plan.valid && plan.bank==53);
+    for(unsigned b=2;b<info.num_cb;++b)mmio[sm::kCbarBase+4*b]=0x20000;
+    assert(!nabu::usbIdentityPlan(read,info,0x140).valid);
     assert(!nabu::usbIdentityBlock(0)&&!nabu::usbIdentityBlock(1)&&!nabu::usbIdentityBlock(8));
     assert((nabu::usbIdentityBlock(3)&~0x3fffffffull)==0xc0000000ull);
     puts("SPMI v5, debounce, long press, USB core sequencing/timeouts, VBUS role, CommandDB: PASS");

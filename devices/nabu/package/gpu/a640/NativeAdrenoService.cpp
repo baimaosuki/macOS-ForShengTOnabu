@@ -11,6 +11,7 @@
 #include "NativeAdrenoGpuProfile.h"
 #include "NativeAdrenoCpInit.h"
 #include "NativeAdrenoIrq.h"
+#include "NabuGpuFault.h"
 #include "NativeAdrenoKernelTime.h"
 #include "NabuSmmuPolicy.h"
 #include "ArmSmmu4KMmio.h"
@@ -336,6 +337,7 @@ class A640State final {
     uint64_t watchedSince_=0;
 #endif
     NativeAdrenoIrq irq_;
+    NabuGpuFaultCapture cpFault_;
     ArmSmmu4KMmio smmuMmio_{};
     ArmSmmu4KIo smmuIo_{};
     NativeAdrenoRingIo ringIo_{};
@@ -599,11 +601,14 @@ void A640State::gpuInterrupt(void *cookie)
     A640State *self=static_cast<A640State *>(cookie);
     NativeAdrenoIrqResult result{};
     const IOReturn status=self->irq_.handle(&result);
-    native_adreno_a6xx_stats[11]=result.status;
-    native_adreno_a6xx_stats[12]=result.cp_status;
-    native_adreno_a6xx_stats[13]=result.protect_status;
     const bool failed=status || (result.flags&NativeAdrenoIrqFatal);
+    if(!self->cpFault_.claimed()) {
+        native_adreno_a6xx_stats[11]=result.status;
+        native_adreno_a6xx_stats[12]=result.cp_status;
+        native_adreno_a6xx_stats[13]=result.protect_status;
+    }
     if(failed) {
+        self->cpFault_.capture(self->ringIo_,result.status,result.cp_status,result.protect_status);
         __atomic_store_n(&self->hardwareIrqFailed_,1,__ATOMIC_RELEASE);
         native_adreno_smmu_disable_irq(self->resources_.gpuInterrupt);
     }
@@ -1137,6 +1142,15 @@ IOReturn A640State::fail(IOReturn status)
      * a mounted client cannot keep opening it. */
     native_adreno_fault();
 #endif
+    // Capture was made at the first failing IRQ, before stopping/resetting CP.
+    // The worker prints one compact record; bootstrap fence stats stay labelled
+    // separately from the live ring values at this failure.
+    NabuGpuCpFault cpFault{};
+    if(cpFault_.snapshot(&cpFault)) {
+        IOLog("NabuGPU: first-cp-fault irq=%08x cp=%08x protect=%08x valid=%x opcode=%08x rptr=%u wptr=%u hw=%08x live_fence=%u/%u\n",
+            cpFault.irq,cpFault.cp,cpFault.protect,cpFault.valid,cpFault.opcode,
+            cpFault.rptr,cpFault.wptr,cpFault.hw_fault,ring_.lastSubmitted(),ring_.completedFence());
+    }
     native_adreno_checkpoint("failed");
     bool stopped=true;
     if(cpTouched_) {

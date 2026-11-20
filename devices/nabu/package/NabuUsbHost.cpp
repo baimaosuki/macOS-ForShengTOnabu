@@ -64,6 +64,8 @@ struct Hardware {
         auto plan=nabu::usbIdentityPlan(read,info,sid);
         if(!plan.valid){IOLog("NABU USB: SMMU refused %s\n",plan.error);return false;}
         if(plan.index==2 || plan.bank==1){IOLog("NABU USB: refused UFS reserved slot/CB\n");return false;}
+        IOLog("NABU USB: SMMU plan slot=%u CB=%u old_sctlr=%08x cbar=%08x cba2r=%08x M=0 unreferenced=1\n",
+            plan.index,plan.bank,plan.sctlr,plan.cbar,plan.cba2r);
         const uint32_t ufsSmr=smmu.read(sm::kSmrBase+8),ufsRoute=smmu.read(sm::kS2crBase+8);
         const uint32_t ufsCb=sm::context_offset(info.global_pages,1);
         const uint32_t ufsRegisters[]={0,0x10,0x20,0x24,0x28,0x2c,0x30,0x38,0x3c};
@@ -77,6 +79,11 @@ struct Hardware {
         for(uintptr_t at=reinterpret_cast<uintptr_t>(table);at<reinterpret_cast<uintptr_t>(table)+4096;at+=64)
             asm volatile("dc cvac, %0"::"r"(at):"memory");
         asm volatile("dsb sy":::"memory");
+        const auto current=nabu::usbIdentityPlan(read,info,sid);
+        if(!current.valid || current.index!=plan.index || current.bank!=plan.bank ||
+            current.sctlr!=plan.sctlr || current.cbar!=plan.cbar || current.cba2r!=plan.cba2r) {
+            IOLog("NABU USB: SMMU candidate changed before programming\n");return false;
+        }
         uint32_t cb=sm::context_offset(info.global_pages,plan.bank);
         // Disable only USB's exact stream; UFS and all other firmware mappings survive.
         smmu.write(sm::kSmrBase+4*plan.index,0);

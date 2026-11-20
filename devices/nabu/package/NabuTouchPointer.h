@@ -24,8 +24,12 @@ struct NabuPointerState {
         } else if (count && !waitAllUp) { found=0;primary=contacts[0].id; }
         const bool nowDown=found>=0;
         if (nowDown) {
-            x=contacts[found].x>32767?32767:contacts[found].x;
-            y=contacts[found].y>32767?32767:contacts[found].y;
+            const uint16_t nextX=contacts[found].x>32767?32767:contacts[found].x;
+            const uint16_t nextY=contacts[found].y>32767?32767:contacts[found].y;
+            // IRQ retries and pressure-only changes must not repeat identical
+            // pointer reports. Keep the button down until an actual lift.
+            if(down && nextX==x && nextY==y)return false;
+            x=nextX;y=nextY;
         } else {
             if(primary>=0) {primary=-1;waitAllUp=count!=0;}
             if(!down)return false;
