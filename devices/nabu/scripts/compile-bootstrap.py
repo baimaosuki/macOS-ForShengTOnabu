@@ -67,6 +67,9 @@ def main():
                                    (m.kind != "refer" or m.name in wanted)})
     tree.assemble(ctx, modules)
     order = patches.prepare(ctx, modules)
+    subprocess.run([sys.executable,str(ROOT / 'devices/nabu/tests/check-gpu-physmap27.py'),
+                    '--xnu',str(ctx.tree / '.cache/xnu-work'),
+                    '--output',str(ROOT / 'out/nabu27-gpu-physmap-host')],check=True)
     subprocess.run([sys.executable,str(ROOT / 'devices/nabu/tests/check-gpu-page-policy27.py'),
                     '--xnu',str(ctx.tree / '.cache/xnu-work'),
                     '--output',str(ROOT / 'out/nabu27-gpu-page-policy-host')],check=True)

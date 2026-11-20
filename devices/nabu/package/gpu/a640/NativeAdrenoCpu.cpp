@@ -2,6 +2,7 @@
 #include "NativeAdrenoMemory.h"
 #include "NabuGpuPagePolicy.h"
 #include "NabuGpuPteSnapshot.h"
+#include "NabuGpuPhysmap.h"
 // XNU osfmk/kern/cpu_data.h exports these C entry points. Avoid pulling
 // private cpu_data_t layouts into a driver that only needs preemption control.
 extern "C" void _disable_preemption(void);
@@ -84,7 +85,6 @@ IOReturn NativeAdrenoSetOwnedPageCache(const NativeAdrenoPhysicalSpan *spans,siz
 
 // pmap_pte is a local inline symbol, not a driver link interface. Walk the
 // live TTBR1 translation through bounded managed table pages instead.
-extern "C" uint64_t gVirtBase;
 void NativeAdrenoMemory::cacheSnapshot(const char *phase,size_t offset,uint64_t userAddress) const
 {
     if(!storage_.prepared || offset>=storage_.bytes || !storage_.mapping)return;
@@ -97,7 +97,7 @@ void NativeAdrenoMemory::cacheSnapshot(const char *phase,size_t offset,uint64_t 
     }
     if(physical<gPhysBase || physical-gPhysBase>=gPhysSize)return;
     const uint64_t kva=reinterpret_cast<uintptr_t>(storage_.mapping)+offset;
-    const uint64_t direct=gVirtBase+physical-gPhysBase;
+    const uint64_t direct=phystokv(physical);
     uint64_t mair=0,mpidr=0,ttbr=0,tcr=0;
     _disable_preemption();
     __asm__ volatile("mrs %0, mair_el1" : "=r"(mair));
@@ -108,11 +108,14 @@ void NativeAdrenoMemory::cacheSnapshot(const char *phase,size_t offset,uint64_t 
     auto read=[](uint64_t address,uint64_t *entry) {
         if((address&7) || address<gPhysBase || address-gPhysBase>=gPhysSize ||
             gPhysSize-(address-gPhysBase)<8)return false;
-        const uint64_t va=gVirtBase+address-gPhysBase;
+        const uint64_t va=phystokv(address);
         *entry=__atomic_load_n(reinterpret_cast<const uint64_t *>(va),__ATOMIC_RELAXED);
         return true;
     };
-    const auto kp=nabuGpuKernelPte(kva,ttbr,tcr,read),dp=nabuGpuKernelPte(direct,ttbr,tcr,read);
+    const auto kp=nabuGpuKernelPte(kva,ttbr,tcr,read);
+    // A missing retained kernel mapping is diagnostic failure, never a reason
+    // to read the direct mapping's bytes or continue a speculative walk.
+    const auto dp=kp.valid?nabuGpuKernelPte(direct,ttbr,tcr,read):NabuGpuPteSnapshot{};
     // The caller may independently vm_deallocate a user mapping. Do not walk
     // its unprotected page-table pointer. Sample the retained kernel mapping
     // and stable physmap instead, and label the user address as unqueried.

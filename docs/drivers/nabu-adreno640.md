@@ -193,3 +193,13 @@ samples record MAIR, real kernel/physmap ATTRINDX/SH and before/after-clean word
 User page tables are not walked without their lock; V2 records its address while
 the snapshot uses the retained kernel mapping and physmap. The old log cannot
 identify the precise user PTE/alias responsible; hardware validation remains due.
+
+
+P031 panics early in the first GMU BO snapshot: manual gVirtBase arithmetic
+bypassed XNU ptov_table and read an unmapped static hole. Both diagnostics and
+cache maintenance now use the real aperture: phystokv for BO/table reads,
+phystokv_range chunks for CIVAC/IVAC. Existing native global LC_SYMTAB entries
+and XNU prototypes are checked before pushing. Host and actual ARM64 replays
+use discontinuous mappings and P031 table addresses. Hardware must first pass
+BO/PTE startup, then validate fence2 and pre/post-clean IB data; P031 did not
+reach the original CP_OPCODE_ERROR path.

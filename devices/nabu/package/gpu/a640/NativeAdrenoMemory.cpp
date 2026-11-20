@@ -1,6 +1,7 @@
 /* SPDX-License-Identifier: MIT */
 #include "NativeAdrenoMemory.h"
 #include "NabuGpuCopyPlan.h"
+#include "NabuGpuPhysmap.h"
 /* Where a call that never returns is stuck: the free/unmap/release path stores a stage number here, the board page shows it. */
 extern "C" {volatile uint32_t native_adreno_trace_stage;}
 #include <IOKit/IOBufferMemoryDescriptor.h>
@@ -890,7 +891,6 @@ IOReturn NativeAdrenoMemory::acquireDeviceWrites(size_t offset,size_t bytes)
     __asm__ volatile("dsb sy" ::: "memory");
     return kIOReturnSuccess;
 }
-extern "C" uint64_t gVirtBase,gPhysBase,gPhysSize;
 IOReturn NativeAdrenoMemory::maintainCpuRange(size_t offset,size_t bytes,bool invalidate)
 {
     // The descriptor pins the pages. Validate the complete range before any
@@ -906,8 +906,7 @@ IOReturn NativeAdrenoMemory::maintainCpuRange(size_t offset,size_t bytes,bool in
         if(first>=last)continue;
         if(first!=covered || span.physical>UINT64_MAX-(first-span.offset))return kIOReturnUnsupported;
         const uint64_t physical=span.physical+first-span.offset;
-        if(physical<gPhysBase || physical-gPhysBase>=gPhysSize || last-first>gPhysSize-(physical-gPhysBase) ||
-            gVirtBase>UINT64_MAX-(physical-gPhysBase) || last-first>UINT64_MAX-(gVirtBase+physical-gPhysBase))
+        if(physical<gPhysBase || physical-gPhysBase>=gPhysSize || last-first>gPhysSize-(physical-gPhysBase))
             return kIOReturnUnsupported;
         covered=last;
     }
@@ -917,13 +916,21 @@ IOReturn NativeAdrenoMemory::maintainCpuRange(size_t offset,size_t bytes,bool in
         const uint64_t first=offset>span.offset?offset:span.offset;
         const uint64_t last=end<span.offset+span.bytes?end:span.offset+span.bytes;
         if(first>=last)continue;
-        const uint64_t start=gVirtBase+span.physical+first-span.offset-gPhysBase;
-        const uint64_t stop=start+last-first;
-        for(uint64_t va=start&~UINT64_C(63);va<stop;va+=64) {
-            // Do not skip this when pp_attr already says WCOMB: publish dirty
-            // aliases to PoC before the GPU sees WPTR. Acquire invalidates only.
-            if(invalidate)__asm__ volatile("dc ivac, %0" :: "r"(va):"memory");
-            else __asm__ volatile("dc civac, %0" :: "r"(va):"memory");
+        uint64_t physical=span.physical+first-span.offset;
+        uint64_t remaining=last-first;
+        while(remaining) {
+            vm_size_t chunk=remaining;
+            const uint64_t start=phystokv_range(physical,&chunk);
+            if(!chunk || chunk>remaining || chunk>UINT64_MAX-start)return kIOReturnUnsupported;
+            const uint64_t stop=start+chunk;
+            for(uint64_t va=start&~UINT64_C(63);va<stop;va+=64) {
+                // Attribute equality is not publication. XNU's aperture may
+                // be split or slid: never advance a VA past this chunk.
+                if(invalidate)__asm__ volatile("dc ivac, %0" :: "r"(va):"memory");
+                else __asm__ volatile("dc civac, %0" :: "r"(va):"memory");
+            }
+            physical+=chunk;
+            remaining-=chunk;
         }
     }
     __asm__ volatile("dsb sy" ::: "memory");

@@ -21,7 +21,18 @@ prefix=r'''
 #include <cstdio>
 #include <vector>
 using IOReturn=int;enum{kIOReturnSuccess=0,kIOReturnUnsupported=1,kIOReturnBadArgument=2,kIOReturnNotReady=3};
-static uint64_t gPhysBase=0x30000000,gPhysSize=0x100000,gVirtBase=0x100000000;
+static uint64_t gPhysBase=0x30000000,gPhysSize=0x100000;
+using vm_size_t=uint64_t;
+static unsigned apertureCalls=0;
+static uint64_t phystokv_range(uint64_t pa,vm_size_t *n){
+ ++apertureCalls;const uint64_t page=pa&~UINT64_C(4095);const uint64_t offset=pa&4095;
+ // Deliberately discontinuous VA: neither adjacent physical pages nor spans
+ // imply adjacent kernel mappings. A fallback caps at each4K boundary.
+ assert(page==0x30000000 || page==0x30001000 || page==0x30008000);
+ const uint64_t va=page==0x30000000?0x100000000:page==0x30001000?0x700000000:0x900000000;
+ if(*n>4096-offset)*n=4096-offset;
+ return va+offset;
+}
 static unsigned barriers=0;struct Op{uint64_t va;bool inv;};static std::vector<Op> operations;
 static uint32_t cpu=0x70460001,dram=0;static bool dirty=true;
 static void hostCache(uint64_t va,bool inv){operations.push_back({va,inv});if(!inv && dirty){dram=cpu;dirty=false;}}
@@ -53,8 +64,13 @@ int main(){
  // Actual publish body must clean even when ensureOwnedPageCache changes zero
  // attributes. It also handles non-page-aligned ranges crossing physical spans.
  assert(!m.publishForDevice(4000,200) && m.checks==1 && dram==cpu && !dirty);
- assert(operations.size()==4 && operations[0].va==0x100000f80 && operations.back().va==0x100008040);
+ assert(operations.size()==4 && operations[0].va==0x100000f80 && operations.back().va==0x900000040);
  assert(!m.acquireDeviceWrites(4000,200));for(size_t i=4;i<8;++i)assert(operations[i].inv);
+ // A physically contiguous8K span must still remap at its physmap break.
+ operations.clear();m.storage_.span_count=1;m.storage_.spans[0].bytes=8192;
+ unsigned calls=apertureCalls;assert(!m.publishForDevice(4000,200));
+ assert(operations.size()==4 && operations[0].va==0x100000f80 && operations[2].va==0x700000000 && apertureCalls-calls==2);
+ m.storage_.span_count=2;m.storage_.spans[0].bytes=4096;
  operations.clear();m.storage_.spans[1].physical=0x40000000;
  assert(m.publishForDevice(4000,200)==1 && operations.empty()); // validate all before mutation
  m.storage_.spans[1].physical=0x30008000;m.ensureFail=7;
@@ -84,4 +100,4 @@ with tempfile.TemporaryDirectory(prefix='nabu-cache-host-') as td:
  q=subprocess.run([str(r/'test')],capture_output=True,text=True);(a.output/'run.log').write_text(q.stdout+q.stderr)
  assert q.returncode==0,q.stdout+q.stderr
  print(q.stdout,end='')
-(a.output/'verification.json').write_text(json.dumps(dict(passed=True,actual_publish_acquire_bodies=True,owned_wc_always_civac=True,all_ibs_and_resource_ranges=True,duplicate_handles_maintained=True,completion_invalidate=True,legacy_v2_share_publish=True,failed_publish_before_ring=True,cache_instructions_modeled=True,sanitizers=['ASan','UBSan'],hardware_tested=False),indent=2)+'\n')
+(a.output/'verification.json').write_text(json.dumps(dict(passed=True,actual_publish_acquire_bodies=True,nonlinear_physmap=True,aperture_chunk_boundaries=True,owned_wc_always_civac=True,all_ibs_and_resource_ranges=True,duplicate_handles_maintained=True,completion_invalidate=True,legacy_v2_share_publish=True,failed_publish_before_ring=True,cache_instructions_modeled=True,sanitizers=['ASan','UBSan'],hardware_tested=False),indent=2)+'\n')

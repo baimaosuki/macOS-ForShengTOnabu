@@ -128,3 +128,11 @@ CIVAC+DSB SY，完成后 IVAC；legacy、V2 和直接提交共用发布函数，
 首批用户 BO/IB 独立限量记录 MAIR、真实 kernel/physmap PTE 的 ATTRINDX/SH
 以及 clean 前后数据。用户页表不作无锁遍历；V2 地址仅记录，实际采样 physmap。
 这些修复不能从旧日志证明哪一条用户 PTE 产生了脏行，真机结果仍需验证。
+
+
+P031 在首个 GMU BO 的 cacheSnapshot 提前 Panic：手工 gVirtBase 线性换算
+绕过 XNU ptov_table，访问了静态映射空洞。现已同时修正诊断和缓存维护：
+BO/页表读取调用 phystokv，CIVAC/IVAC 按 phystokv_range 返回边界分段。
+推送前核对现有内核 LC_SYMTAB 的全局符号与 XNU 源码签名，Host/ARM64
+回放使用非连续 physmap 和 P031 页表地址。上机仍需先通过 BO/PTE，再验证
+fence2 和提交前后数据；P031 尚未运行到原来的 CP_OPCODE_ERROR 路径。
