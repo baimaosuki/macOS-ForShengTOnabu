@@ -2,6 +2,9 @@
 #pragma once
 #include "NabuUsbSmmu.h"
 namespace nabu {
+// Stock dma_info_to_prot(coherent=false) selects io-pgtable-arm's MAIR index0
+// Normal-NC. This applies only to USB's private identity context, not UFS.
+constexpr uint32_t usbDmaMair=0x44;
 // Owned rings and transfer buffers must use Normal-NC on this non-snooping
 // USB master. Do not combine a requested cache mode with the caller's mode.
 inline uint32_t usbBufferOptions(uint32_t options) {

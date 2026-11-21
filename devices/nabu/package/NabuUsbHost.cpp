@@ -105,12 +105,12 @@ struct Hardware {
         smmu.write(cb+0x30,28u|(1u<<8)|(1u<<10)|(3u<<12)|(1u<<23));
         smmu.write(cb+0x20,uint32_t(pa));smmu.write(cb+0x24,uint32_t(pa>>32));
         smmu.write(cb+0x28,0);smmu.write(cb+0x2c,0);
-        smmu.write(cb+0x38,0xff);smmu.write(cb+0x3c,0);
+        smmu.write(cb+0x38,nabu::usbDmaMair);smmu.write(cb+0x3c,0);
         smmu.write(cb+0x610,0);smmu.write(cb+0x7f0,0);
         if(!smmu.wait(cb+0x7f4,1,0,10000))return false;
         smmu.write(cb+0x58,smmu.read(cb+0x58));
         smmu.write(cb,1u|2u|4u|(1u<<5)|(1u<<12));
-        if(!(smmu.read(cb)&1) || smmu.read(cb+0x20)!=uint32_t(pa) || smmu.read(cb+0x38)!=0xff)return false;
+        if(!(smmu.read(cb)&1) || smmu.read(cb+0x20)!=uint32_t(pa) || smmu.read(cb+0x38)!=nabu::usbDmaMair)return false;
         smmu.write(sm::kS2crBase+4*plan.index,plan.bank);
         smmu.write(sm::kSmrBase+4*plan.index,sm::kSmrValid|sid);
         bool ok=smmu.read(sm::kSmrBase+4*plan.index)==(sm::kSmrValid|sid) && smmu.read(sm::kS2crBase+4*plan.index)==plan.bank;
@@ -119,7 +119,7 @@ struct Hardware {
         IOLog("NABU USB: UFS slot2=%08x route=%08x CB1 preserved=%u USB slot=%u CB=%u\n",ufsSmr,ufsRoute,ufsPreserved,plan.index,plan.bank);
         if(!ufsPreserved)return false;
         dmaBank=plan.bank;dmaSlot=plan.index;dmaGlobalPages=info.global_pages;dmaReady=ok;
-        IOLog("NABU USB: SID=%x slot=%u context=%u identity=%u table=%llx GFSR=%x memory=WB-inner-shareable coherence=unverified\n",sid,plan.index,plan.bank,ok,pa,smmu.read(sm::kGfsr));
+        IOLog("NABU USB: SID=%x slot=%u context=%u identity=%u table=%llx GFSR=%x memory=Normal-NC-inner-shareable coherence=unverified\n",sid,plan.index,plan.bank,ok,pa,smmu.read(sm::kGfsr));
         return ok;
     }
 } hardware;

@@ -58,10 +58,11 @@ int main(){
  }
  assert(!nabu::usbContextFaults(0x400) && nabu::usbContextFaults(2)==2);
  assert(nabu::usbContextFaults(0x80000480)==0x80000080);
- // Existing DMA attributes remain explicit; changing only the SMMU cannot
- // remove a CPU-side cacheable alias or establish hardware snooping.
+ // USB's private SMMU context matches the stock noncoherent-domain MAIR.
+ // It supplements CPU-side NC allocation and borrowed-buffer maintenance.
  const uint64_t pte=nabu::usbIdentityBlock(3);
  assert(((pte>>2)&7)==0 && ((pte>>8)&3)==3 && (pte&(1u<<10)));
+ assert(nabu::usbDmaMair==0x44);
  Bus bus;bus.core(0,0x40);bus.core(4,2u<<24);bus.core(0x18,0x1000);
  bus.core(0x40,0);bus.core(0x44,0);bus.core(0x458,0xdeadbeef);
  bus.core(0x440,0x0e000663);bus.core(0x450,0x200);bus.core(0x1020,3);
