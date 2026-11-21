@@ -231,3 +231,24 @@ physmap-range splitting. ASan/UBSan production-body tests and actual ARM64 repla
 cover these paths, including an old-code destructive-alias model. The model does
 not prove which instruction caused the P034 change, and the correction still
 requires hardware verification of fence2 and desktop rendering.
+
+
+P036 device evidence (2026-11-21): source bbe725d0 matches9897d9b. The first
+182-word production IB and second256-word sample are unchanged across publish;
+no CP fault, kernel panic or WindowServer exit appears in the captured log.
+There is no later exported submitted/completed fence counter, so this does not
+qualify general GPU rendering. The display refuses at least105 swaps: format
+0x62336138 (b3a8),1600x2560,stride1600 fails the plain BGRA/RGhA format guard
+with reason7. The firmware diagnostic bars persist because no swap is accepted.
+
+The GPU-mode signed-text filter erroneously excluded the existing final BGRA
+allocation rule at QuartzCore0x18e1e63cc (subcache03+0x5de63cc). The earlier
+0x5de1134 rule only bypasses one FP16 branch and does not cover b3a8 selection.
+Both boot modes now retain the final allocation rule; CPU-only renderer/nil
+Metal overrides remain excluded from GPU mode. This changes allocation before
+reuse and IOSurface creation, not metadata after allocation, and never relabels
+b3a8 memory as BGRA. The original format and bounds guards stay intact.
+Host replay executes the original allocation/reuse/property instructions and
+the actual kernel mode filter. Final native verification checks the shipped
+filter and signed-byte reconstruction. A visible GPU desktop still requires
+booting the corrected kernel. Signed GPU userspace remains unchanged.

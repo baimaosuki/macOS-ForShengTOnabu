@@ -4,16 +4,16 @@
  	return true;
  }
  
-+/* One kernel/ADT serves both nabu menu entries. CPU renderer overrides must
-+ * never disable Metal discovery in the GPU entry; neither mode writes signed
-+ * mapped text directly. The existing signed-byte reconstruction is unchanged. */
++/* Both renderers require plain BGRA at the final framebuffer allocation site.
++ * Only CPU renderer/discovery overrides are excluded from the GPU entry.
++ * The existing signed-byte reconstruction is unchanged. */
 +static __attribute__((noinline)) int
 +nabu_cs_text_rule_for_mode(const struct cs_text_fixup *f, int gpu)
 +{
 +#if defined(NABU)
 +	if (!strcmp(f->name, "dyld_shared_cache_arm64e.03")) {
 +		if (f->offset == 0x5de1134) return gpu == 1;
-+		if (f->offset == 0x5b51d00 || f->offset == 0x5b4263c || f->offset == 0x5de63cc) return gpu != 1;
++		if (f->offset == 0x5b51d00 || f->offset == 0x5b4263c) return gpu != 1;
 +	}
 +	if (!strcmp(f->name, "dyld_shared_cache_arm64e.01") &&
 +	    (f->offset == 0x24dfd5c || f->offset == 0x26cde70)) return gpu != 1;
