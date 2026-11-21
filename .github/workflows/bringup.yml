@@ -215,6 +215,7 @@ jobs:
             out/nabu27-gpu-userspace/verification.json
             out/nabu27-gpu-userspace/cpu-policy-verification.json
             out/nabu27-gpu-userspace/bridge-cache-verification.json
+            out/nabu27-gpu-userspace/render-failure-verification/
             out/nabu27-gpu-userspace/prepared.json
             out/nabu27-gpu-userspace/tree/nabu-runtime-inputs.json
             out/nabu27-gpu-userspace/tree/build/adreno-metal-plugin-macos27/

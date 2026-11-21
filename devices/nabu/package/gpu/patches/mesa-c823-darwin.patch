@@ -3885,3 +3885,18 @@ index 6308d70d..6fe5dd78 100644
        metal_layer.pixelFormat = metal_format;
  
        metal_layer.colorspace = cg_color_space;
+diff --git a/src/freedreno/vulkan/tu_cs.cc b/src/freedreno/vulkan/tu_cs.cc
+--- a/src/freedreno/vulkan/tu_cs.cc
++++ b/src/freedreno/vulkan/tu_cs.cc
+@@ -259,6 +259,11 @@
+ VkResult
+ tu_cs_add_entries(struct tu_cs *cs, struct tu_cs *target)
+ {
++   if (unlikely(cs->status != VK_SUCCESS))
++      return cs->status;
++   if (unlikely(target->status != VK_SUCCESS))
++      return target->status;
++
+    VkResult result;
+ 
+    assert(cs->mode == TU_CS_MODE_GROW);

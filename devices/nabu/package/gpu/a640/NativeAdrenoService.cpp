@@ -12,6 +12,7 @@
 #include "NativeAdrenoCpInit.h"
 #include "NativeAdrenoIrq.h"
 #include "NabuGpuFault.h"
+#include "NabuGpuWatchdog.h"
 #include "NativeAdrenoKernelTime.h"
 #include "NabuSmmuPolicy.h"
 #include "ArmSmmu4KMmio.h"
@@ -336,8 +337,7 @@ class A640State final {
     NativeAdrenoTimer timer_;
     NativeAdrenoAbiDeviceInfo info_{};
     NabuMetalObservation observation_;
-    uint32_t watchedFence_=0;
-    uint64_t watchedSince_=0;
+    NabuGpuWatchdog watchdog_;
 #endif
     NativeAdrenoIrq irq_;
     NabuGpuFaultCapture cpFault_;
@@ -1156,6 +1156,10 @@ IOReturn A640State::fail(IOReturn status)
         IOLog("NabuGPU: fault-cp-ib valid=%x ib1=%08x:%08x rem=%u ib2=%08x:%08x rem=%u position=prefetch-not-exact\n",
             cpFault.valid,cpFault.ib1_hi,cpFault.ib1_lo,cpFault.ib1_rem,
             cpFault.ib2_hi,cpFault.ib2_lo,cpFault.ib2_rem);
+    }
+    {
+        IOLog("NabuGPU: failed-ring submitted=%u completed=%u rptr_shadow=%u\n",
+            ring_.lastSubmitted(),ring_.completedFence(),ring_.readPointer());
         // native_adreno_fault() has closed admission under the publication
         // lock. These fixed software snapshots survive BO teardown and need
         // no new mapping or MMIO. Print only the latest submission, once.
@@ -1330,12 +1334,14 @@ void A640State::poll()
     const int progress=native_adreno_progress(&submitted,&completed);
     const uint64_t current=now(nullptr);
     observation_.sample(current,submitted,completed,progress);
-    if(completed!=watchedFence_ || submitted==completed) {
-        watchedFence_=completed;
-        watchedSince_=current;
-    }
-    const bool timeout=submitted!=completed && current-watchedSince_>500000;
+    const bool timeout=watchdog_.sample(current,submitted,completed,500000);
     if(status || progress || timeout) {
+        IOLog("NabuGPU: stalled submitted=%u completed=%u no_progress_us=%llu limit_us=500000 progress=%x irq_failed=%u\n",
+            submitted,completed,watchdog_.stalledUs(current),unsigned(progress),unsigned(status!=0));
+        if(timeout) {
+            cpFault_.capture(ringIo_,0,0,0);
+            IOLog("NabuGPU: failure_snapshot origin=watchdog cp_irq_observed=0\n");
+        }
         ready_=false;
         native_adreno_a6xx_stats[0]=8;
         fail(status?status:(timeout?kIOReturnTimeout:kIOReturnIOError));

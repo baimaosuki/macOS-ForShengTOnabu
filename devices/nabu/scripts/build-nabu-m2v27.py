@@ -111,6 +111,8 @@ def main():
             '--stage',tree,'--output',out/'bridge-cache-verification.json')
         patch=tree/'patches/nabu/mesa-c823-darwin.patch'
         run('git','-C',mesa,'apply','--check',patch);run('git','-C',mesa,'apply',patch)
+        run(sys.executable,ROOT/'devices/nabu/tests/check-gpu-render-failure27.py',
+            '--mesa',mesa,'--output',out/'render-failure-verification')
         (tree/'.cache/mesa-work').symlink_to(mesa,target_is_directory=True)
         run(sys.executable,'-m','venv','--system-site-packages',tree/'.cache/mesa-venv')
         run(tree/'.cache/mesa-venv/bin/python','-m','pip','install','meson==1.9.1','mako','packaging','PyYAML')
