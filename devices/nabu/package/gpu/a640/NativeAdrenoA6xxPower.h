@@ -56,10 +56,10 @@ struct NativeAdrenoA6xxReport {
 
 /* NativeAdrenoA6xxTables contains the A6xx HFI v2 wire payloads (the vendor
  * kgsl_hfi.h hfi_dcvstable_cmd and hfi_bwtable_cmd without their headers). GPU
- * entry zero requests the off level; entry one requests 257 MHz at LOW_SVS, the
- * lowest qcom,gpu-pwrlevel of both nabu speed bins. GMU entry one requests 200
- * MHz at MIN_SVS (gpucc-sm8150 gpu_cc_gmu_clk_src). The bandwidth table has off
- * and active DDR levels (1799000 KB/s, 257 MHz usecase 3); CNOC is the unit's
+ * entry zero requests off; the other entries are the common nabu speed-bin
+ * OPPs, 257 through 585 MHz. GMU entry one requests 200 MHz at MIN_SVS
+ * (gpucc-sm8150 gpu_cc_gmu_clk_src). All twelve stock DDR usecases are retained;
+ * CNOC is the unit's
  * SH2/SN15/SN3 path at 100 KB/s. BCM widths, units and VCDs come from command-db.
  * Power reads the ARC indexes and BCM addresses from the running SM8150 command
  * database before changing any power register. */
@@ -73,6 +73,8 @@ struct NativeAdrenoA6xxTables {
     uint32_t cxIndex;
     uint32_t mxIndex;
     uint32_t gfxIndex;
+    uint32_t gpuLevel;
+    uint32_t bandwidthLevel;
 };
 
 /* NativeAdrenoA6xxPower owns the host votes that keep the GMU and SMMU alive.
@@ -97,6 +99,7 @@ class NativeAdrenoA6xxPower final {
     bool linkUp_ = false;
     bool cxReady_ = false;
     bool gxReady_ = false;
+    uint32_t requestedKhz_ = 585000;
 
     IOReturn read(uint32_t, uint32_t, uint32_t *);
     IOReturn write(uint32_t, uint32_t, uint32_t);
@@ -118,7 +121,8 @@ public:
     };
 
     /* doorbell is the AOP IPC register (byte offset, value) in the doorbell window. */
-    IOReturn enableCx(const NativeAdrenoA6xxIo &, uint32_t doorbellOffset, uint32_t doorbellValue);
+    IOReturn enableCx(const NativeAdrenoA6xxIo &, uint32_t doorbellOffset,
+        uint32_t doorbellValue, uint32_t gpuKhz = 585000);
     IOReturn enableGx();
     IOReturn stop(bool dmaStopped);
     const NativeAdrenoA6xxTables &tables() const { return tables_; }

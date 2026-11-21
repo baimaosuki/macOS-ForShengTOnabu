@@ -6,6 +6,28 @@
 #include "NabuClockBranch.h"
 namespace nabu {
 enum class UsbBlock { Gcc, Phy, Scratch, Core };
+struct UsbHostSnapshot {
+    bool valid=false,runtimeValid=false;
+    uint32_t cap=0,command=0,status=0,crcrLo=0,crcrHi=0,dcbaaLo=0,dcbaaHi=0;
+    uint32_t runtime=0,iman=0,erstSize=0,erstLo=0,erstHi=0,erdpLo=0,erdpHi=0;
+    uint32_t port[2]{},gctl=0,usb2=0,bus0=0,bus1=0,cgctl=0;
+    bool haltPending() const {return valid && !(command&1) && !(status&1);}
+    uint32_t signature() const {
+        // Pointer traffic is not a reason to log each interrupt/frame.
+        return (command&3)|((status&0x1805)<<2)|((port[0]&0x3fe3)<<16);
+    }
+};
+class UsbHostReportPolicy {
+    bool seen_=false;uint64_t at_=0;uint32_t signature_=0;
+public:
+    bool sample(uint64_t ms,const UsbHostSnapshot &s,bool fault) {
+        if(!s.valid)return false;
+        if(seen_ && ms>=at_ && ms-at_<1000)return false;
+        const bool changed=!seen_ || signature_!=s.signature();
+        if(!changed && !((fault || s.haltPending()) && ms>=at_ && ms-at_>=10000))return false;
+        seen_=true;at_=ms;signature_=s.signature();return true;
+    }
+};
 template<class Io> class Usb2Core {
     Io &io;
     uint32_t coreId_=0,coreRevision_=0;
@@ -114,6 +136,10 @@ public:
     }
     bool selectUtmiHost() {
         using B=UsbBlock;
+        phase("RAM-clocks");
+        // nabu-r-oss dwc3_msm_qscratch_reg_init: keep master RAM clocks
+        // available to the USB bus engine, preserving other CGCTL fields.
+        if(!update(B::Scratch,0x28,0x18,0x18))return false;
         phase("UTMI-clock-select");
         // Missing PIPE clock otherwise stalls xHCI HCRST. Disable -> select -> enable.
         if(!update(B::Scratch,8,0x100,0x100))return false;
@@ -165,6 +191,27 @@ public:
         if(!wait(B::Core,cap,2,0,1000000))return false;
         phase("XHCI-ready");
         return wait(B::Core,cap+4,1u<<11,0,1000000);
+    }
+    UsbHostSnapshot snapshot() {
+        using B=UsbBlock;UsbHostSnapshot s;
+        s.cap=io.read(B::Core,0)&255;
+        if(s.cap<0x20 || s.cap>0x80)return s;
+        s.valid=true;s.command=io.read(B::Core,s.cap);s.status=io.read(B::Core,s.cap+4);
+        s.crcrLo=io.read(B::Core,s.cap+0x18);s.crcrHi=io.read(B::Core,s.cap+0x1c);
+        s.dcbaaLo=io.read(B::Core,s.cap+0x30);s.dcbaaHi=io.read(B::Core,s.cap+0x34);
+        s.runtime=io.read(B::Core,0x18)&~31u;
+        if(s.runtime>=0x20 && s.runtime<=0xffc0) {
+            s.runtimeValid=true;const uint32_t at=s.runtime+0x20;
+            s.iman=io.read(B::Core,at);s.erstSize=io.read(B::Core,at+8);
+            s.erstLo=io.read(B::Core,at+0x10);s.erstHi=io.read(B::Core,at+0x14);
+            s.erdpLo=io.read(B::Core,at+0x18);s.erdpHi=io.read(B::Core,at+0x1c);
+        }
+        unsigned ports=io.read(B::Core,4)>>24;if(ports>2)ports=2;
+        for(unsigned i=0;i<ports;++i)s.port[i]=io.read(B::Core,s.cap+0x400+16*i);
+        s.gctl=io.read(B::Core,0xc110);s.usb2=io.read(B::Core,0xc200);
+        s.bus0=io.read(B::Core,0xc100);s.bus1=io.read(B::Core,0xc104);
+        s.cgctl=io.read(B::Scratch,0x28);
+        return s;
     }
 };
 }

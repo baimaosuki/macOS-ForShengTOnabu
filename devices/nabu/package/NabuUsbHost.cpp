@@ -22,6 +22,8 @@ namespace {
 constexpr uint32_t irq=165,sid=0x140;
 struct Hardware {
     IOBufferMemoryDescriptor *dmaTable=nullptr;
+    uint32_t dmaBank=0,dmaSlot=0,dmaGlobalPages=0;
+    bool dmaReady=false;
     nabu::RegisterWindow gcc,phy,scratch,core,smmu,rsc,dbPointer,db,rcal;
     nabu::RegisterWindow &region(nabu::UsbBlock b){
         switch(b){case nabu::UsbBlock::Gcc:return gcc;case nabu::UsbBlock::Phy:return phy;
@@ -108,59 +110,127 @@ struct Hardware {
         for(unsigned i=0;i<9;++i)ufsPreserved=ufsPreserved && smmu.read(ufsCb+ufsRegisters[i])==ufsBefore[i];
         IOLog("NABU USB: UFS slot2=%08x route=%08x CB1 preserved=%u USB slot=%u CB=%u\n",ufsSmr,ufsRoute,ufsPreserved,plan.index,plan.bank);
         if(!ufsPreserved)return false;
-        IOLog("NABU USB: SID=%x slot=%u context=%u coherent-identity=%u table=%llx GFSR=%x\n",sid,plan.index,plan.bank,ok,pa,smmu.read(sm::kGfsr));
+        dmaBank=plan.bank;dmaSlot=plan.index;dmaGlobalPages=info.global_pages;dmaReady=ok;
+        IOLog("NABU USB: SID=%x slot=%u context=%u identity=%u table=%llx GFSR=%x memory=WB-inner-shareable coherence=unverified\n",sid,plan.index,plan.bank,ok,pa,smmu.read(sm::kGfsr));
         return ok;
     }
 } hardware;
 } // namespace
 class NabuXhciNub;
 NabuXhciNub *active=nullptr;bool lineAttached=false;
+struct UsbIrqCounters {uint32_t arrivals=0,forwarded=0,inactive=0,masks=0,unmasks=0,errors=0,lastStatus=0,inFlight=0;} usbIrqs;
+int usbMask(bool masked) {
+    __atomic_fetch_add(masked?&usbIrqs.masks:&usbIrqs.unmasks,1,__ATOMIC_RELAXED);
+    const int status=armcpu_spi_mask(irq,masked);
+    __atomic_store_n(&usbIrqs.lastStatus,uint32_t(status),__ATOMIC_RELAXED);
+    if(status)__atomic_fetch_add(&usbIrqs.errors,1,__ATOMIC_RELAXED);
+    return status;
+}
+void usbQuiesceInterrupt() {
+    // Match IOInterruptController: thread-context disable/unregister waits for
+    // the primary action; a level filter disabling itself must never wait.
+    if(!IOService::getPlatform()->atInterruptLevel())
+        while(__atomic_load_n(&usbIrqs.inFlight,__ATOMIC_SEQ_CST))IODelay(1);
+}
 class NabuXhciNub : public IOService {
     OSDeclareDefaultStructors(NabuXhciNub)
-    IOInterruptAction action=nullptr;OSObject *target=nullptr;void *refcon=nullptr;bool enabled=false;
-    static void primary(void *){auto *self=active;if(self&&self->enabled&&self->action)self->action(self->target,self->refcon,self,0);}
+    IOInterruptAction action=nullptr;OSObject *target=nullptr;void *refcon=nullptr;uint32_t enabled=0;
+    static void primary(void *) {
+        __atomic_fetch_add(&usbIrqs.inFlight,1,__ATOMIC_SEQ_CST);
+        __atomic_fetch_add(&usbIrqs.arrivals,1,__ATOMIC_RELAXED);
+        auto *self=__atomic_load_n(&active,__ATOMIC_SEQ_CST);
+        const auto handler=self?__atomic_load_n(&self->action,__ATOMIC_ACQUIRE):nullptr;
+        if(!self || !__atomic_load_n(&self->enabled,__ATOMIC_ACQUIRE) || !handler) {
+            // armcpu_spi_attach enables the level line before it returns.
+            // An asserted source during registration must be masked here,
+            // otherwise ArmCpu's IRQ drain can never return to registration.
+            __atomic_fetch_add(&usbIrqs.inactive,1,__ATOMIC_RELAXED);usbMask(true);
+            __atomic_fetch_sub(&usbIrqs.inFlight,1,__ATOMIC_SEQ_CST);return;
+        }
+        __atomic_fetch_add(&usbIrqs.forwarded,1,__ATOMIC_RELAXED);
+        // IO[Filter]InterruptEventSource owns level masking/re-enable after
+        // its filter accepts the IRQ. Do not unconditionally re-enable here.
+        handler(self->target,self->refcon,self,0);
+        __atomic_fetch_sub(&usbIrqs.inFlight,1,__ATOMIC_SEQ_CST);
+    }
 public:
+    bool interruptEnabled() const {return __atomic_load_n(&enabled,__ATOMIC_ACQUIRE)!=0;}
     IOReturn getInterruptType(int source,int *type) override {
         if(source || !type)return kIOReturnNoInterrupt;*type=kIOInterruptTypeLevel;return kIOReturnSuccess;
     }
     IOReturn registerInterrupt(int source,OSObject *owner,IOInterruptAction handler,void *context) override {
-        if(source || !handler)return kIOReturnNoInterrupt;if(action)return kIOReturnNoResources;
-        target=owner;refcon=context;action=handler;enabled=false;active=this;
-        asm volatile("dmb ish":::"memory");
+        if(source || !handler)return kIOReturnNoInterrupt;
+        if(__atomic_load_n(&action,__ATOMIC_ACQUIRE))return kIOReturnNoResources;
+        target=owner;refcon=context;__atomic_store_n(&enabled,0,__ATOMIC_RELEASE);
+        __atomic_store_n(&action,handler,__ATOMIC_RELEASE);__atomic_store_n(&active,this,__ATOMIC_SEQ_CST);
         if(!lineAttached){
-            auto r=armcpu_spi_attach(irq,false,primary,nullptr,nullptr,nullptr);
-            if(r){action=nullptr;active=nullptr;return r;}lineAttached=true;
+            uint32_t config=0;uint64_t route=0;
+            auto r=armcpu_spi_attach(irq,false,primary,nullptr,&config,&route);
+            if(r){__atomic_store_n(&active,nullptr,__ATOMIC_SEQ_CST);usbQuiesceInterrupt();__atomic_store_n(&action,nullptr,__ATOMIC_RELEASE);return r;}lineAttached=true;
+            IOLog("NABU USB: GIC intid=%u config=%08x router=%llx type=level\n",irq,config,route);
         }
-        return armcpu_spi_mask(irq,true);
+        return usbMask(true);
     }
     IOReturn unregisterInterrupt(int source) override {
-        if(source)return kIOReturnNoInterrupt;enabled=false;auto r=armcpu_spi_mask(irq,true);
-        action=nullptr;target=nullptr;refcon=nullptr;return r;
+        if(source)return kIOReturnNoInterrupt;__atomic_store_n(&enabled,0,__ATOMIC_RELEASE);auto r=usbMask(true);
+        __atomic_store_n(&active,nullptr,__ATOMIC_SEQ_CST);usbQuiesceInterrupt();
+        __atomic_store_n(&action,nullptr,__ATOMIC_RELEASE);target=nullptr;refcon=nullptr;return r;
     }
     IOReturn enableInterrupt(int source) override {
-        if(source||!action)return kIOReturnNoInterrupt;enabled=true;return armcpu_spi_mask(irq,false);
+        if(source||!__atomic_load_n(&action,__ATOMIC_ACQUIRE))return kIOReturnNoInterrupt;
+        usbQuiesceInterrupt();
+        __atomic_store_n(&enabled,1,__ATOMIC_RELEASE);const auto status=usbMask(false);
+        if(status)__atomic_store_n(&enabled,0,__ATOMIC_RELEASE);return status;
     }
     IOReturn disableInterrupt(int source) override {
-        if(source)return kIOReturnNoInterrupt;enabled=false;return armcpu_spi_mask(irq,true);
+        if(source)return kIOReturnNoInterrupt;__atomic_store_n(&enabled,0,__ATOMIC_RELEASE);
+        const auto status=usbMask(true);usbQuiesceInterrupt();return status;
     }
 };
 OSDefineMetaClassAndStructors(NabuXhciNub,IOService)
+struct UsbRegisterIo {
+    volatile uint32_t *words;
+    uint32_t read32(uint32_t off) const {return words[off/4];}
+    void write32(uint32_t off,uint32_t v) {words[off/4]=v;}
+    void readBarrier() {asm volatile("dmb oshld":::"memory");}
+    void writeBarrier() {asm volatile("dmb oshst":::"memory");}
+    void complete() {asm volatile("dsb sy":::"memory");}
+};
 class NabuUsbXhci : public AppleUSBXHCI {
     OSDeclareDefaultStructors(NabuUsbXhci)
 public:
     uint32_t desiredPower() override {return 3;}
     uint64_t regRead64(void *base,uint32_t off) override {
-        auto *r=reinterpret_cast<volatile uint32_t *>(static_cast<uint8_t *>(base)+off);
-        uint32_t lo=r[0];asm volatile("dmb oshld":::"memory");return uint64_t(r[1])<<32|lo;
+        UsbRegisterIo io{reinterpret_cast<volatile uint32_t *>(base)};
+        return nabu::usbReadRegister64(io,off);
     }
     void regWrite64(void *base,uint32_t off,uint64_t value) override {
-        auto *r=reinterpret_cast<volatile uint32_t *>(static_cast<uint8_t *>(base)+off);
-        r[1]=uint32_t(value>>32);asm volatile("dmb oshst":::"memory");r[0]=uint32_t(value);asm volatile("dsb sy":::"memory");
+        UsbRegisterIo io{reinterpret_cast<volatile uint32_t *>(base)};
+        nabu::usbWriteRegister64(io,off,value);
     }
 };
 OSDefineMetaClassAndStructors(NabuUsbXhci,AppleUSBXHCI)
 namespace {
 NabuUsbXhci *host=nullptr;NabuXhciNub *nub=nullptr;
+void reportRuntime(const nabu::UsbHostSnapshot &s) {
+    auto count=[](const uint32_t *p){return __atomic_load_n(p,__ATOMIC_RELAXED);};
+    IOLog("NABU USB: runtime CMD=%08x STS=%08x halt_pending=%u PORT0=%08x PORT1=%08x PLS=%u speed=%u\n",
+        s.command,s.status,s.haltPending(),s.port[0],s.port[1],(s.port[0]>>5)&15,(s.port[0]>>10)&15);
+    IOLog("NABU USB: rings CRCR=%08x:%08x DCBAA=%08x:%08x runtime_valid=%u IMAN=%08x ERSTSZ=%u ERST=%08x:%08x ERDP=%08x:%08x\n",
+        s.crcrHi,s.crcrLo,s.dcbaaHi,s.dcbaaLo,s.runtimeValid,s.iman,s.erstSize,s.erstHi,s.erstLo,s.erdpHi,s.erdpLo);
+    IOLog("NABU USB: irq arrivals=%u forwarded=%u inactive=%u mask=%u unmask=%u errors=%u last=%08x logical_enabled=%u in_flight=%u\n",
+        count(&usbIrqs.arrivals),count(&usbIrqs.forwarded),count(&usbIrqs.inactive),
+        count(&usbIrqs.masks),count(&usbIrqs.unmasks),count(&usbIrqs.errors),count(&usbIrqs.lastStatus),nub?nub->interruptEnabled():false,count(&usbIrqs.inFlight));
+    IOLog("NABU USB: glue GCTL=%08x USB2=%08x BUS0=%08x BUS1=%08x CGCTL=%08x MASTER=%08x CFG=%08x UTMI=%08x SLEEP=%08x\n",
+        s.gctl,s.usb2,s.bus0,s.bus1,s.cgctl,hardware.gcc.read(0xf010),hardware.gcc.read(0xf078),hardware.gcc.read(0xf018),hardware.gcc.read(0xf014));
+    if(hardware.dmaReady) {
+        namespace sm=nabu_usb::smmu;const uint32_t cb=sm::context_offset(hardware.dmaGlobalPages,hardware.dmaBank);
+        IOLog("NABU USB: dma SID=%x slot=%u CB=%u GFSR=%08x FSR=%08x FAR=%08x:%08x FSYNR0=%08x SCTLR=%08x TCR=%08x MAIR0=%08x route=%08x coherence=unverified\n",
+            sid,hardware.dmaSlot,hardware.dmaBank,hardware.smmu.read(sm::kGfsr),hardware.smmu.read(cb+0x58),
+            hardware.smmu.read(cb+0x64),hardware.smmu.read(cb+0x60),hardware.smmu.read(cb+0x68),hardware.smmu.read(cb),
+            hardware.smmu.read(cb+0x30),hardware.smmu.read(cb+0x38),hardware.smmu.read(sm::kS2crBase+4*hardware.dmaSlot));
+    }
+}
 bool publishHost(){
     nabu::FamilyRegistration registration;if(!registration.valid())return false;
     auto load=OSKextLoadKextWithIdentifier("com.apple.driver.usb.AppleUSBXHCI");
@@ -209,8 +279,14 @@ void worker(void *,wait_result_t){
     auto role=vbus.initializeRole();
     if(role!=nabu::InputError::Ok)IOLog("NABU USB: DRP setup error=%u; self-powered hub can supply VBUS\n",unsigned(role));
     if(!publishHost())return;
+    nabu::UsbHostReportPolicy reports;uint64_t diagnosticMs=0;
     uint32_t previous=~0u;bool source=false;unsigned errorRounds=0;
     for(;;){
+        const auto hostState=core.snapshot();
+        uint32_t usbFault=0;
+        if(hardware.dmaReady)usbFault=hardware.smmu.read(nabu_usb::smmu::context_offset(hardware.dmaGlobalPages,hardware.dmaBank)+0x58);
+        if(reports.sample(diagnosticMs,hostState,usbFault || (hostState.status&0x1004) ||
+            (hostState.runtimeValid && (hostState.iman&3)==1)))reportRuntime(hostState);
         uint8_t cc=0,plugin=0,cmd=0,fault=0;auto e=vbus.status(cc,plugin,cmd,fault);
         bool external=!source&&vbus.externallyPowered(plugin);
         bool wanted=e==nabu::InputError::Ok&&nabu::UsbVbus<nabu::PmicBus>::wantSource(cc,plugin,source);
@@ -222,7 +298,8 @@ void worker(void *,wait_result_t){
         if(snapshot!=previous || (e!=nabu::InputError::Ok && errorRounds++%60==0)){
             IOLog("NABU USB: CC=%02x USBIN=%02x OTG_CMD=%02x OTG_RT=%02x source=%u external5V=%u error=%u\n",cc,plugin,cmd,fault,source,external,unsigned(e));previous=snapshot;
         }
-        IOSleep(e==nabu::InputError::Ok?250:1000);
+        const unsigned sleepMs=e==nabu::InputError::Ok?250:1000;
+        IOSleep(sleepMs);diagnosticMs+=sleepMs;
     }
 }
 }

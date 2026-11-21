@@ -115,3 +115,27 @@ the previous production function fails the object-identity regression. Whether
 this resolves the P027 CP failure remains a hardware question. Fault records now
 include the A6xx IB1/IB2 base/remaining registers and up to 256 IB words. Remaining
 counts exclude prefetched words and are not labeled as an exact faulting PC.
+
+The A640 power producer now includes the OPPs common to both stock nabu speed
+bins: off,257,345,427,499.2 and585 MHz. It retains all12 stock DDR usecases
+(maximum8363000 KB/s) and resolves ARC dependencies and BCM width/unit/VCD
+encoding from the live command-db. Default HFI selection is585 MHz with DDR
+usecase11; `nabu-gpu-khz=427000`, for example, selects another exact common OPP.
+675 MHz is excluded until the physical speed bin is known. Invalid frequencies,
+missing ARC levels and an MX table unable to cover the selected primary voltage
+fail before power writes. The ADT257 MHz property remains the bootstrap resource
+contract; it no longer restricts the runtime HFI table or vote.
+
+The current nabu IRQ adapter invokes callbacks from a polling worker, not a
+GIC interrupt. Pending fences receive1 ms polling, retained for20 ms between
+bursts; sustained idle returns to10 ms. Completion logs identify this transport
+and count real fence-status callbacks. The500000 us watchdog and execution/IB
+fault capture remain unchanged. Higher requested OPPs do not establish the cause
+of P038's stall or measured hardware clock/throughput.
+
+Run `python3 devices/nabu/tests/check-gpu-performance27.py --vendor-dtb <stock-nabu.dtb>
+--output <report-directory>` to check the real FDT and execute the actual Power
+producer with ASan/UBSan. It covers both bins, OPP voltage tags, all DDR entries,
+HFI index selection, legacy and maximum BCM values, VCD waits, invalid rail
+tables and polling cadence. Device frequency, temperature, frame rate and
+remaining stalls still require a new boot log.

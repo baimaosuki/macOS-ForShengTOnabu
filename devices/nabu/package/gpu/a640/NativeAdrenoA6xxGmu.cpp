@@ -4,6 +4,7 @@
  * Adreno6xx implementation.
  * Copyright (c) 2017-2021, The Linux Foundation. All rights reserved. */
 #include "NativeAdrenoA6xxGmu.h"
+#include "NabuGpuPerformance.h"
 #include <IOKit/IOLib.h>
 
 namespace {
@@ -673,9 +674,7 @@ IOReturn NativeAdrenoA6xxGmu::start(const NativeAdrenoA6xxGmuConfig &config)
         }
     }
     if (config.buffers[4].bytes < HfiRequiredBytes || config.buffers[3].bytes > 0x100000 ||
-        config.tables->performance[0] != 2 || config.tables->performance[1] != 2 ||
-        config.tables->performance[7] != 257000 || config.tables->performance[53] != 200000 ||
-        config.tables->bandwidth[0] != 2 || (config.chipId >> 16) != 0x0604) {
+        !nabuGpuPerformanceTablesValid(*config.tables) || (config.chipId >> 16) != 0x0604) {
         return kIOReturnBadArgument;
     }
 
@@ -795,13 +794,17 @@ IOReturn NativeAdrenoA6xxGmu::start(const NativeAdrenoA6xxGmuConfig &config)
         return result;
     }
 
-    /* hfi_gx_bw_perf_vote_cmd: ack type 1, GPU level 1 (257 MHz), bw level 1. */
+    /* hfi_gx_bw_perf_vote_cmd: acknowledged, bounded stock OPP and DDR indices. */
     report_.phase = PerformanceVote;
-    const uint32_t votePayload[] = {1, 1, 1};
+    uint32_t votePayload[3];
+    if(!nabuGpuPerformanceVote(*config_.tables,votePayload))return kIOReturnBadArgument;
+    IOLog("NativeAdrenoA6xx: HFI vote gx=%u khz=%u bw=%u kbps=%u ack=required\n",
+        votePayload[1],NabuGpuOpps[votePayload[1]].khz,votePayload[2],NabuGpuDdrKbps[votePayload[2]]);
     result = exchange(30, votePayload, 3);
     if (result) {
         return result;
     }
+    IOLog("NativeAdrenoA6xx: HFI vote acknowledged gx=%u bw=%u\n",votePayload[1],votePayload[2]);
     /* adreno_start: OOB GPU set (HFI v2 bits 30/31) powers GX, then A640 sends
      * H2F_MSG_START (a6xx_gmu_hfi_start_msg). */
     report_.phase = GpuWake;

@@ -3,7 +3,8 @@
 #include "NabuUsbSmmu.h"
 namespace nabu {
 // The USB controller is halted before changing its exact SID mapping. Never
-// reuse a firmware/shared bypass context: Apple's XHCI needs coherent output.
+// reuse a firmware/shared bypass context. WB/shareable SMMU attributes alone
+// do not prove the USB master can snoop CPU caches.
 template<class Read> nabu_usb::smmu::Plan usbIdentityPlan(Read read,const nabu_usb::smmu::Info &info,uint32_t sid){
     namespace sm=nabu_usb::smmu;
     if(!info.supported || info.exids || (sid&~sm::stream_id_mask(info)))return sm::plan_error("unsupported-geometry");
@@ -40,4 +41,16 @@ template<class Read> nabu_usb::smmu::Plan usbIdentityPlan(Read read,const nabu_u
     return sm::plan_error("no-free-context-bank");
 }
 inline uint64_t usbIdentityBlock(unsigned i){return i>=2&&i<8 ? uint64_t(i)<<30|1ull<<10|3ull<<8|1ull<<6|1ull : 0;}
+
+// nabu-r-oss drivers/usb/host/xhci.h: low DWORD first, high DWORD second.
+// The barriers also order preceding CPU stores before publishing a pointer.
+template<class Io> uint64_t usbReadRegister64(Io &io,uint32_t offset) {
+    const uint32_t low=io.read32(offset);io.readBarrier();
+    const uint32_t high=io.read32(offset+4);io.readBarrier();
+    return uint64_t(high)<<32|low;
+}
+template<class Io> void usbWriteRegister64(Io &io,uint32_t offset,uint64_t value) {
+    io.writeBarrier();io.write32(offset,uint32_t(value));
+    io.writeBarrier();io.write32(offset+4,uint32_t(value>>32));io.complete();
+}
 }

@@ -38,7 +38,7 @@
     ],
     "mesa": "c823a83e8f373a5c36c2b9ed1d7dc98a4f3360ee",
     "mesa_patch": "patches/mesa-c823-darwin.patch",
-    "mesa_patch_sha256": "a373645d4a740af2fcef95c0cde4ed29dca62988493129b037328317a8644825",
+    "mesa_patch_sha256": "8e247ad5ba3bebffb09b0294c7a4f58a305c3ad16be965af1aebb911cdb39ad3",
     "clang_cpu": "generic",
     "clang_arch": "armv8.2-a+crypto",
     "abi": "zeta-ordinary-v1",

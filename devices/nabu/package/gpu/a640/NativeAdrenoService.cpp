@@ -13,6 +13,7 @@
 #include "NativeAdrenoIrq.h"
 #include "NabuGpuFault.h"
 #include "NabuGpuWatchdog.h"
+#include "NabuGpuPollPolicy.h"
 #include "NativeAdrenoKernelTime.h"
 #include "NabuSmmuPolicy.h"
 #include "ArmSmmu4KMmio.h"
@@ -340,6 +341,7 @@ class A640State final {
     NabuMetalObservation observation_;
     NabuGpuWatchdog watchdog_;
     NabuGpuStallConfirmation stallConfirmation_;
+    NabuGpuPollPolicy pollPolicy_;
 #endif
     NativeAdrenoIrq irq_;
     NabuGpuFaultCapture cpFault_;
@@ -353,6 +355,8 @@ class A640State final {
     bool irqAttached_=false;
     bool hardwareIrqEnabled_=false;
     uint32_t hardwareIrqFailed_=0;
+    uint64_t polledIrqCalls_=0,fenceCallbacks_=0;
+    unsigned pollDelayMs_=1;
     unsigned gpuSlots_[4]{},gmuSlots_[2]{};
 
     static int read(void *,uint32_t,uint32_t,uint32_t *);
@@ -382,6 +386,7 @@ class A640State final {
 public:
     IOReturn start();
     void poll();
+    unsigned pollDelayMs() const {return ready_?pollDelayMs_:10;}
     void dump() const;
 };
 
@@ -606,6 +611,8 @@ void A640State::gpuInterrupt(void *cookie)
     A640State *self=static_cast<A640State *>(cookie);
     NativeAdrenoIrqResult result{};
     const IOReturn status=self->irq_.handle(&result);
+    ++self->polledIrqCalls_;
+    if(result.flags&NativeAdrenoIrqFence)++self->fenceCallbacks_;
     const bool failed=status || (result.flags&NativeAdrenoIrqFatal);
     if(!self->cpFault_.claimed()) {
         native_adreno_a6xx_stats[11]=result.status;
@@ -661,6 +668,7 @@ IOReturn A640State::checkGpuTranslations()
 IOReturn A640State::mapWindows()
 {
     if(native_adreno_a6xx_resources(&resources_) || resources_.chipId!=0x06040001 ||
+        // The legacy ADT frequency property describes bootstrap, not the HFI OPP vote.
         resources_.gmemBytes!=0x100000 || resources_.frequencyHz!=257000000 ||
         !resources_.gmuFirmware || !resources_.sqeFirmware ||
         !resources_.zapMetadata || !resources_.zapShader ||
@@ -1246,7 +1254,10 @@ IOReturn A640State::start()
     if(native_adreno_checkpoint("power-cx"))return fail(kIOReturnNotReady);
     IOLog("NativeAdrenoA6xx: enabling CX clocks and parent votes\n");
     const NativeAdrenoA6xxIo io{this,read,write,delay};
-    status=power_.enableCx(io,resources_.aopDoorbellOffset,resources_.aopDoorbellValue);
+    unsigned gpuKhz=585000;
+    PE_parse_boot_argn("nabu-gpu-khz",&gpuKhz,sizeof(gpuKhz));
+    IOLog("NativeAdrenoA6xx: requested GPU khz=%u (common nabu OPPs only)\n",gpuKhz);
+    status=power_.enableCx(io,resources_.aopDoorbellOffset,resources_.aopDoorbellValue,gpuKhz);
     if(status) {
         return fail(status);
     }
@@ -1282,7 +1293,8 @@ IOReturn A640State::start()
     native_adreno_a6xx_stats[0]=5;
     nabuGpuState(5,0,"starting");
     if(native_adreno_checkpoint("gx"))return fail(kIOReturnNotReady);
-    IOLog("NativeAdrenoA6xx: requesting GX at 257 MHz\n");
+    IOLog("NativeAdrenoA6xx: requesting GX at %u kHz\n",
+        power_.tables().performance[4+3*power_.tables().gpuLevel]);
     status=power_.enableGx();
     if(!status) {
         status=gmu_.keepAlive(true);
@@ -1308,6 +1320,7 @@ IOReturn A640State::start()
         return fail(status);
     }
     ready_=true;
+    IOLog("NabuGPU: completion mode=polled-irq active_ms=1 idle_ms=10 idle_grace_us=20000 gic_connected=0\n");
 #if defined(NABU_GPU_METAL) && NABU_GPU_METAL
     unsigned observe=0;
     PE_parse_boot_argn("nabu-gpu-observe",&observe,sizeof(observe));
@@ -1348,6 +1361,7 @@ void A640State::poll()
     uint32_t submitted=0,completed=0;
     const int progress=native_adreno_progress(&submitted,&completed);
     const uint64_t current=now(nullptr);
+    pollDelayMs_=pollPolicy_.delayMs(current,submitted,completed);
     observation_.sample(current,submitted,completed,progress);
     bool timeout=watchdog_.sample(current,submitted,completed,500000);
     bool unreadable=false;
@@ -1398,6 +1412,8 @@ void A640State::poll()
 
 void A640State::dump() const
 {
+    IOLog("NabuGPU: completion polled_calls=%llu fence_callbacks=%llu gic_connected=0\n",
+        polledIrqCalls_,fenceCallbacks_);
     const auto &power=failureCaptured_?failedPowerReport_:power_.report();
     const auto &gmu=failureCaptured_?failedGmuReport_:gmu_.report();
     IOLog("NativeAdrenoA6xx: step=%u status=%08x cp_fence=%u/%u readback=%08x irq=%08x cp=%08x protect=%08x\n",
@@ -1472,8 +1488,8 @@ void hardwareWorker(void *,wait_result_t)
         return;
     }
     for(;;) {
-        IOSleep(10);
         state->poll();
+        IOSleep(state->pollDelayMs());
     }
 }
 void registrationEntry(void *argument,wait_result_t result)

@@ -1,0 +1,172 @@
+"""A640-era nabu USB register order, level IRQ handoff and read-only fault capture."""
+from pathlib import Path
+import json
+import shutil
+import subprocess
+
+DEVICE=Path(__file__).resolve().parents[1]
+
+def compile_run(tmp_path,name,text):
+    cpp=tmp_path/(name+'.cpp');exe=tmp_path/name;cpp.write_text(text)
+    subprocess.run([shutil.which('clang++') or 'c++','-std=c++17','-O1','-g','-pthread',
+        '-Wall','-Wextra','-Werror','-Wno-misleading-indentation','-Wno-unused-parameter',
+        '-fsanitize=address,undefined','-fno-sanitize-recover=all',
+        '-I',str(DEVICE/'package'),str(cpp),'-o',str(exe)],check=True)
+    result=subprocess.run([str(exe)],check=True,capture_output=True,text=True,timeout=10)
+    (tmp_path/(name+'.log')).write_text(result.stdout+result.stderr)
+    return result.stdout
+
+def check_mmio_snapshot_and_clocks(tmp_path):
+    code=r'''
+#include <cassert>
+#include <cstdint>
+#include <cstdio>
+#include <map>
+#include <vector>
+#include "NabuUsbDma.h"
+#include "NabuUsb2Core.h"
+struct Pair {
+ std::vector<unsigned> events;uint32_t low=0,high=0;bool committed=false;
+ uint32_t read32(uint32_t o){events.push_back(o);return o==0x18?low:high;}
+ void write32(uint32_t o,uint32_t v){events.push_back(o);if(o==0x18)low=v;else {assert(o==0x1c);high=v;committed=true;}}
+ void readBarrier(){events.push_back(1);}void writeBarrier(){events.push_back(2);}void complete(){assert(committed);events.push_back(3);}
+};
+struct Bus {
+ std::map<std::pair<nabu::UsbBlock,uint32_t>,uint32_t> registers;
+ std::vector<uint32_t> reads;unsigned writes=0;bool clockStuck=false;
+ uint32_t read(nabu::UsbBlock b,uint32_t o){assert(o<0x10000 && !(o&3));reads.push_back(o);return registers[{b,o}];}
+ void write(nabu::UsbBlock b,uint32_t o,uint32_t v){++writes;if(!(clockStuck && b==nabu::UsbBlock::Scratch && o==0x28))registers[{b,o}]=v;}
+ void delayUs(unsigned){}void checkpoint(const char*){}
+ void core(uint32_t o,uint32_t v){registers[{nabu::UsbBlock::Core,o}]=v;}
+};
+int main(){
+ Pair pair;nabu::usbWriteRegister64(pair,0x18,0x12345678abcdef01ull);
+ assert(pair.events==std::vector<unsigned>({2,0x18,2,0x1c,3}));
+ pair.events.clear();assert(nabu::usbReadRegister64(pair,0x18)==0x12345678abcdef01ull);
+ assert(pair.events==std::vector<unsigned>({0x18,1,0x1c,1}));
+ // Existing DMA attributes remain explicit; changing only the SMMU cannot
+ // remove a CPU-side cacheable alias or establish hardware snooping.
+ const uint64_t pte=nabu::usbIdentityBlock(3);
+ assert(((pte>>2)&7)==0 && ((pte>>8)&3)==3 && (pte&(1u<<10)));
+ Bus bus;bus.core(0,0x40);bus.core(4,2u<<24);bus.core(0x18,0x1000);
+ bus.core(0x40,0);bus.core(0x44,0);bus.core(0x458,0xdeadbeef);
+ bus.core(0x440,0x0e000663);bus.core(0x450,0x200);bus.core(0x1020,3);
+ bus.core(0x1028,1);bus.core(0x1038,0xabc00008);bus.core(0x103c,1);
+ nabu::Usb2Core<Bus> core(bus);auto s=core.snapshot();
+ assert(s.valid && s.runtimeValid && s.haltPending() && s.iman==3);
+ assert(s.port[0]==0x0e000663 && ((s.port[0]>>5)&15)==3 && ((s.port[0]>>10)&15)==1);
+ assert(s.erdpHi==1 && s.erdpLo==0xabc00008 && !bus.writes);
+ bus.core(0x44,1);assert(!core.snapshot().haltPending());
+ bus.core(0x18,0xffffffe0);s=core.snapshot();assert(s.valid && !s.runtimeValid && !bus.writes);
+ bus.core(0,0xff);assert(!core.snapshot().valid);
+ nabu::UsbHostReportPolicy reports;s.valid=true;s.command=1;s.status=0;
+ assert(reports.sample(0,s,false));s.port[0]^=0x60;
+ assert(!reports.sample(250,s,false) && reports.sample(1000,s,false));
+ assert(!reports.sample(2000,s,false) && !reports.sample(9999,s,true));
+ assert(reports.sample(11000,s,true));
+ Bus clocks;clocks.core(0xc120,0x33310000);clocks.core(0xc1a0,0x3137302a);
+ clocks.registers[{nabu::UsbBlock::Scratch,0x28}]=0xa5000001;
+ nabu::Usb2Core<Bus> boot(clocks);assert(boot.selectUtmiHost());
+ assert(clocks.read(nabu::UsbBlock::Scratch,0x28)==0xa5000019);
+ Bus stuck;stuck.clockStuck=true;nabu::Usb2Core<Bus> failed(stuck);
+ assert(!failed.selectUtmiHost() && failed.failedOffset()==0x28 && failed.failedMask()==0x18);
+ puts("PASS low/high MMIO ordering, read-only bounded snapshots, U3/halt decoding, rate limits and stock RAM clocks");
+}
+'''
+    assert 'PASS' in compile_run(tmp_path,'usb-registers',code)
+
+IRQ_PREFIX=r'''
+#include <cassert>
+#include <cstdint>
+#include <cstdio>
+#include <atomic>
+#include <thread>
+using IOReturn=int;enum{kIOReturnSuccess=0,kIOReturnNoInterrupt=1,kIOReturnNoResources=2};
+enum{kIOInterruptTypeLevel=1};
+struct OSObject{};class IOService;
+static thread_local bool interruptContext=false;
+struct Platform {bool atInterruptLevel(){return interruptContext;}};
+[[maybe_unused]] static void IODelay(unsigned){std::this_thread::yield();}
+using IOInterruptAction=void(*)(OSObject*,void*,IOService*,int);
+class IOService:public OSObject {
+public:
+ static Platform *getPlatform(){static Platform platform;return &platform;}
+ virtual IOReturn getInterruptType(int,int*){return 0;}
+ virtual IOReturn registerInterrupt(int,OSObject*,IOInterruptAction,void*){return 0;}
+ virtual IOReturn unregisterInterrupt(int){return 0;}
+ virtual IOReturn enableInterrupt(int){return 0;}
+ virtual IOReturn disableInterrupt(int){return 0;}
+};
+#define OSDeclareDefaultStructors(T)
+[[maybe_unused]] static void IOLog(const char*,...){}
+constexpr uint32_t irq=165;
+static void(*callback)(void*)=nullptr;static bool masked=true,pending=true,storm=false,failUnmask=false;
+static unsigned handlers=0,maskCalls=0,unmaskCalls=0;
+static void deliver(){interruptContext=true;callback(nullptr);interruptContext=false;}
+static int armcpu_spi_mask(uint32_t n,bool mask){assert(n==165);if(mask)++maskCalls;else ++unmaskCalls;
+ if(!mask && failUnmask)return 7;masked=mask;return 0;}
+static int armcpu_spi_attach(uint32_t n,bool edge,void(*fn)(void*),void*,uint32_t *config,uint64_t *route){
+ assert(n==165 && !edge);callback=fn;masked=false;
+ // Model an asserted GIC level line arriving BEFORE attach returns.
+ for(unsigned i=0;i<8 && !masked && pending;++i)deliver();
+ if(!masked && pending){storm=true;return 8;}
+ if(config)*config=0xa001;if(route)*route=0;return 0;
+}
+'''
+IRQ_TAIL=r'''
+static bool filterAccept=true;
+static std::atomic<bool> holdPrimary{false},entered{false},finish{false};
+static void action(OSObject*,void*,IOService *source,int){++handlers;
+ if(holdPrimary.load()){entered.store(true);while(!finish.load())std::this_thread::yield();}
+ if(filterAccept)source->disableInterrupt(0); // exact XNU level/filter ownership.
+ else pending=false;
+}
+int main(){
+ NabuXhciNub nub;OSObject owner;const auto status=nub.registerInterrupt(0,&owner,action,nullptr);
+#if !REPAIRED
+ assert(storm && status==8 && !handlers);
+ puts("PASS old registration's asserted level interrupt window reproduced");return 0;
+#else
+ assert(!status && !storm && masked && !handlers && usbIrqs.inactive==1);
+ assert(!nub.enableInterrupt(0) && !masked);deliver();
+ assert(handlers==1 && masked && usbIrqs.forwarded==1);
+ unsigned unmaskBefore=unmaskCalls;deliver();
+ assert(handlers==1 && masked && unmaskCalls==unmaskBefore);
+ assert(!nub.enableInterrupt(0));filterAccept=false;deliver();
+ assert(handlers==2 && !masked); // rejecting filter must not be force-masked.
+ failUnmask=true;assert(nub.enableInterrupt(0)==7);deliver();
+ assert(handlers==2 && masked && usbIrqs.errors==1);
+ assert(!nub.unregisterInterrupt(0));deliver();assert(handlers==2 && masked);
+ failUnmask=false;filterAccept=true;holdPrimary=true;
+ assert(!nub.registerInterrupt(0,&owner,action,nullptr) && !nub.enableInterrupt(0));
+ std::thread primaryThread([]{deliver();});while(!entered.load())std::this_thread::yield();
+ std::atomic<bool> unregistered{false};
+ std::thread teardown([&]{assert(!nub.unregisterInterrupt(0));unregistered=true;});
+ while(__atomic_load_n(&active,__ATOMIC_SEQ_CST)!=nullptr)std::this_thread::yield();
+ assert(!unregistered.load());finish=true;primaryThread.join();teardown.join();
+ assert(unregistered && !usbIrqs.inFlight && handlers==3 && masked);
+ puts("PASS actual nub: registration IRQ window, level filter ownership, no eager re-enable, mask errors and concurrent unregister quiescence");
+#endif
+}
+'''
+
+def nub_code(text):
+    start=text.index('class NabuXhciNub;')
+    end=text.index('OSDefineMetaClassAndStructors(NabuXhciNub',start)
+    return text[start:end].replace('asm volatile("dmb ish":::"memory");',
+                                  'std::atomic_thread_fence(std::memory_order_seq_cst);')
+
+def check_actual_level_irq_nub_and_old_window(tmp_path):
+    current=(DEVICE/'package/NabuUsbHost.cpp').read_text()
+    compile_run(tmp_path,'usb-irq-new','#define REPAIRED 1\n'+IRQ_PREFIX+nub_code(current)+IRQ_TAIL)
+    old=subprocess.check_output(['git','show','9488928:devices/nabu/package/NabuUsbHost.cpp'],cwd=DEVICE,text=True)
+    compile_run(tmp_path,'usb-irq-old','#define REPAIRED 0\n'+IRQ_PREFIX+nub_code(old)+IRQ_TAIL)
+
+def check_original_abi_and_diagnostic_claims():
+    abi=json.loads((DEVICE/'scripts/usb-xhci-26C5035r.json').read_text())
+    assert abi['slots'][292]['symbols']==['__ZNK22AppleUSBHostController17defaultPowerStateEv']
+    assert 'regRead64' in abi['slots'][419]['symbols'][0] and 'regWrite64' in abi['slots'][421]['symbols'][0]
+    source=(DEVICE/'package/NabuUsbHost.cpp').read_text()
+    assert 'coherent-identity=' not in source and 'coherence=unverified' in source
+    primary=source[source.index('static void primary('):source.index('public:',source.index('static void primary('))]
+    assert 'IOLog(' not in primary and 'IOSleep(' not in primary

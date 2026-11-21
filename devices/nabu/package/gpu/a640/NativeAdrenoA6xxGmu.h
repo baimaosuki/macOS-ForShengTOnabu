@@ -29,8 +29,8 @@ struct NativeAdrenoA6xxGmuConfig {
  * commands, then requires real firmware acknowledgements for FW_VER, the
  * performance table, bandwidth table, ECP feature control and core start. Its
  * four-header HFI table includes the disabled dispatch queue and needs at least
- * 0x5000 mapped bytes (0x40e0 used). The HFI vote selects GPU level 1
- * (257 MHz) and bandwidth level 1 from the two-entry table. GPU OOB powers GX
+ * 0x5000 mapped bytes (0x40e0 used). The HFI vote selects the requested common
+ * nabu OPP and its stock DDR usecase (default 585 MHz/usecase11). GPU OOB powers GX
  * and H2F_MSG_START follows
  * as adreno_start does for A640. poll reads the GMU fault registers and drains
  * bounded response/debug queue contents while the service owns the device.
