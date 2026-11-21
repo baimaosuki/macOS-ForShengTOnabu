@@ -2,6 +2,14 @@
 #pragma once
 #include "NabuUsbSmmu.h"
 namespace nabu {
+// Owned rings and transfer buffers must use Normal-NC on this non-snooping
+// USB master. Do not combine a requested cache mode with the caller's mode.
+inline uint32_t usbBufferOptions(uint32_t options) {
+    return (options&~0xf00u)|0x400u; // kIOMapCacheMask / kIOMapWriteCombineCache
+}
+// SMMUv2 FSR[10] is RES0, not an architectural fault indication. Retain the
+// raw register in diagnostics, but only real faults should trigger reporting.
+inline uint32_t usbContextFaults(uint32_t fsr) {return fsr&0xc00001feu;}
 // The USB controller is halted before changing its exact SID mapping. Never
 // reuse a firmware/shared bypass context. WB/shareable SMMU attributes alone
 // do not prove the USB master can snoop CPU caches.
@@ -48,6 +56,14 @@ template<class Io> uint64_t usbReadRegister64(Io &io,uint32_t offset) {
     const uint32_t low=io.read32(offset);io.readBarrier();
     const uint32_t high=io.read32(offset+4);io.readBarrier();
     return uint64_t(high)<<32|low;
+}
+template<class Io> uint32_t usbReadRegister32(Io &io,uint32_t offset) {
+    const uint32_t value=io.read32(offset);io.readBarrier();return value;
+}
+template<class Io> void usbWriteRegister32(Io &io,uint32_t offset,uint32_t value) {
+    // Publish Normal-NC TRBs/data before the doorbell, and finish control
+    // register writes before subsequent polling or power-state transitions.
+    io.writeBarrier();io.write32(offset,value);io.complete();
 }
 template<class Io> void usbWriteRegister64(Io &io,uint32_t offset,uint64_t value) {
     io.writeBarrier();io.write32(offset,uint32_t(value));

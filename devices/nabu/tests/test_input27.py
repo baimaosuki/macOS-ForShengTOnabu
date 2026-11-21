@@ -5,7 +5,8 @@ import shutil
 import pytest
 from usb_runtime27 import (check_mmio_snapshot_and_clocks,
                           check_actual_level_irq_nub_and_old_window,
-                          check_original_abi_and_diagnostic_claims)
+                          check_original_abi_and_diagnostic_claims,
+                          check_actual_dma_allocation_and_failure_paths)
 DEVICE=Path(__file__).resolve().parents[1]
 
 def test_usb_mmio_snapshot_and_clocks(tmp_path):
@@ -16,6 +17,9 @@ def test_usb_level_irq_and_registration_window(tmp_path):
 
 def test_usb_original_abi_and_diagnostics():
     check_original_abi_and_diagnostic_claims()
+
+def test_usb_dma_allocation_and_failures(tmp_path):
+    check_actual_dma_allocation_and_failure_paths(tmp_path)
 @pytest.mark.parametrize('source',['test_input_hardware27.cpp','test_touch_pointer27.cpp'])
 def test_input_algorithms(tmp_path,source):
     compiler=shutil.which('c++') or shutil.which('clang++-17')

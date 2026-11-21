@@ -2573,6 +2573,8 @@
     "__ZN12AppleUSBXHCIC2EPK11OSMetaClass": "0xfffffe000b454978",
     "__ZN12AppleUSBXHCID2Ev": "0xfffffe000b4549e8",
     "__ZN12AppleUSBXHCI10gMetaClassE": "0xfffffe000cc7c3f8",
-    "__ZTV12AppleUSBXHCI": "0xfffffe0008a0dc60"
+    "__ZTV12AppleUSBXHCI": "0xfffffe0008a0dc60",
+    "_nabu_usb_dma_with_service": "0xfffffe000b2c8ee0",
+    "_nabu_usb_dma_aligned_mapper": "0xfffffe000b25b838"
   }
 }

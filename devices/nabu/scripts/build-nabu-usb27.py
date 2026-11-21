@@ -9,6 +9,8 @@ def header(abi):
     text='''// Generated from original 26C5035r class, plain arm64 ABI.
 #pragma once
 #include <IOKit/IOService.h>
+#include <IOKit/IOBufferMemoryDescriptor.h>
+#include <IOKit/IODMACommand.h>
 class AppleUSBXHCI : public IOService {
  OSDeclareDefaultStructors(AppleUSBXHCI)
  unsigned char originalPrivate[0xf88-sizeof(IOService)];
@@ -38,7 +40,12 @@ public:
  IOReturn powerStateWillChangeTo(IOPMPowerFlags,unsigned long,IOService *) override;
  IOReturn powerStateDidChangeTo(IOPMPowerFlags,unsigned long,IOService *) override;
 '''
-    methods={292:'uint32_t desiredPower()',419:'uint64_t regRead64(void *,uint32_t)',421:'void regWrite64(void *,uint32_t,uint64_t)'}
+    methods={286:'IOReturn lowerOnePowerStateTo(unsigned long)',292:'uint32_t desiredPower()',
+        335:'IOBufferMemoryDescriptor *createIOBuffer(uint32_t,uint64_t)',
+        336:'IODMACommand *getDMACommand(uint32_t,uint32_t)',
+        342:'uint32_t getBufferOptions(uint32_t) const',
+        418:'uint32_t regRead32(void *,uint32_t)',419:'uint64_t regRead64(void *,uint32_t)',
+        420:'void regWrite32(void *,uint32_t,uint32_t)',421:'void regWrite64(void *,uint32_t,uint64_t)'}
     for i in range(272,427):
         text+=' virtual '+methods.get(i,f'void opaque{i}()')+';\n'
     return text+'};\nstatic_assert(sizeof(AppleUSBXHCI)==0xf88,"original XHCI instance");\n'

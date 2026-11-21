@@ -16,6 +16,14 @@ int armcpu_spi_attach(uint32_t,bool,void (*)(void *),void *,uint32_t *,uint64_t 
 int armcpu_spi_mask(uint32_t,bool);
 kern_return_t OSKextLoadKextWithIdentifier(const char *);
 extern kmod_info_t g_kernel_kmod_info;
+// Exact 26C5035r native factory/callback bindings. Keep Apple's DMACommand
+// subclass, mapper sessions, segment limits and teardown; change only the
+// coherency contract passed to its factory.
+IODMACommand *nabu_usb_dma_with_service(IODMACommand::SegmentFunction,
+    bool (*)(OSObject *,IODMACommand::Segment64,uint32_t,bool),IOService *,
+    IODMACommand::MappingOptions,void *);
+bool nabu_usb_dma_aligned_mapper(OSObject *,IODMACommand::Segment64,uint32_t,bool);
+unsigned int pmap_cache_attributes(unsigned int);
 void nabu_usb_static_init(void) __asm__("__GLOBAL__sub_I_NabuUsbHost.cpp");
 }
 namespace {
@@ -196,10 +204,55 @@ struct UsbRegisterIo {
     void writeBarrier() {asm volatile("dmb oshst":::"memory");}
     void complete() {asm volatile("dsb sy":::"memory");}
 };
+static_assert(kIOMapCacheMask==0xf00 && kIOMapWriteCombineCache==0x400,"USB cache ABI");
+namespace {void reportRuntime(const nabu::UsbHostSnapshot &);}
 class NabuUsbXhci : public AppleUSBXHCI {
     OSDeclareDefaultStructors(NabuUsbXhci)
 public:
     uint32_t desiredPower() override {return 3;}
+    uint32_t getBufferOptions(uint32_t options) const override {
+        return nabu::usbBufferOptions(AppleUSBXHCI::getBufferOptions(options));
+    }
+    IOBufferMemoryDescriptor *createIOBuffer(uint32_t options,uint64_t size) override {
+        // Preserve native allocation address masks/alignment and capabilities.
+        const uint32_t nc=nabu::usbBufferOptions(options);
+        auto *buffer=AppleUSBXHCI::createIOBuffer(nc,size);
+        static uint32_t reports=0;const auto sample=__atomic_fetch_add(&reports,1,__ATOMIC_RELAXED);
+        if(sample<8 || !buffer) {
+            uint64_t span=0;const uint64_t pa=buffer?buffer->getPhysicalSegment(0,&span,0):0;
+            IOLog("NABU USB: buffer bytes=%llu options=%08x PA=%llx span=%llu cpu_cache=%x policy=Normal-NC allocated=%u\n",
+                size,nc,pa,span,pa?pmap_cache_attributes(unsigned(pa>>PAGE_SHIFT)):~0u,buffer!=nullptr);
+        }
+        return buffer;
+    }
+    IODMACommand *getDMACommand(uint32_t,uint32_t) override {
+        // Native 26C5035r uses OutputHost64 + alignedMapper for all caller
+        // options, but hard-codes kMapped. kNonCoherent makes prepare/complete
+        // clean/invalidate borrowed buffers as well as any bounce buffers.
+        auto *command=nabu_usb_dma_with_service(kIODMACommandOutputHost64,
+            nabu_usb_dma_aligned_mapper,this,IODMACommand::kNonCoherent,nullptr);
+        static uint32_t reports=0;const auto sample=__atomic_fetch_add(&reports,1,__ATOMIC_RELAXED);
+        if(sample<4 || !command)IOLog("NABU USB: DMACommand mapping=noncoherent prepare=clean complete=invalidate allocated=%u\n",command!=nullptr);
+        return command;
+    }
+    IOReturn lowerOnePowerStateTo(unsigned long state) override {
+        // Capture the actual transition, rather than inferring halt from a
+        // 250ms poll after native recovery has already re-enabled RS.
+        nabu::Usb2Core<Hardware> core(hardware);const auto before=core.snapshot();
+        const auto result=AppleUSBXHCI::lowerOnePowerStateTo(state);const auto after=core.snapshot();
+        IOLog("NABU USB: power target=%lu result=%08x before_CMD=%08x before_STS=%08x after_CMD=%08x after_STS=%08x\n",
+            state,result,before.command,before.status,after.command,after.status);
+        if(result!=kIOReturnSuccess)reportRuntime(after);
+        return result;
+    }
+    uint32_t regRead32(void *base,uint32_t off) override {
+        UsbRegisterIo io{reinterpret_cast<volatile uint32_t *>(base)};
+        return nabu::usbReadRegister32(io,off);
+    }
+    void regWrite32(void *base,uint32_t off,uint32_t value) override {
+        UsbRegisterIo io{reinterpret_cast<volatile uint32_t *>(base)};
+        nabu::usbWriteRegister32(io,off,value);
+    }
     uint64_t regRead64(void *base,uint32_t off) override {
         UsbRegisterIo io{reinterpret_cast<volatile uint32_t *>(base)};
         return nabu::usbReadRegister64(io,off);
@@ -284,7 +337,7 @@ void worker(void *,wait_result_t){
     for(;;){
         const auto hostState=core.snapshot();
         uint32_t usbFault=0;
-        if(hardware.dmaReady)usbFault=hardware.smmu.read(nabu_usb::smmu::context_offset(hardware.dmaGlobalPages,hardware.dmaBank)+0x58);
+        if(hardware.dmaReady)usbFault=nabu::usbContextFaults(hardware.smmu.read(nabu_usb::smmu::context_offset(hardware.dmaGlobalPages,hardware.dmaBank)+0x58));
         if(reports.sample(diagnosticMs,hostState,usbFault || (hostState.status&0x1004) ||
             (hostState.runtimeValid && (hostState.iman&3)==1)))reportRuntime(hostState);
         uint8_t cc=0,plugin=0,cmd=0,fault=0;auto e=vbus.status(cc,plugin,cmd,fault);

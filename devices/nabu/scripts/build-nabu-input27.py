@@ -51,7 +51,7 @@ def qualify(raw,macho,klass,family,abi,required):
             bindings[n]=target
         elif i>=abi['base_slots']:raise ValueError(f'{klass}: unexpected native slot {i}: {n}')
     if not set(required)<=set(own):raise ValueError(f'{klass}: missing overrides {set(required)-set(own)}')
-    undefined={n for n,v,k in sy if k==1 and f'{len(family)}{family}' in n}
+    undefined={n for n,v,k in sy if k==1 and (f'{len(family)}{family}' in n or n in bindings)}
     if not undefined<=set(bindings):raise ValueError(f'{klass}: unbound native imports {undefined-set(bindings)}')
     return {n:bindings[n] for n in undefined},own
 
@@ -93,7 +93,7 @@ def build(root,out,compile_cpp,run,llvm,triple,sdk,macho):
     objects=[];bindings={};report={}
     configurations=[('NabuTouch','NabuTouchHid','IOHIDDevice',hid,[0,1,7,22,190,191,275,277,284]),
         ('NabuPowerKey','NabuPowerHid','IOHIDDevice',hid,[0,1,7,22,190,191,275,277,284]),
-        ('NabuUsbHost','NabuUsbXhci','AppleUSBXHCI',usb,[0,1,7,292,419,421])]
+        ('NabuUsbHost','NabuUsbXhci','AppleUSBXHCI',usb,[0,1,7,286,292,335,336,342,418,419,420,421])]
     for source,klass,family,abi,required in configurations:
         path=root/'kits/nabu'/(source+'.cpp');obj=out/(source+'.o')
         compile_cpp(path,obj,extra=['-I',str(out),'-fno-c++-static-destructors'])
