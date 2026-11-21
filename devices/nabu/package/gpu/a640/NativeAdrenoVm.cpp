@@ -554,6 +554,18 @@ IOReturn NativeAdrenoVm::sampleWord(uint64_t iova,uint32_t *cached,uint32_t *dra
     }
     return kIOReturnBadArgument;
 }
+IOReturn NativeAdrenoVm::describeAddress(uint64_t iova,NativeAdrenoVmAddress *out) const
+{
+    if(!out || !attached_ || poisoned_ || (iova&3))return kIOReturnBadArgument;
+    *out={};
+    const Mapping *record=findAddressRecord(iova);
+    if(!record || record->mapped_spans!=record->spans || !record->memory->mapping())
+        return kIOReturnBadArgument;
+    out->handle=record->handle;out->base=record->iova;out->bytes=record->memory->bytes();
+    out->offset=size_t(iova-record->iova);out->jobs=record->jobs;
+    out->owned=!record->memory->imported();
+    return kIOReturnSuccess;
+}
 IOReturn NativeAdrenoVm::peekWords(uint64_t iova,uint32_t *out,size_t count) const
 {
     if(!out || !attached_ || poisoned_)return kIOReturnBadArgument;

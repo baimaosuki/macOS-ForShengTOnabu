@@ -109,6 +109,7 @@ jobs:
             out/nabu27-gpu-page-policy-host/
             out/nabu27-gpu-ownership-host/
             out/nabu27-gpu-fault-host/
+            out/nabu27-gpu-stall-host/
             out/nabu27-gpu-view-cache-host/
             out/nabu27-gpu-cpumap-host/
             out/nabu27-touch-events-host/
@@ -216,6 +217,7 @@ jobs:
             out/nabu27-gpu-userspace/cpu-policy-verification.json
             out/nabu27-gpu-userspace/bridge-cache-verification.json
             out/nabu27-gpu-userspace/render-failure-verification/
+            out/nabu27-gpu-userspace/substream-failure-verification/
             out/nabu27-gpu-userspace/prepared.json
             out/nabu27-gpu-userspace/tree/nabu-runtime-inputs.json
             out/nabu27-gpu-userspace/tree/build/adreno-metal-plugin-macos27/

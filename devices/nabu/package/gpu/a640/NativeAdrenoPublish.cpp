@@ -34,6 +34,7 @@
 #include "NativeAdrenoScheduler.h"
 #include "NabuGpuProblemLog.h"
 #include "NabuGpuKernelInterfaces.h"
+#include "NabuGpuActiveIb.h"
 
 static NativeAdrenoIntegration integration = {};
 extern "C" kmod_info_t g_kernel_kmod_info;
@@ -2098,7 +2099,7 @@ extern "C" void native_adreno_metal_dump_stats(void)
     IOLog("NativeAdrenoMetal: end\n");
 }
 
-extern "C" void native_adreno_fault(void)
+extern "C" void native_adreno_fault_snapshot(const NabuGpuCpFault *fault)
 {
     if(!g.published || !g.lock) {
         return;
@@ -2109,11 +2110,31 @@ extern "C" void native_adreno_fault(void)
         g.status.noteFault();
         g.ring->recordFault();
     }
+    NabuGpuActiveIb active[2]{};
+    if(fault)for(unsigned i=0;i<2;++i)active[i]=NabuGpuCaptureActiveIb(*g.vm,fault->execution,i);
     g.submit->scheduler()->fault(kIOReturnIOError,false);
     IOLockWakeup(g.lock,&g.completionEvent,false);
     IOLockUnlock(g.lock);
+    if(fault)for(unsigned index=0;index<2;++index) {
+        const auto &ib=active[index];
+        IOLog("NabuGPU: active-ib level=%u address=%llx initial=%u remaining=%u roq=%u status=%08x handle=%llx bo=%llx bytes=%zu offset=%zu jobs=%u owned=%u bounded_words=%u cursor_hint=%u hint_valid=%u position=prefetch-estimate fence=unassigned\n",
+            index+1,ib.address,ib.initial,ib.remaining,ib.roq,ib.status,ib.mapping.handle,
+            ib.mapping.base,ib.mapping.bytes,ib.mapping.offset,ib.mapping.jobs,unsigned(ib.mapping.owned),
+            ib.boundedWords,ib.cursorHint,unsigned(ib.hintValid));
+        for(unsigned k=0;k<ib.count;++k) {
+            const auto &window=ib.windows[k];
+            IOLog("NabuGPU: active-ib-window level=%u at=%u captured=%u status=%08x\n",index+1,window.at,window.count,window.status);
+            for(unsigned j=0;j<window.count;j+=4)
+                IOLog("NabuGPU: active-ib-words level=%u at=%u n=%u data=%08x/%08x/%08x/%08x\n",
+                    index+1,window.at+j,window.count-j<4?window.count-j:4,window.words[j],
+                    j+1<window.count?window.words[j+1]:0,j+2<window.count?window.words[j+2]:0,
+                    j+3<window.count?window.words[j+3]:0);
+        }
+    }
     thread_call_enter(g.completionCall);
 }
+
+extern "C" void native_adreno_fault(void) {native_adreno_fault_snapshot(nullptr);}
 
 extern "C" void native_adreno_dma_stopped(void)
 {

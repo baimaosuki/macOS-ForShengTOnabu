@@ -3900,3 +3900,60 @@ diff --git a/src/freedreno/vulkan/tu_cs.cc b/src/freedreno/vulkan/tu_cs.cc
     VkResult result;
  
     assert(cs->mode == TU_CS_MODE_GROW);
+diff --git a/src/freedreno/vulkan/tu_cs.cc b/src/freedreno/vulkan/tu_cs.cc
+--- a/src/freedreno/vulkan/tu_cs.cc
++++ b/src/freedreno/vulkan/tu_cs.cc
+@@ -364,8 +364,8 @@
+       cs->start += (size - tu_cs_get_offset(cs)) % size;
+    }
+    if (result != VK_SUCCESS) {
+-      /* Freshly declared, nothing owned yet so safe to zero. */
+-      memset(sub_cs, 0, sizeof(*sub_cs));
++      tu_cs_init_external(sub_cs, cs->device, tu_cs_fail_sink,
++                          tu_cs_fail_sink + TU_CS_FAIL_SINK_SIZE, 0, cs->writeable);
+       tu_cs_fail(sub_cs, result);
+       return result;
+    }
+diff --git a/src/freedreno/vulkan/tu_cs.h b/src/freedreno/vulkan/tu_cs.h
+--- a/src/freedreno/vulkan/tu_cs.h
++++ b/src/freedreno/vulkan/tu_cs.h
+@@ -326,8 +326,8 @@
+ 
+    VkResult result = tu_cs_alloc(sub_cs, size, 1, &memory);
+    if (result != VK_SUCCESS) {
+-      /* Freshly declared, nothing owned yet so safe to zero. */
+-      memset(cs, 0, sizeof(*cs));
++      tu_cs_init_external(cs, sub_cs->device, tu_cs_fail_sink,
++                          tu_cs_fail_sink + TU_CS_FAIL_SINK_SIZE, 0, sub_cs->writeable);
+       tu_cs_fail(cs, result);
+       return (struct tu_draw_state) {};
+    }
+diff --git a/src/freedreno/vulkan/tu_pipeline.cc b/src/freedreno/vulkan/tu_pipeline.cc
+--- a/src/freedreno/vulkan/tu_pipeline.cc
++++ b/src/freedreno/vulkan/tu_pipeline.cc
+@@ -4265,7 +4265,11 @@
+        !(cmd->state.pipeline_draw_states & (1u << id))) {                     \
+       unsigned size = tu6_##name##_size<CHIP>(cmd->device, __VA_ARGS__);      \
+       if (size > 0) {                                                         \
+-         tu_cs_begin_sub_stream(&cmd->sub_cs, size, &cs);                     \
++         VkResult result = tu_cs_begin_sub_stream(&cmd->sub_cs, size, &cs); \
++         if (result != VK_SUCCESS) {                                        \
++            vk_command_buffer_set_error(&cmd->vk, result);                  \
++            return dirty_draw_states;                                       \
++         }                                                                  \
+          tu6_emit_##name<CHIP>(&cs, __VA_ARGS__);                             \
+          cmd->state.dynamic_state[id] =                                       \
+             tu_cs_end_draw_state(&cmd->sub_cs, &cs);                          \
+@@ -4288,7 +4292,11 @@
+       } else {                                                                \
+          unsigned size = tu6_##name##_size<CHIP>(cmd->device, __VA_ARGS__);   \
+          if (size > 0) {                                                      \
+-            tu_cs_begin_sub_stream(&cmd->sub_cs, size, &cs);                  \
++            VkResult result = tu_cs_begin_sub_stream(&cmd->sub_cs, size, &cs);\
++            if (result != VK_SUCCESS) {                                     \
++               vk_command_buffer_set_error(&cmd->vk, result);               \
++               return dirty_draw_states;                                    \
++            }                                                               \
+             tu6_emit_##name<CHIP>(&cs, __VA_ARGS__);                          \
+             cmd->state.dynamic_state[id] =                                    \
+                tu_cs_end_draw_state(&cmd->sub_cs, &cs);                       \

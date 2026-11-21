@@ -38,6 +38,8 @@ def main():
                         str(ROOT / 'devices/nabu/tests/test_input_hardware27.cpp'), '-o', str(test)], check=True)
         subprocess.run([str(test)], check=True)
     subprocess.run([sys.executable, str(ROOT / 'devices/nabu/tests/test_power_hold27.py')], check=True)
+    subprocess.run([sys.executable,str(ROOT / 'devices/nabu/tests/check-gpu-stall27.py'),
+                    '--output',str(ROOT / 'out/nabu27-gpu-stall-host')],check=True)
     subprocess.run([sys.executable, str(ROOT / 'devices/nabu/tests/check-gpu-smmu27.py'),
                     '--output', str(ROOT / 'out/nabu27-gpu-smmu-host')], check=True)
     subprocess.run([sys.executable, str(ROOT / 'devices/nabu/tests/check-gpu-profile27.py'),

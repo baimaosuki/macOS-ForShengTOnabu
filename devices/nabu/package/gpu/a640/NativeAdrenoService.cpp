@@ -41,6 +41,7 @@ extern "C" IOReturn native_adreno_initialize_classes(void);
 extern "C" IOReturn native_adreno_publish(NativeAdrenoVm *,NativeAdrenoSubmit *,NativeAdrenoRing *,
     const NativeAdrenoRingClock *,const NativeAdrenoTimer *,const NativeAdrenoAbiDeviceInfo *,uint32_t,uint32_t);
 extern "C" void native_adreno_fault(void);
+extern "C" void native_adreno_fault_snapshot(const NabuGpuCpFault *);
 extern "C" void native_adreno_dma_stopped(void);
 extern "C" void native_adreno_gpu_interrupt(bool failed);
 extern "C" int native_adreno_progress(uint32_t *,uint32_t *);
@@ -338,6 +339,7 @@ class A640State final {
     NativeAdrenoAbiDeviceInfo info_{};
     NabuMetalObservation observation_;
     NabuGpuWatchdog watchdog_;
+    NabuGpuStallConfirmation stallConfirmation_;
 #endif
     NativeAdrenoIrq irq_;
     NabuGpuFaultCapture cpFault_;
@@ -1125,6 +1127,17 @@ IOReturn A640State::startCp()
     return kIOReturnSuccess;
 }
 
+static void nabuLogExecution(const char *sample,const NabuGpuExecutionState &state,uint64_t interval)
+{
+    const auto *w=state.words;
+    IOLog("NabuGPU: execution sample=%s interval_us=%llu valid=%x rptr=%u wptr=%u rbbm=%08x status1=%08x status2=%08x status3=%08x cp_status1=%08x sqe_cntl=%08x\n",
+        sample,interval,state.valid,w[0],w[1],w[12],w[13],w[14],w[15],w[16],w[17]);
+    IOLog("NabuGPU: execution-ib sample=%s ib1=%08x:%08x rem=%u initial=%u roq=%08x ib2=%08x:%08x rem=%u initial=%u roq=%08x\n",
+        sample,w[3],w[2],w[4],w[8],w[10],w[6],w[5],w[7],w[9],w[11]);
+    IOLog("NabuGPU: execution-busy sample=%s sp=%u tp=%u rb=%u uche=%u cp=%u smmu_stalled=%u busy_bits_not_progress=1\n",
+        sample,(w[12]>>18)&1,(w[12]>>19)&1,(w[12]>>7)&1,(w[12]>>17)&1,(w[12]>>2)&1,(w[15]>>24)&1);
+}
+
 IOReturn A640State::fail(IOReturn status)
 {
     NativeAdrenoGpuProfile::fault();
@@ -1143,13 +1156,15 @@ IOReturn A640State::fail(IOReturn status)
 #if defined(NABU_GPU_METAL) && NABU_GPU_METAL
     /* No-op before a publish; afterwards it marks the published core failed so
      * a mounted client cannot keep opening it. */
-    native_adreno_fault();
+    NabuGpuCpFault captured{};
+    native_adreno_fault_snapshot(cpFault_.snapshot(&captured)?&captured:nullptr);
 #endif
     // Capture was made at the first failing IRQ, before stopping/resetting CP.
     // The worker prints one compact record; bootstrap fence stats stay labelled
     // separately from the live ring values at this failure.
     NabuGpuCpFault cpFault{};
     if(cpFault_.snapshot(&cpFault)) {
+        nabuLogExecution("failure",cpFault.execution,0);
         IOLog("NabuGPU: first-cp-fault irq=%08x cp=%08x protect=%08x valid=%x opcode=%08x rptr=%u wptr=%u hw=%08x live_fence=%u/%u\n",
             cpFault.irq,cpFault.cp,cpFault.protect,cpFault.valid,cpFault.opcode,
             cpFault.rptr,cpFault.wptr,cpFault.hw_fault,ring_.lastSubmitted(),ring_.completedFence());
@@ -1166,7 +1181,7 @@ IOReturn A640State::fail(IOReturn status)
         if(native_adreno_ring_log_count) {
             const auto *record=native_adreno_ring_log[(native_adreno_ring_log_count-1)&3];
             const unsigned count=record[3]<112?record[3]:112;
-            IOLog("NabuGPU: fault-ring fence=%u start=%u end=%u words=%u captured=%u\n",
+            IOLog("NabuGPU: fault-ring fence=%u start=%u end=%u words=%u captured=%u role=latest-submitted-not-executing\n",
                 record[0],record[1],record[2],record[3],count);
             for(unsigned i=0;i<count;i+=4) {
                 IOLog("NabuGPU: fault-ring at=%u n=%u data=%08x/%08x/%08x/%08x\n",
@@ -1179,7 +1194,7 @@ IOReturn A640State::fail(IOReturn status)
             const auto *record=native_adreno_ib_log[slot];
             const unsigned words=native_adreno_ib_log_words[slot];
             const unsigned count=words<NabuGpuIbHeadWords?words:NabuGpuIbHeadWords;
-            IOLog("NabuGPU: fault-ib fence=%u iova=%08x:%08x bytes=%u status=%08x captured=%u\n",
+            IOLog("NabuGPU: fault-ib fence=%u iova=%08x:%08x bytes=%u status=%08x captured=%u role=latest-submitted-not-executing\n",
                 record[0],record[2],record[1],record[3],native_adreno_ib_log_status[slot],count);
             for(unsigned i=0;i<count;i+=4) {
                 IOLog("NabuGPU: fault-ib at=%u n=%u data=%08x/%08x/%08x/%08x\n",
@@ -1334,11 +1349,36 @@ void A640State::poll()
     const int progress=native_adreno_progress(&submitted,&completed);
     const uint64_t current=now(nullptr);
     observation_.sample(current,submitted,completed,progress);
-    const bool timeout=watchdog_.sample(current,submitted,completed,500000);
-    if(status || progress || timeout) {
+    bool timeout=watchdog_.sample(current,submitted,completed,500000);
+    bool unreadable=false;
+    const uint64_t elapsed=watchdog_.stalledUs(current);
+    if(!status && !progress && elapsed>=450000) {
+        const auto state=NabuGpuReadExecution(ringIo_);
+        const auto decision=stallConfirmation_.sample(current,elapsed,completed,state);
+        timeout=false;
+        if(decision!=NabuGpuStallConfirmation::Waiting) {
+            nabuLogExecution("before",stallConfirmation_.before(),0);
+            nabuLogExecution("after",state,stallConfirmation_.interval(current));
+            if(decision==NabuGpuStallConfirmation::Moving && watchdog_.executionProgress(current)) {
+                IOLog("NabuGPU: execution-progress completed=%u retries=%u limit=10 fence_not_fabricated=1\n",
+                    completed,watchdog_.executionRetries());
+                stallConfirmation_.reset();
+                return;
+            }
+            unreadable=decision==NabuGpuStallConfirmation::Unreadable;
+            timeout=!unreadable;
+            IOLog("NabuGPU: stall-confirmation result=%s interval_us=%llu execution_retries=%u\n",
+                unreadable?"read-failed":decision==NabuGpuStallConfirmation::Stopped?
+                    "execution-stationary":"execution-moving-budget-exhausted",
+                stallConfirmation_.interval(current),watchdog_.executionRetries());
+        }
+    } else if(elapsed<450000) {
+        stallConfirmation_.reset();
+    }
+    if(status || progress || timeout || unreadable) {
         IOLog("NabuGPU: stalled submitted=%u completed=%u no_progress_us=%llu limit_us=500000 progress=%x irq_failed=%u\n",
             submitted,completed,watchdog_.stalledUs(current),unsigned(progress),unsigned(status!=0));
-        if(timeout) {
+        if(timeout || unreadable) {
             cpFault_.capture(ringIo_,0,0,0);
             IOLog("NabuGPU: failure_snapshot origin=watchdog cp_irq_observed=0\n");
         }
