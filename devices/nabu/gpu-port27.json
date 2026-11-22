@@ -1,4 +1,8 @@
 {
+  "record_scope": "Historical Host build/integration snapshot; current device status is recorded in ../../STATUS.md",
+  "project_status_as_of": "2026-11-22",
+  "maintenance": "paused",
+  "gpu_device_status": "suspected/unconfirmed",
   "target": "macos-27.3-26C5035r",
   "gpu": "Adreno640v2",
   "chip_id": "0x06040001",

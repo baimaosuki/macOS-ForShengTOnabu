@@ -1,0 +1,16 @@
+# Local-only inputs for the current nabu macOS27.3 integration.
+# Paths below are relative to their environment-selected firmware directory.
+# These are filenames/requirements, not redistributed firmware.
+# Validation hashes live in scripts/unixnu/devicetree.py.
+
+# NABU_GPU_FIRMWARE_DIR
+a640_gmu.bin
+a630_sqe.fw
+a640_zap.mdt
+a640_zap.b02
+
+# NABU_TOUCH_FIRMWARE_DIR
+novatek_nt36523_k82_fw01.bin
+
+# Separate local inputs: original27.3 IPSW/kernelcache, UEFI, ROOT/Data,
+# signing material and any generated accounts. See BUILDING.md.

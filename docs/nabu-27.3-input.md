@@ -1,5 +1,8 @@
 # NABU macOS input integration
 
+> Current project status (2026-11-22): development paused; USB not working, touch working, GPU suspected/unconfirmed. This page retains historical engineering records. See [current status](https://github.com/baimaosuki/macOS-ForShengTOnabu/blob/main/STATUS.md).
+
+
 P019 includes Apple's IOUSBHostFamily, AppleUSBXHCI, IOUSBHostHIDDevice and IOHIDFamily. It does not select a Qualcomm USB controller component or start a board touch transport. Starting hidd/usbmuxd is not evidence of hardware enumeration.
 
 The board-owned `package/NabuTouch.cpp` reuses the NT36523 SE18 SPI, clock and firmware protocol from UniXNU-nabu `54b4f98457f8e9e232cc0a077c20d08d0b2f0ac9`. `build-nabu-touch27.py` binds the retained macOS 26C5035r IOHIDDevice: 334 virtual entries, IOService base 272 entries, 0xd0 instance size. The old 21H16 layout (207/168 entries) and its IOHIDEvent edge hook must not be used.

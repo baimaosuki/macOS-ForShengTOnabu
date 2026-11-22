@@ -1,5 +1,8 @@
 # NABU Adreno 640, macOS 27.3
 
+> Current project status (2026-11-22): development paused; USB not working, touch working, GPU suspected/unconfirmed. This page retains historical engineering records. See [current status](https://github.com/baimaosuki/macOS-ForShengTOnabu/blob/main/STATUS.md).
+
+
 The source target is macOS 27.3, 26C5035r, native arm64 XNU 12377.121.6 with
 Zeta ordinary-pointer PAC conversion. Do not replace the A640 hardware path
 with A740 register, HFI, firmware, voltage or bandwidth tables.

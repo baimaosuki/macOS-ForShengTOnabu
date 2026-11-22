@@ -1,5 +1,8 @@
 # NABU A640 / macOS 27.3 移植记录
 
+> Current project status (2026-11-22): development paused; USB not working, touch working, GPU suspected/unconfirmed. This page retains historical engineering records. See [current status](https://github.com/baimaosuki/macOS-ForShengTOnabu/blob/main/STATUS.md).
+
+
 目标是 26C5035r、XNU12377.121.6、arm64 + Zeta PAC。A640 后端与 A740 的寄存器、GMU/HFI、ZAP/SQE 固件及电源表分离保存。
 
 `devices/nabu/package/gpu` 已接入编译，普通启动不启用 GPU。`nabu-gpu=1` 在 IOBSD 后执行真实上电、SMMU、GMU/HFI、CP scratch 与 fence 验证；只有真实读回才报告成功。不确定 DMA 停止时保留资源。

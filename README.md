@@ -1,51 +1,42 @@
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset="assets/logo-light.svg">
-    <img alt="UniXNU" src="assets/logo-light.svg" width="200">
-  </picture>
-</p>
+# macOS on Xiaomi Pad 5 · nabu
 
-<p align="center">
-  <a href="https://unixnu.com"><img alt="Documentation" src="https://img.shields.io/badge/docs-unixnu.com-2A5BD7?logo=readthedocs&logoColor=white"></a>
-  <a href="https://t.me/unixnu"><img alt="Telegram" src="https://img.shields.io/badge/Telegram-@unixnu-26A5E4?logo=telegram&logoColor=white"></a>
-  <a href="https://qun.qq.com/universal-share/share?ac=1&authKey=Pubz23DOCY76nxjlGuSms2zesk4jRvas4zrXJRYk7omf7CprXbGQigLEI%2BCoYR8D&busi_data=eyJncm91cENvZGUiOiIxMTI2MTE2NzU5IiwidG9rZW4iOiJwSHJsUDN1UnN2Vi8yM210TjJRbzBIcERmcUpyOS9lb0hHVVpadWdvVFdScVpSYUFLT1YzTk5TWC9mN2xWYmtIIiwidWluIjoiMzE1MTEwOTc0MSJ9&data=_cJgr-jX9yJ2-GXwVjRN5FOhDyk5B-HAfIk5LSunbW_XkkmKqNXbpH33wzP93J0p9DI1fbjgBUrUfTVhwDcxjg&svctype=4&tempid=h5_group_info"><img alt="QQ Group" src="https://img.shields.io/badge/QQ%20Group-join-12B7F5?logo=qq&logoColor=white"></a>
-  <a href="https://x.com/UniXNU_new"><img alt="X" src="https://img.shields.io/badge/X-@UniXNU__new-000000?logo=x&logoColor=white"></a>
-</p>
+[English](README.en.md) · [当前状态](STATUS.md) · [源码导航](REPOSITORY.md) · [构建说明](BUILDING.md) · [上游与许可](UPSTREAM.md)
 
-<p align="center">
-  English | <a href="README.zh-CN.md">简体中文</a>
-</p>
+基于 UniXNU 的小米平板 5（**nabu / SM8150-AC / Adreno 640**）macOS 实验移植。当前目标为 **macOS 27.3 / 26C5035r**。本仓库是 nabu 的独立实验分支，由 baimaosuki 整理维护；上游项目见[致谢](UPSTREAM.md)。
 
-# UniXNU
+> **暂时停更 · 2026-11-22**
+> USB 不工作，触控工作，GPU 疑似在工作，仍缺多项驱动。恢复时间未定。
 
-> **Migration notice:** Update your device repository for shared SoC support and canonical component names. Follow the [migration guide](https://unixnu.com/porting/migration).
+## 当前实机状态
 
-An independent project to run iOS and macOS on non-Apple ARM64 hardware through UEFI. Like OpenCore, UniXNU is a general UEFI environment and driver loading system: it loads the drivers a device needs and boots the OS through a common UEFI layer.
-
-UniXNU provides shared build tools, ARM64 support, OS profiles and reusable components for ports across SoCs and devices. SoC repositories supply common platform support, and device repositories supply board configuration and hardware integration.
-
-**🎉 News:** Adreno740 and AdrenoMetal implement GPU acceleration for A740/SM8550. See the [Adreno 740 driver documentation](https://unixnu.com/drivers/adreno740).
-
-Documentation: [unixnu.com](https://unixnu.com). Start with [Port a device](https://unixnu.com/porting/) or [Build and boot](https://unixnu.com/building).
-
-## Repositories
-
-| Repository | Contents |
+| 项目 | 状态 |
 | --- | --- |
-| [UniXNU](https://github.com/UniXNU/UniXNU) | Build tools, component catalog, ARM64 support, OS profiles, UEFI package, documentation |
-| [UniXNU-sm8550-common](https://github.com/UniXNU/UniXNU-sm8550-common) | Shared SM8550 support |
-| [UniXNU-sheng](https://github.com/UniXNU/UniXNU-sheng) | Xiaomi Pad 6S Pro |
-| [uefi-sheng](https://github.com/UniXNU/uefi-sheng) | UEFI firmware for the Xiaomi Pad 6S Pro |
+| 系统启动与显示 | 已能启动并出现系统界面，仍属实验状态 |
+| NT36523 触控 | **工作**，依据当前实机反馈；完整多点手势兼容性未确认 |
+| USB Host / 外接键鼠 | **不工作**；外设亮灯不能视为输入可用 |
+| Adreno 640 GPU | **疑似在工作**；稳定硬件加速、完整桌面合成和性能尚未确认 |
+| 其他驱动 | **多项缺失或未完成验证**，包括音频、无线、相机、传感器及完整电源管理等 |
+| 开发状态 | **暂时停更**，暂无恢复时间或下一版计划 |
 
-Clone with `--recurse-submodules`.
+[STATUS.md](STATUS.md) 是当前状态入口。CI 成功、驱动发布、fence 完成或出现画面，都不能单独证明 GPU 桌面加速或 USB 输入已经可用。
 
-## Contributing
+## 仓库内容
 
-See [CONTRIBUTING.md](CONTRIBUTING.md).
+- [`devices/nabu/`](devices/nabu/)：设备配置、驱动集成、PAC 适配、GPU/输入代码、构建脚本和测试。
+- [`soc/sm8150/`](soc/sm8150/)：SM8150 平台与设备树。
+- [`scripts/`](scripts/)、[`profiles/`](profiles/)、[`package/`](package/)：保留的 UniXNU 构建框架、OS 配置和引导支持。
+- [`docs/`](docs/)：上游文档和历史工程记录；硬件现状以本页和 [STATUS.md](STATUS.md) 为准。
 
-The macOS 27 profile follows [macOS-DroidVM](https://github.com/Droid-VM/macOS-DroidVM), the DroidVM port booted with UniXNU, for its kernel patches (the union root volume, code signature pages on a 4K kernel, the 24 MHz timebase, the realtime and mmap fixes, exec denial) and for the account setup in the Data seed.
+`main` 是当前公开快照入口。旧 26.5 与实验分支历史仍可通过提交记录查看，参见[仓库说明](REPOSITORY.md)。
 
-## License
+## 构建与验证
 
-BSD-2-Clause-Patent. See [LICENSE](LICENSE).
+目标系统是 **27.3**；最近使用的 **SDK 26.5** 是编译工具版本，二者不是同一概念。SM8150 没有硬件 PAuth，当前路径使用普通 `arm64` 与 Zeta PAC 适配。详情见 [BUILDING.md](BUILDING.md)。
+
+最近一次驱动代码快照为 [`be3ac67`](https://github.com/baimaosuki/macOS-ForShengTOnabu/commit/be3ac67a51e8d0a0da52b50e9a79cc3ab0297920)，对应[内核 CI 44984347125](https://github.com/baimaosuki/macOS-ForShengTOnabu/actions/runs/44984347125) 已通过。该结果属于构建验证，**不代表 USB 已修复或 GPU 已完成实机验收**。
+
+本仓库保留源码和构建记录。Apple 系统素材、ROOT/Data 镜像、设备固件、私钥和本机账号文件由构建者自行准备，不纳入当前源码快照。现有构建流程仍有本地输入和集成步骤，参见[构建边界](BUILDING.md#构建边界)。
+
+## 许可与致谢
+
+参见 [LICENSE](LICENSE)、各组件自身许可证及 [UPSTREAM.md](UPSTREAM.md)。保留 UniXNU、SHENG、Zeta、AdrenoMetal、metal2vulkan、Mesa 与其他组件的原作者归属。

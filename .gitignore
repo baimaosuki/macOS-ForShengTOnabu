@@ -50,3 +50,20 @@ __pycache__/
 .env
 local.toml
 unixnu.local.toml
+
+# NABU local inputs and historical generated products
+/private/
+/logs/
+/.work/
+/runtime/
+/downloads/
+/firmware/
+/.ci-cache/
+*.nabu
+*.dtbo
+*.trustcache
+*.p12
+*.pfx
+*.zip
+*.tar
+*.tar.gz
