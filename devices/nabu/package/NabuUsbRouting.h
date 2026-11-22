@@ -3,6 +3,11 @@
 #include "NabuUsbTransfer.h"
 
 namespace nabu {
+// One GIC SPI is exposed by this nub, so publish one usable interrupter to
+// the native class even if a DWC3 revision implements additional banks.
+inline uint32_t usbSingleInterrupterCapability(uint32_t hcsparams1) {
+    return (hcsparams1&0x7ff00u)?(hcsparams1&~0x7ff00u)|0x100u:hcsparams1;
+}
 // 26C5035r emits IO target 1 (isochronous target 2), even when the
 // non-MSI platform publishes one interrupter. nabu's single event ring is 0.
 // Translate that native routing contract BEFORE publishing each doorbell.

@@ -25,6 +25,11 @@ struct Io {
 };
 UsbTrb trb(uint64_t p,unsigned length,unsigned flags){return UsbTrb{{unsigned(p),unsigned(p>>32),length,flags}};}
 int main(){
+ for(unsigned count: {0u,1u,2u,8u,2047u}) {
+  const uint32_t raw=0xa2000010|(count<<8),visible=usbSingleInterrupterCapability(raw);
+  assert((visible&~0x7ff00u)==(raw&~0x7ff00u));
+  assert(((visible>>8)&0x7ff)==(count?1u:0u));
+ }
  std::vector<UsbSingleInterrupter::Cursor> storage(9*32);UsbSingleInterrupter route;Io io;
  assert(!route.initialize(nullptr,8) && !route.initialize(storage.data(),0));
  assert(route.initialize(storage.data(),8));

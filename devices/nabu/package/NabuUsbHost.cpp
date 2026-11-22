@@ -344,10 +344,13 @@ public:
     }
     uint32_t regRead32(void *base,uint32_t off) override {
         UsbRegisterIo io{reinterpret_cast<volatile uint32_t *>(base)};
-        const auto value=nabu::usbReadRegister32(io,off);
+        auto value=nabu::usbReadRegister32(io,off);
         unsigned location;
-        if(off==4 && usbRegisterOffset(base,off,location) && location==(hardware.core.read(0)&255)+4) {
-            UsbTraceIo trace;usbTransfers.status(trace,value);
+        if(off==4 && usbRegisterOffset(base,off,location)) {
+            if(location==4)value=nabu::usbSingleInterrupterCapability(value);
+            else if(location==(hardware.core.read(0)&255)+4) {
+                UsbTraceIo trace;usbTransfers.status(trace,value);
+            }
         }
         return value;
     }
@@ -418,7 +421,7 @@ bool publishHost(){
     if(load!=KERN_SUCCESS){IOLog("NABU USB: XHCI family load=%x\n",load);return false;}
     const unsigned slots=hardware.core.read(4)&255;
     const unsigned maxInterrupters=(hardware.core.read(4)>>8)&0x7ff;
-    if(!slots || maxInterrupters!=1) {
+    if(!slots || !maxInterrupters) {
         IOLog("NABU USB: unsupported event routing HCSPARAMS1=%08x slots=%u interrupters=%u\n",hardware.core.read(4),slots,maxInterrupters);return false;
     }
     const unsigned cursorBytes=(slots+1)*32*sizeof(nabu::UsbSingleInterrupter::Cursor);
@@ -426,7 +429,7 @@ bool publishHost(){
     if(!usbRouteCursors)return false;
     __builtin_memset(usbRouteCursors,0,cursorBytes);
     if(!usbRouting.initialize(usbRouteCursors,slots))return false;
-    IOLog("NABU USB: event-route HCSPARAMS1=%08x slots=%u hardware_interrupters=%u native_io_target=1 mapped_target=0\n",
+    IOLog("NABU USB: event-route HCSPARAMS1=%08x slots=%u hardware_interrupters=%u exposed_interrupters=1 native_io_target=1 mapped_target=0\n",
         hardware.core.read(4),slots,maxInterrupters);
     void *handle=OSMetaClass::preModLoad(g_kernel_kmod_info.name);if(!handle)return false;
     nabu_usb_static_init();if(OSMetaClass::postModLoad(handle)!=kOSReturnSuccess)return false;
