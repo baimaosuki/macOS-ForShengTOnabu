@@ -217,17 +217,28 @@ struct UsbTraceIo {
     uint32_t reg(unsigned off) const {return hardware.core.read(off);}
     uint32_t status() const {const unsigned cap=reg(0)&255;return cap>=0x20 && cap<=0x80?reg(cap+4):~0u;}
     unsigned cache(uint64_t pa) const {return pmap_cache_attributes(unsigned(pa>>PAGE_SHIFT));}
+    void readBarrier() const {
+#if defined(__aarch64__)
+        asm volatile("dmb oshld":::"memory");
+#else
+        __atomic_thread_fence(__ATOMIC_ACQUIRE);
+#endif
+    }
     bool read(uint64_t pa,void *output,unsigned bytes) const {
         // Do not trust a DMA pointer enough to fault the kernel. Bound every
         // sample to DRAM, split at XNU physmap aperture/page boundaries and
         // use the native no-fault accessor. No manual gVirtBase arithmetic.
         if(!bytes || bytes>128 || pa<gPhysBase || pa-gPhysBase>=gPhysSize || bytes>gPhysSize-(pa-gPhysBase))return false;
+        // Normal-NC is not an acquire operation. Order the observed event
+        // cycle/status before sampling the device's preceding DATA IN writes.
+        readBarrier();
         auto *destination=static_cast<uint8_t *>(output);
         while(bytes) {
             if(!pmap_valid_page(unsigned(pa>>PAGE_SHIFT)))return false;
             vm_size_t span=PAGE_SIZE-(pa&PAGE_MASK);if(span>bytes)span=bytes;
             const auto address=phystokv_range(pa,&span);
             if(!address || !span || span>bytes || ml_nofault_copy(address,reinterpret_cast<vm_offset_t>(destination),span)!=span)return false;
+            readBarrier();
             destination+=span;pa+=span;bytes-=unsigned(span);
         }
         return true;
