@@ -131,7 +131,9 @@ class UsbTransferTrace {
                 const uint64_t source=trb.pointer()&~15ull;record.related=source;
                 if(source)record.valid|=unsigned(io.read(source,record.bytes,16))<<1;
             }
-            append(record);
+            // MFINDEX wrap events carry no device/command progress. They
+            // must not consume the finite first-enumeration capture budget.
+            if(trb.type()!=39)append(record);
             if(trb.type()==32 && ((trb.word[3]>>16)&31)==1)
                 for(auto &p:pending_)if(p.slot==trb.word[3]>>24) {
                     data(io,p,UsbTraceKind::DataAfter,record.status);
@@ -171,7 +173,10 @@ public:
                 if(value&6) {
                     UsbTraceRecord record;record.kind=UsbTraceKind::Abort;record.address=value;
                     record.status=io.status();append(record,true);
-                    for(const auto &p:pending_)data(io,p,UsbTraceKind::DataAfter,record.status,true);
+                    // Timeout unwinding may already have returned the DMA
+                    // buffer to its pool. Only sample at a real Transfer Event,
+                    // while the native completion still owns the descriptor.
+                    for(auto &p:pending_){p.address=0;p.length=0;}
                 } else {command_=value&~63ull;commandCycle_=value&1;}
             } else if(off==cap+0x30)dcbaa_=value&~63ull;
         }
@@ -191,7 +196,7 @@ public:
         if((value&0x1000) && !hce_) {
             UsbTraceRecord record;record.kind=UsbTraceKind::Hce;record.status=value;
             record.address=io.reg((io.reg(0)&255));append(record,true);
-            for(const auto &p:pending_)data(io,p,UsbTraceKind::DataAfter,value,true);
+            for(auto &p:pending_){p.address=0;p.length=0;}
         }
         hce_=(value&0x1000)!=0;leave();
     }

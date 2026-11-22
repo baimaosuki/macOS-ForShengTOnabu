@@ -72,8 +72,8 @@ int main(){
  unsigned invalid=io.invalid;trace.write64(io,0x1038,0x700028);
  records=drain(trace);assert(records.size()==1 && records[0].related==0 && records[0].valid==1 && io.invalid==invalid);
  // Segment transition and complete ring wrap preserve consumer cycle.
- io.store(0x700020,trb(0,1u<<24,(34u<<10)|1));io.store(0x700030,trb(0,1u<<24,(34u<<10)|1));
- trace.write64(io,0x1038,0x710008);assert(drain(trace).size()==2);
+ io.store(0x700020,trb(0,1u<<24,(34u<<10)|1));io.store(0x700030,trb(0,1u<<24,(39u<<10)|1));
+ trace.write64(io,0x1038,0x710008);assert(drain(trace).size()==1); // MFINDEX wrap doesn't spend capture budget.
  for(unsigned n=0;n<4;++n)io.store(0x710000+n*16,trb(0,1u<<24,(34u<<10)|1));
  trace.write64(io,0x1038,0x700008);assert(drain(trace).size()==4);
  io.store(0x700000,trb(0,1u<<24,34u<<10));
@@ -110,13 +110,14 @@ def test_usb_physmap_reader_rejects_faults_and_splits_apertures(tmp_path):
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
+#include "NabuUsbDma.h"
 using vm_offset_t=uintptr_t;using vm_map_address_t=uintptr_t;using vm_size_t=uintptr_t;
 constexpr unsigned PAGE_SHIFT=12,PAGE_SIZE=4096,PAGE_MASK=4095;
 uint64_t gPhysBase=0x80000000,gPhysSize=8192;
 uint8_t first[4096],second[4096];
-bool valid=true,shortCopy=false,zeroSpan=false;unsigned translations=0,copies=0;
+bool valid=true,shortCopy=false,zeroSpan=false;unsigned translations=0,copies=0,cache=6;
 static int pmap_valid_page(unsigned pn){return valid && pn>=gPhysBase/4096 && pn<(gPhysBase+gPhysSize)/4096;}
-static unsigned pmap_cache_attributes(unsigned){return 6;}
+static unsigned pmap_cache_attributes(unsigned){return cache;}
 static vm_map_address_t phystokv_range(uint64_t pa,vm_size_t *span){
  assert(pa>=gPhysBase && pa-gPhysBase<gPhysSize);++translations;
  unsigned offset=unsigned(pa-gPhysBase);unsigned pageOffset=offset&4095;
@@ -144,6 +145,10 @@ int main(){
  assert(!translations);valid=false;assert(!io.read(gPhysBase,sample,16) && !translations);
  valid=true;zeroSpan=true;copies=0;assert(!io.read(gPhysBase,sample,16) && !copies);
  zeroSpan=false;shortCopy=true;assert(!io.read(gPhysBase,sample,16));
+ shortCopy=false;assert(io.store32(gPhysBase+8,0x12345678));
+ uint32_t word=0;assert(io.read(gPhysBase+8,&word,4) && word==0x12345678);
+ assert(!io.store32(gPhysBase+9,1) && !io.store32(0,1));
+ cache=2;assert(!io.store32(gPhysBase+8,0));cache=6;
  puts("PASS production no-fault reader: fragmented physmap/page splits, managed-page guard, overflow/size rejection and partial-copy failure");
 }
 ''')

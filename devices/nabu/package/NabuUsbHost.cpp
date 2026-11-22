@@ -4,6 +4,7 @@
 #include "NabuUsb2Core.h"
 #include "NabuUsbDma.h"
 #include "NabuUsbTransfer.h"
+#include "NabuUsbRouting.h"
 #include <IOKit/IOBufferMemoryDescriptor.h>
 #include "NabuUsbRole.h"
 #include "NabuRpmh.h"
@@ -213,6 +214,10 @@ struct UsbRegisterIo {
 static_assert(kIOMapCacheMask==0xf00 && kIOMapWriteCombineCache==0x400,"USB cache ABI");
 namespace {
 nabu::UsbTransferTrace usbTransfers;
+nabu::UsbSingleInterrupter usbRouting;
+nabu::UsbSingleInterrupter::Cursor *usbRouteCursors=nullptr;
+uint32_t usbRouteChanged=0,usbRouteFailed=0,usbRouteSlot=0,usbRouteEndpoint=0;
+uint64_t usbRouteFailedAddress=0;
 struct UsbTraceIo {
     uint32_t reg(unsigned off) const {return hardware.core.read(off);}
     uint32_t status() const {const unsigned cap=reg(0)&255;return cap>=0x20 && cap<=0x80?reg(cap+4):~0u;}
@@ -223,6 +228,12 @@ struct UsbTraceIo {
 #else
         __atomic_thread_fence(__ATOMIC_ACQUIRE);
 #endif
+    }
+    bool store32(uint64_t pa,uint32_t value) const {
+        if((pa&3) || pa<gPhysBase || pa-gPhysBase>=gPhysSize || 4>gPhysSize-(pa-gPhysBase) ||
+           !pmap_valid_page(unsigned(pa>>PAGE_SHIFT)) || cache(pa)!=nabu::usbCpuDmaCache)return false;
+        vm_size_t span=4;const auto address=phystokv_range(pa,&span);
+        return address && span==4 && ml_nofault_copy(reinterpret_cast<vm_offset_t>(&value),address,4)==4;
     }
     bool read(uint64_t pa,void *output,unsigned bytes) const {
         // Do not trust a DMA pointer enough to fault the kernel. Bound every
@@ -261,6 +272,15 @@ void drainTransfers() {
     }
     static unsigned previous=0;const unsigned lost=usbTransfers.dropped();
     if(lost!=previous){IOLog("NABU USB: transfer-trace dropped=%u (bounded nonblocking capture)\n",lost);previous=lost;}
+    static unsigned changedBefore=0,failedBefore=0;
+    const unsigned changed=__atomic_load_n(&usbRouteChanged,__ATOMIC_RELAXED),failed=__atomic_load_n(&usbRouteFailed,__ATOMIC_RELAXED);
+    if(changedBefore!=changed || failedBefore!=failed) {
+        if(changedBefore==0 || failedBefore!=failed || changed/128!=changedBefore/128)
+            IOLog("NABU USB: event-route target=0 patched=%u failed=%u last_slot=%u last_ep=%u failed_pa=%llx\n",changed,failed,
+                __atomic_load_n(&usbRouteSlot,__ATOMIC_RELAXED),__atomic_load_n(&usbRouteEndpoint,__ATOMIC_RELAXED),
+                __atomic_load_n(&usbRouteFailedAddress,__ATOMIC_RELAXED));
+        changedBefore=changed;failedBefore=failed;
+    }
 }
 }
 namespace {void reportRuntime(const nabu::UsbHostSnapshot &);}
@@ -335,7 +355,21 @@ public:
         UsbRegisterIo io{reinterpret_cast<volatile uint32_t *>(base)};
         unsigned location;
         if(usbRegisterOffset(base,off,location)) {
-            io.writeBarrier();UsbTraceIo trace;usbTransfers.write32(trace,location,value);
+            io.writeBarrier();UsbTraceIo trace;
+            const auto route=usbRouting.beforeWrite32(trace,location,value);
+            __atomic_fetch_add(&usbRouteChanged,route.patched,__ATOMIC_RELAXED);
+            if(!route.ok) {
+                __atomic_fetch_add(&usbRouteFailed,1,__ATOMIC_RELAXED);
+                __atomic_store_n(&usbRouteFailedAddress,route.failed,__ATOMIC_RELAXED);
+                // Do not hand hardware a request still targeting an absent
+                // event ring. Native timeout/error recovery remains active.
+                return;
+            }
+            if(route.visited) {
+                __atomic_store_n(&usbRouteSlot,route.slot,__ATOMIC_RELAXED);
+                __atomic_store_n(&usbRouteEndpoint,route.endpoint,__ATOMIC_RELAXED);
+            }
+            usbTransfers.write32(trace,location,value);
         }
         nabu::usbWriteRegister32(io,off,value);
     }
@@ -347,7 +381,7 @@ public:
         UsbRegisterIo io{reinterpret_cast<volatile uint32_t *>(base)};
         unsigned location;
         if(usbRegisterOffset(base,off,location)) {
-            io.writeBarrier();UsbTraceIo trace;usbTransfers.write64(trace,location,value);
+            io.writeBarrier();UsbTraceIo trace;usbRouting.write64(trace,location,value);usbTransfers.write64(trace,location,value);
         }
         nabu::usbWriteRegister64(io,off,value);
     }
@@ -382,6 +416,18 @@ bool publishHost(){
     nabu::FamilyRegistration registration;if(!registration.valid())return false;
     auto load=OSKextLoadKextWithIdentifier("com.apple.driver.usb.AppleUSBXHCI");
     if(load!=KERN_SUCCESS){IOLog("NABU USB: XHCI family load=%x\n",load);return false;}
+    const unsigned slots=hardware.core.read(4)&255;
+    const unsigned maxInterrupters=(hardware.core.read(4)>>8)&0x7ff;
+    if(!slots || maxInterrupters!=1) {
+        IOLog("NABU USB: unsupported event routing HCSPARAMS1=%08x slots=%u interrupters=%u\n",hardware.core.read(4),slots,maxInterrupters);return false;
+    }
+    const unsigned cursorBytes=(slots+1)*32*sizeof(nabu::UsbSingleInterrupter::Cursor);
+    usbRouteCursors=static_cast<nabu::UsbSingleInterrupter::Cursor *>(IOMalloc(cursorBytes));
+    if(!usbRouteCursors)return false;
+    __builtin_memset(usbRouteCursors,0,cursorBytes);
+    if(!usbRouting.initialize(usbRouteCursors,slots))return false;
+    IOLog("NABU USB: event-route HCSPARAMS1=%08x slots=%u hardware_interrupters=%u native_io_target=1 mapped_target=0\n",
+        hardware.core.read(4),slots,maxInterrupters);
     void *handle=OSMetaClass::preModLoad(g_kernel_kmod_info.name);if(!handle)return false;
     nabu_usb_static_init();if(OSMetaClass::postModLoad(handle)!=kOSReturnSuccess)return false;
     nub=OSTypeAlloc(NabuXhciNub);
@@ -395,7 +441,8 @@ bool publishHost(){
     if(ok){nub->registerService();IOLog("NABU USB: NabuXhciNub published regs=0a600000 IRQ=165\n");host=new NabuUsbXhci;ok=host&&host->init()&&host->configureDmaCache()&&host->attach(nub);}
     if(ok){ok=host->start(nub);if(!ok)host->detach(nub);}
     OSSafeReleaseNULL(zero);OSSafeReleaseNULL(ranges);OSSafeReleaseNULL(range);
-    if(!ok){OSSafeReleaseNULL(host);if(nub){nub->terminate(kIOServiceSynchronous);nub->release();nub=nullptr;}}
+    if(!ok){OSSafeReleaseNULL(host);if(nub){nub->terminate(kIOServiceSynchronous);nub->release();nub=nullptr;}
+        IOFree(usbRouteCursors,cursorBytes);usbRouteCursors=nullptr;}
     IOLog("NABU USB: native AppleUSBXHCI start=%u IRQ=%u SID=%x\n",ok,irq,sid);return ok;
 }
 template<class Core> void reportFailure(const char *stage,const Core &core){

@@ -212,6 +212,7 @@ def check_actual_dma_allocation_and_failure_paths(tmp_path):
 #include <cstdio>
 #include "NabuUsbDma.h"
 #include "NabuUsbTransfer.h"
+#include "NabuUsbRouting.h"
 using IOReturn=int;using IOOptionBits=uint32_t;
 constexpr int kIOReturnSuccess=0;constexpr unsigned PAGE_SHIFT=12;
 #define OSDeclareDefaultStructors(T)
@@ -256,8 +257,12 @@ struct Hardware{struct Core{unsigned read(unsigned){return 0;}}core;} hardware;
 struct UsbTraceIo {
  unsigned reg(unsigned){return 0;}unsigned status(){return 0;}
  unsigned cache(uint64_t){return 6;}bool read(uint64_t,void*,unsigned){return false;}
+ bool store32(uint64_t,uint32_t){return false;}
 };
 static nabu::UsbTransferTrace usbTransfers;
+static nabu::UsbSingleInterrupter usbRouting;
+static uint32_t usbRouteChanged=0,usbRouteFailed=0,usbRouteSlot=0,usbRouteEndpoint=0;
+static uint64_t usbRouteFailedAddress=0;
 static bool usbRegisterOffset(void*,unsigned,unsigned&){return false;}
 namespace nabu {
 struct UsbHostSnapshot{uint32_t command=0x40d,status=0;};
