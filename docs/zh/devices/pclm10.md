@@ -399,7 +399,7 @@ Format 2 UniXNU port for OPPO Reno Ace \(PCLM10, OPPO project 19081, Snapdragon 
 
 ### 开发经验
 
-- Device-verified USB CDC-ECM networking on PCLM10: macOS enumerated Sweet iOS \(USB Ethernet\) on en2 \(status: active, 02:00:5e:77:ee:01\) and XNU received broadcast UDP port 5141 REBOOT triggering fastboot return in 7s.
+- Device-verified USB CDC-ECM networking on PCLM10: macOS enumerated Sweet iOS \(USB Ethernet\) on en2 \(status: active, MAC redacted\) and XNU received broadcast UDP port 5141 REBOOT triggering fastboot return in 7s.
 - WCN3990 uses SNOC/QMI rather than PCIe MHI and remains deferred.
 
 ### 完成条件
@@ -412,7 +412,7 @@ Format 2 UniXNU port for OPPO Reno Ace \(PCLM10, OPPO project 19081, Snapdragon 
 
 ### 下一步
 
-- Assign 192.168.7.1/24 on host en2 when using sweetusb=2 for interactive TCP/UDP traffic or nc -ukl 5140 live logs.
+- Assign 192.0.2.2/24 on host en2 when using sweetusb=2 for interactive TCP/UDP traffic or nc -ukl 5140 live logs.
 
 ### 证据
 

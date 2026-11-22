@@ -84,7 +84,7 @@ Xiaomi 12 \(cupid, SM8450\) running iOS 27.0.1 \(24A446, arm64e\) under an iPhon
 ### 证据
 
 - `source`: [Resolve, arm64e kernel build, iPhone17,2 prelink and EDK II package steps used by the host-verified runs.](https://github.com/obaosp/UniXNU-cupid/blob/ab8d7e9e7e93aa05febc059a6916cbdfbfcab5cb/.github/workflows/macos.yml)
-- `device`: [ro.board.platform=taro, ro.boot.hardware.sku=cupid, dtb\_idx=10 \(Waipio v2\), dtbo\_idx=19, cpuid=0x0000043252a25a21, serialno=1cb22738; /sys/devices/soc0 revision 2.2.](https://github.com/obaosp/UniXNU-cupid/blob/ab8d7e9e7e93aa05febc059a6916cbdfbfcab5cb/notes/device-2026-11-07.md)
+- `device`: [ro.board.platform=taro, ro.boot.hardware.sku=cupid, dtb\_idx=10 \(Waipio v2\), dtbo\_idx=19, cpuid=0x0000043252a25a21, serialno=REDACTED; /sys/devices/soc0 revision 2.2.](https://github.com/obaosp/UniXNU-cupid/blob/ab8d7e9e7e93aa05febc059a6916cbdfbfcab5cb/notes/device-2026-11-07.md)
   Command: <code>adb shell su -c 'getprop | grep ro.boot'</code>. Revision: `4730e3b1fb52e1238a5d370bdc1f381622033de9`.
 
 ## 固件与启动 {#firmware}

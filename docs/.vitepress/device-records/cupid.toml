@@ -76,7 +76,7 @@ kind = "device"
 reference = "notes/device-2026-11-07.md"
 command = "adb shell su -c 'getprop | grep ro.boot'"
 revision = "4730e3b1fb52e1238a5d370bdc1f381622033de9"
-result = "ro.board.platform=taro, ro.boot.hardware.sku=cupid, dtb_idx=10 (Waipio v2), dtbo_idx=19, cpuid=0x0000043252a25a21, serialno=1cb22738; /sys/devices/soc0 revision 2.2."
+result = "ro.board.platform=taro, ro.boot.hardware.sku=cupid, dtb_idx=10 (Waipio v2), dtbo_idx=19, cpuid=0x0000043252a25a21, serialno=REDACTED; /sys/devices/soc0 revision 2.2."
 
 [[area]]
 id = "firmware"

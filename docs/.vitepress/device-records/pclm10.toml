@@ -311,7 +311,7 @@ procedure = [
     "Boot with sweetusb=2 usbstream=0x140 qcom-usb-debug=0; verify Sweet iOS (USB Ethernet) VID 0x1209 PID 0x0001 enumeration on macOS and UDP port 5141 RX into pclm10_watchdog_thread.",
 ]
 findings = [
-    "Device-verified USB CDC-ECM networking on PCLM10: macOS enumerated Sweet iOS (USB Ethernet) on en2 (status: active, 02:00:5e:77:ee:01) and XNU received broadcast UDP port 5141 REBOOT triggering fastboot return in 7s.",
+    "Device-verified USB CDC-ECM networking on PCLM10: macOS enumerated Sweet iOS (USB Ethernet) on en2 (status: active, MAC redacted) and XNU received broadcast UDP port 5141 REBOOT triggering fastboot return in 7s.",
     "WCN3990 uses SNOC/QMI rather than PCIe MHI and remains deferred.",
 ]
 completion = [
@@ -321,7 +321,7 @@ limits = [
     "USB CDC-ECM shares the single DWC3 controller with QcomXnuUsbDebug (mutually exclusive per boot); WCN3990 Wi-Fi is not yet enabled.",
 ]
 next_action = [
-    "Assign 192.168.7.1/24 on host en2 when using sweetusb=2 for interactive TCP/UDP traffic or nc -ukl 5140 live logs.",
+    "Assign 192.0.2.2/24 on host en2 when using sweetusb=2 for interactive TCP/UDP traffic or nc -ukl 5140 live logs.",
 ]
 evidence = [
     { kind = "device", reference = "scripts/apply-pclm10-sweet-overlay.py", result = "Enumerated Sweet iOS (USB Ethernet) VID 0x1209/PID 0x0001 (en2 active) and delivered UDP 5141 REBOOT to XNU on 34d5cb55.", command = "fastboot -s 34d5cb55 flash boot sweet_work/out_ios_20H392_ecm/boot-sweet.img && fastboot -s 34d5cb55 reboot", revision = "76421c000a3de564d0dbdd48dc0d25424537e86a" },

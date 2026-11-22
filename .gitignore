@@ -67,3 +67,11 @@ unixnu.local.toml
 *.zip
 *.tar
 *.tar.gz
+
+# Private deployment/account/log-allocation inputs
+/private/
+/config/*.local.toml
+/config/*.private.toml
+account.json
+*-account.json
+log-token.txt

@@ -25,7 +25,7 @@
 - 用户态 GPU 构建：复用 [`9488928`](https://github.com/baimaosuki/macOS-ForShengTOnabu/commit/9488928fe17c5d601ed19ea2fad3554244a6c325) 对应的[已签名构建](https://github.com/baimaosuki/macOS-ForShengTOnabu/actions/runs/44892556083)。
 - 最新 USB 修改：P046 真机记录显示控制传输 TRB 的完成事件目标为1；P047 将输入上下文和传输 TRB 路由到平台使用的0号环，保留原生完成处理。最新修正尚未取得鼠标可用的实机验收，USB 仍标为不工作。
 - 本地验证：10项 ASan/UBSan 测试、SDK26.5编译链接、原始27.3与本次ARM64路由回放；15项最终二进制检查、FAT读回、ZIP校验通过。
-- 启动菜单：4,909B 对齐版已纳入源码与最终GPU集成；默认 `a640-metal`、`[ui] scale=3`，初始化 Data 仅在显式确认后触发。详见 [INSTALLING.md](INSTALLING.md)。
+- 启动菜单：对齐版已纳入源码与最终GPU集成；公共模板已去除本地日志分配标识，安装时保留设备原值；默认 `a640-metal`、`[ui] scale=3`，初始化 Data 仅在显式确认后触发。详见 [INSTALLING.md](INSTALLING.md)。
 - 本地验证包含 SDK 编译链接、Host 测试、ARM64 回放和产物检查。**这些结果不替代真机验证，也不用于将 GPU 状态改为“已确认工作”。**
 
 ## 阅读历史记录

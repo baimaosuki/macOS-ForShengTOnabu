@@ -4,10 +4,10 @@
 
 ## 固定菜单
 
-仓库中的 [`config/unixnu.aligned.toml`](config/unixnu.aligned.toml) 为当前对齐版，4,909字节。
+仓库中的 [`config/unixnu.aligned.toml`](config/unixnu.aligned.toml) 为已脱敏的公共模板，4,669字节；设备日志分配标识在本地安装时补入。
 
 ```text
-a857f55144484709ca6fc174a25c3eee0705632be28516d485f98e2a746db72b
+d636e6d5025d3b010f525590d8f33c10f1a1334f34365979f0092082474e2ea0
 ```
 
 | 设置 | 值 |
@@ -28,29 +28,43 @@ a857f55144484709ca6fc174a25c3eee0705632be28516d485f98e2a746db72b
 
 ```sh
 ESP_ZIP=/absolute/path/to/esp-aligned.zip
+NABU_SAVED_BOOT_CONFIG=$(mktemp /tmp/nabu-menu.XXXXXX)
+chmod 600 "$NABU_SAVED_BOOT_CONFIG"
+cp /esp/EFI/UniXNU/unixnu.toml "$NABU_SAVED_BOOT_CONFIG"
 unzip -o "$ESP_ZIP" 'EFI/*' -d /esp
-cp config/unixnu.aligned.toml /esp/EFI/UniXNU/unixnu.toml
+python3 devices/nabu/scripts/align-esp-menu27.py --esp /esp --local-boot-config "$NABU_SAVED_BOOT_CONFIG"
 sync
+rm "$NABU_SAVED_BOOT_CONFIG"
 ```
 
-这里的 `config/` 是本仓库根目录。维护者原本的本机配置位置为 `/home/baimao/nabu_macos/config/unixnu.aligned.toml`；仓库副本与该文件的字节、SHA256相同。
+先保存设备菜单，再解压更新包，避免原菜单被覆盖后丢失本地日志分配标识。上述命令应逐步执行，任何步骤失败就停止并保留临时菜单；冲突时不要直接复制公共模板绕过检查。公共模板不包含设备日志分配标识，安装工具从保存的本地配置保留该标识。
 
 重新启动后选择 **macOS 27.3 - A640 Metal GPU**。只有需要清除并重新初始化 macOS Data 时，才选择初始化项并确认。
 
 ## 校验和规则
 
-新 `*-aligned.zip` 已内置同一份对齐菜单，包内 `SHA256SUMS` 已按最终文件重算，全部 EFI 文件应通过：
+新 `*-aligned.zip` 已内置同一设备配置渲染的对齐菜单，包内 `SHA256SUMS` 已按最终文件重算，全部 EFI 文件应通过：
 
 ```sh
 unzip -p "$ESP_ZIP" SHA256SUMS > /tmp/nabu-esp-SHA256SUMS
 (cd /esp && sha256sum -c /tmp/nabu-esp-SHA256SUMS)
 ```
 
-旧 ESP 包携带约3,761字节的通用菜单。对旧包执行“解压 EFI、再复制对齐版”的流程后，用旧包 `SHA256SUMS` 检查时，**仅 `EFI/UniXNU/unixnu.toml` 不匹配是预期的**，因为它已被明确替换。应另外核对安装菜单的完整SHA256；其他EFI文件失败仍应查明，不能一概忽略。
+旧 ESP 包携带约3,761字节的通用菜单。对旧包执行“解压 EFI、再复制对齐版”的流程后，用旧包 `SHA256SUMS` 检查时，**仅 `EFI/UniXNU/unixnu.toml` 不匹配是预期的**，因为它已被明确替换。安装工具会输出本地渲染菜单的SHA256，可与设备菜单单独核对；其他EFI文件失败仍应查明，不能一概忽略。
 
 ```sh
 sha256sum /esp/EFI/UniXNU/unixnu.toml
 ```
+
+## 本地日志分配标识
+
+公共模板不保存 `nabu-log-token`。安装/重打包时从已有 ESP 菜单保留标识；若中间产物不含该标识，使用 `--local-boot-config /path/to/private/unixnu.toml`（菜单安装工具）或设置环境变量 `NABU_LOCAL_BOOT_CONFIG` 指向已有设备菜单。缺失、冲突或格式非法时工具会停止，不生成随机标识替代现有日志分配。不要把本地菜单作为源码提交。
+
+```sh
+export NABU_LOCAL_BOOT_CONFIG=/path/to/private/unixnu.toml
+```
+
+公共模板的SHA256与设备渲染菜单不同，包清单必须以最终设备文件为准。现有设备的日志标识不变，ROOT/Data不变。
 
 ## 打包维护
 

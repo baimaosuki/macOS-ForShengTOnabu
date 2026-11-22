@@ -119,7 +119,7 @@ Samsung Galaxy S7 Edge \(SM-G935F\) on Exynos 8890. Phase 1 is a Mu-Silicium UEF
 - `source`: [hero2lte firmware package, keypad library, host tests and optional UniXNU payload integration](https://github.com/DokuroMitsukai/Mu-Silicium/commit/5790015a98714044d72d5037cea300b40f66a2e0)
 - `host`: [2 MiB SILICIUM\_UEFI.fd contains UniXNU, UniXNUDxe, UniXNURamDiskDxe and DarwinBoot; FVMAIN used 0x235000 and FVMAIN\_COMPACT kept 0x194998 free](https://github.com/DokuroMitsukai/UniXNU-hero2lte/blob/33ca6933fc94aeced28610b9e1fe5743e7f172dd/board.toml)
   Command: <code>./unixnu build firmware --uefi ../Mu-Silicium --target RELEASE -D ../UniXNU-hero2lte</code>. Revision: `5790015a98714044d72d5037cea300b40f66a2e0`.
-- `device`: [readback matched 011d3abf...; timer block toggled magenta/cyan, volume/home/power keys were accepted, counter advanced, manual reboot to TWRP](https://github.com/DokuroMitsukai/UniXNU-hero2lte/blob/33ca6933fc94aeced28610b9e1fe5743e7f172dd/evidence/uefi-bringup-20261026.txt)
+- `device`: [readback matched 011d3abf...; timer block toggled magenta/cyan, volume/home/user keys were accepted, counter advanced, manual reboot to TWRP](https://github.com/DokuroMitsukai/UniXNU-hero2lte/blob/33ca6933fc94aeced28610b9e1fe5743e7f172dd/evidence/uefi-bringup-20261026.txt)
   Command: <code>adb push out/boot-uefi-samsung-bringup.img /tmp/boot-bringup.img; adb shell 'dd if=/tmp/boot-bringup.img of=/dev/block/sda5 bs=1M; sync; sha256sum /dev/block/sda5'; adb reboot</code>. Revision: `9f984f86636492269fff9297163d98b89c3cea65`.
 
 ## CPU 与中断 {#cpu}

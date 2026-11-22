@@ -105,7 +105,7 @@ kind = "device"
 reference = "evidence/uefi-bringup-20261026.txt"
 command = "adb push out/boot-uefi-samsung-bringup.img /tmp/boot-bringup.img; adb shell 'dd if=/tmp/boot-bringup.img of=/dev/block/sda5 bs=1M; sync; sha256sum /dev/block/sda5'; adb reboot"
 revision = "9f984f86636492269fff9297163d98b89c3cea65"
-result = "readback matched 011d3abf...; timer block toggled magenta/cyan, volume/home/power keys were accepted, counter advanced, manual reboot to TWRP"
+result = "readback matched 011d3abf...; timer block toggled magenta/cyan, volume/home/user keys were accepted, counter advanced, manual reboot to TWRP"
 
 [[area]]
 id = "cpu"

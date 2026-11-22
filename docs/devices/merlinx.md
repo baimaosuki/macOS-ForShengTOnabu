@@ -509,7 +509,7 @@ Components: `DarwinBoot`, `XnuPrelink`.
 
 ### Development findings
 
-- The status lines identified the cache and launchd checkpoints without a UART. The Mali diagnostics add MATCH, START, RC, M2W, M2P, PMIC, GIC and staged M2 voltage markers. The MUSB channel now carries the kernel ring, ps, fault records and display/touch/tap/swipe/home/cpufreq commands to a host.
+- The status lines identified the cache and launchd checkpoints without a UART. The Mali diagnostics add MATCH, START, RC, M2W, M2P, PMIC, GIC and staged M2 voltage markers. The MUSB channel now carries the kernel ring, ps, fault records and display/touch/tap/swipe/home/user commands to a host.
 
 ### Completion criteria
 

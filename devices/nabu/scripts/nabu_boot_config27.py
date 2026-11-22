@@ -1,12 +1,42 @@
 """Canonical nabu ESP menu, installed after signed GPU addon integration."""
 import hashlib
+import os
+import re
 import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 ALIGNED_CONFIG = ROOT / 'config/unixnu.aligned.toml'
-ALIGNED_SHA256 = 'a857f55144484709ca6fc174a25c3eee0705632be28516d485f98e2a746db72b'
+ALIGNED_SHA256 = 'd636e6d5025d3b010f525590d8f33c10f1a1334f34365979f0092082474e2ea0'
 MENU_PATH = Path('EFI/UniXNU/unixnu.toml')
+
+
+def public_args(args):
+    return {value for value in args.split() if not value.startswith('nabu-log-token=')}
+
+
+def allocation_token(*configs):
+    """An ESP write-allocation identity, not an account/API credential.
+
+    Keep it local, and never print or regenerate it without provisioning the
+    matching log-file allocation. Conflicting deployment inputs must fail.
+    """
+    found = set()
+    for config in configs:
+        if config is None:
+            continue
+        for entry in config.get('entry', []):
+            values = [arg.partition('=')[2] for arg in entry.get('args', '').split()
+                      if arg.startswith('nabu-log-token=')]
+            if len(values) > 1:
+                raise ValueError('Duplicate local log allocation identity')
+            for value in values:
+                if not re.fullmatch('[0-9a-fA-F]{32}', value) or int(value, 16) == 0:
+                    raise ValueError('Invalid local log allocation identity')
+                found.add(value.lower())
+    if len(found) > 1:
+        raise ValueError('Conflicting local log allocation identities')
+    return next(iter(found), None)
 
 
 def validate(raw, reference=None):
@@ -46,7 +76,7 @@ def validate(raw, reference=None):
         for entry in reference.get('entry', []):
             current = by_id.get(entry.get('id'))
             if current is not None and entry.get('type') == 'xnu':
-                if set(current['args'].split()) != set(entry['args'].split()):
+                if public_args(current['args']) != public_args(entry['args']):
                     raise ValueError(f'Aligned config args differ from payload: {entry["id"]}')
                 for field in ('path', 'initrd', 'type'):
                     if current.get(field) != entry.get(field):
@@ -54,18 +84,30 @@ def validate(raw, reference=None):
     return config
 
 
-def install(esp, reference=None):
+def install(esp, reference=None, local_boot_config=None):
     raw = ALIGNED_CONFIG.read_bytes()
     digest = hashlib.sha256(raw).hexdigest()
     if digest != ALIGNED_SHA256:
         raise ValueError('Canonical aligned menu changed; review and update its pinned checksum')
+    config = validate(raw, reference)
+    configured = local_boot_config or os.environ.get('NABU_LOCAL_BOOT_CONFIG')
+    local = tomllib.loads(Path(configured).read_text()) if configured else None
+    token = allocation_token(reference, local)
+    wants_log = any('nabu-log=1' in entry.get('args', '').split() for entry in config['entry'])
+    if wants_log and token is None:
+        raise ValueError('Log allocation identity required: preserve an existing ESP menu or set NABU_LOCAL_BOOT_CONFIG')
+    # The published template has no device identity. Materialize it only in
+    # the local artifact, preserving the existing allocation and menu layout.
+    if token:
+        raw = raw.replace(b'nabu-log=1 ', b'nabu-log=1 nabu-log-token=' + token.encode() + b' ')
     config = validate(raw, reference)
     menu = Path(esp) / MENU_PATH
     menu.parent.mkdir(parents=True, exist_ok=True)
     menu.write_bytes(raw)
     if menu.read_bytes() != raw:
         raise OSError('Aligned menu readback mismatch')
-    return dict(path=MENU_PATH.as_posix(), bytes=len(raw), sha256=digest,
+    return dict(path=MENU_PATH.as_posix(), bytes=len(raw), sha256=hashlib.sha256(raw).hexdigest(),
+                template_sha256=digest, log_allocation_identity_preserved=token is not None,
                 default=config['boot']['default'], ui_scale=config['ui']['scale'],
                 entry_order=[entry['id'] for entry in config['entry']],
                 data_reset_confirmation_only=True)

@@ -74,7 +74,7 @@ def main():
     result=dict(passed=True,signed_userspace_commit=report['source_commit'],
         addon_sha256=hashlib.sha256(addon.read_bytes()).hexdigest(),trust_sha256=hashlib.sha256(trust.read_bytes()).hexdigest(),
         preserved_entries=len(original),gpu_entries=len(merged)-len(original),owner_module_preserved=True,
-        cpu_entry_preserved=True,gpu_entry=entry,shader_cache=cache_contract,
+        cpu_entry_preserved=True,gpu_entry={**entry, 'args': ' '.join(arg for arg in entry['args'].split() if not arg.startswith('nabu-log-token='))},shader_cache=cache_contract,
         metal_publication=publication,boot_menu=aligned_menu,hardware_tested=False)
     a.output.write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result,indent=2))
 

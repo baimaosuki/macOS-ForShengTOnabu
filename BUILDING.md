@@ -68,7 +68,7 @@ GPU、SMMU、PAC 与 signed-text 检查位于 [`devices/nabu/tests/`](devices/na
 
 ## 最终 ESP 菜单与打包
 
-[`integrate-gpu-esp27.py`](devices/nabu/scripts/integrate-gpu-esp27.py) 在合并已签名 GPU addon 后，自动安装仓库根目录的 [`config/unixnu.aligned.toml`](config/unixnu.aligned.toml)。这是完整 GPU ESP 的最终菜单阶段；通用 `./unixnu build payload` 只是中间产物，不能据此跳过 addon 集成。后续 FAT/ZIP/SHA256SUMS 必须对最终菜单计算。
+[`integrate-gpu-esp27.py`](devices/nabu/scripts/integrate-gpu-esp27.py) 在合并已签名 GPU addon 后，从现有菜单或 `NABU_LOCAL_BOOT_CONFIG` 指定的私有菜单取得日志分配标识后，安装仓库根目录的 [`config/unixnu.aligned.toml`](config/unixnu.aligned.toml)。这是完整 GPU ESP 的最终菜单阶段；通用 `./unixnu build payload` 只是中间产物，不能据此跳过 addon 集成。后续 FAT/ZIP/SHA256SUMS 必须对最终菜单计算。
 
 已有通过校验的 ESP ZIP，可用公开工具补入同一菜单并重算校验和：
 
