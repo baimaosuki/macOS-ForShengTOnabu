@@ -33,9 +33,9 @@ struct Pair {
 };
 struct Bus {
  std::map<std::pair<nabu::UsbBlock,uint32_t>,uint32_t> registers;
- std::vector<uint32_t> reads;unsigned writes=0;bool clockStuck=false;
+ std::vector<uint32_t> reads;unsigned writes=0;bool clockStuck=false,utmiDisabled=false;
  uint32_t read(nabu::UsbBlock b,uint32_t o){assert(o<0x10000 && !(o&3));reads.push_back(o);return registers[{b,o}];}
- void write(nabu::UsbBlock b,uint32_t o,uint32_t v){++writes;if(!(clockStuck && b==nabu::UsbBlock::Scratch && o==0x28))registers[{b,o}]=v;}
+ void write(nabu::UsbBlock b,uint32_t o,uint32_t v){++writes;if(b==nabu::UsbBlock::Scratch && o==8 && (v&0x100))utmiDisabled=true;if(!(clockStuck && b==nabu::UsbBlock::Scratch && o==0x28))registers[{b,o}]=v;}
  void delayUs(unsigned){}void checkpoint(const char*){}
  void core(uint32_t o,uint32_t v){registers[{nabu::UsbBlock::Core,o}]=v;}
 };
@@ -58,11 +58,25 @@ int main(){
  }
  assert(!nabu::usbContextFaults(0x400) && nabu::usbContextFaults(2)==2);
  assert(nabu::usbContextFaults(0x80000480)==0x80000080);
- // USB's private SMMU context matches the stock noncoherent-domain MAIR.
- // It supplements CPU-side NC allocation and borrowed-buffer maintenance.
+ struct Fields {
+  uint32_t words[nabu::UsbControllerCachePolicy27::instanceBytes/4]{};bool reject=false;
+  uint32_t read(unsigned off){return words[off/4];}
+  void write(unsigned off,uint32_t value){if(!reject)words[off/4]=value;}
+ } fields;
+ for(auto &word:fields.words)word=0xa5a5a5a5;
+ fields.words[0x5ac/4]=0x10003;fields.words[0x5b0/4]=0x300;
+ nabu::UsbControllerCachePolicy27 native;assert(native.install(fields));
+ assert(native.oldDma==0x10003 && native.dma==0x10403 && native.client==0x400);
+ for(unsigned off=0;off<sizeof(fields.words);off+=4)
+  if(off!=0x5ac && off!=0x5b0)assert(fields.words[off/4]==0xa5a5a5a5);
+ fields.reject=true;fields.words[0x5ac/4]=0x10003;assert(!native.install(fields));
+ nabu::UsbPowerReportPolicy power;
+ for(unsigned n=1;n<=130;++n)assert(power.sample(1,0xe00002e9,0,0x100d)==(n<=3 || n%64==0));
+ assert(power.sample(1,0xe00002e9,0,0x18));assert(!power.sample(9,0,0,0));
+ // Keep proven USB SMMU WBWA; CPU buffer coherency is a separate policy.
  const uint64_t pte=nabu::usbIdentityBlock(3);
  assert(((pte>>2)&7)==0 && ((pte>>8)&3)==3 && (pte&(1u<<10)));
- assert(nabu::usbDmaMair==0x44);
+ assert(nabu::usbDmaMair==0xff);
  Bus bus;bus.core(0,0x40);bus.core(4,2u<<24);bus.core(0x18,0x1000);
  bus.core(0x40,0);bus.core(0x44,0);bus.core(0x458,0xdeadbeef);
  bus.core(0x440,0x0e000663);bus.core(0x450,0x200);bus.core(0x1020,3);
@@ -83,6 +97,7 @@ int main(){
  clocks.registers[{nabu::UsbBlock::Scratch,0x28}]=0xa5000001;
  nabu::Usb2Core<Bus> boot(clocks);assert(boot.selectUtmiHost());
  assert(clocks.read(nabu::UsbBlock::Scratch,0x28)==0xa5000019);
+ assert(!clocks.utmiDisabled && (clocks.read(nabu::UsbBlock::Scratch,8)&0x109)==9);
  Bus stuck;stuck.clockStuck=true;nabu::Usb2Core<Bus> failed(stuck);
  assert(!failed.selectUtmiHost() && failed.failedOffset()==0x28 && failed.failedMask()==0x18);
  puts("PASS low/high MMIO ordering, read-only bounded snapshots, U3/halt decoding, rate limits and stock RAM clocks");
@@ -213,6 +228,7 @@ struct IODMACommand {
 #define kIODMACommandOutputHost64 IODMACommand::OutputHost64
 static bool failBuffer=false,failCommand=false;static uint32_t allocationOptions=0;static uint64_t allocationSize=0;
 struct AppleUSBXHCI:IOService {
+ unsigned char nativePrivate[0xf88-sizeof(void*)]{};
  virtual uint32_t desiredPower(){return 0;}
  virtual uint32_t getBufferOptions(uint32_t o)const{return o|0x200;}
  virtual IOBufferMemoryDescriptor *createIOBuffer(uint32_t o,uint64_t n){allocationOptions=o;allocationSize=n;return failBuffer?nullptr:&buffer;}
@@ -245,6 +261,10 @@ static void reportRuntime(const nabu::UsbHostSnapshot&){++faultReports;}
     tail=r'''
 int main(){
  NabuUsbXhci host;
+ auto *raw=reinterpret_cast<uint8_t*>(&host);uint32_t value=0x10003;
+ __builtin_memcpy(raw+0x5ac,&value,4);value=0x300;__builtin_memcpy(raw+0x5b0,&value,4);
+ assert(host.configureDmaCache());__builtin_memcpy(&value,raw+0x5ac,4);assert(value==0x10403);
+ __builtin_memcpy(&value,raw+0x5b0,4);assert(value==0x400);
  for(unsigned cache=0;cache<16;++cache){
   uint32_t options=0x80000003|(cache<<8);
   assert(host.getBufferOptions(options)==((options&~0xf00u)|0x400));

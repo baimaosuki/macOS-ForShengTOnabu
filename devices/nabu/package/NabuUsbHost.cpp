@@ -119,7 +119,7 @@ struct Hardware {
         IOLog("NABU USB: UFS slot2=%08x route=%08x CB1 preserved=%u USB slot=%u CB=%u\n",ufsSmr,ufsRoute,ufsPreserved,plan.index,plan.bank);
         if(!ufsPreserved)return false;
         dmaBank=plan.bank;dmaSlot=plan.index;dmaGlobalPages=info.global_pages;dmaReady=ok;
-        IOLog("NABU USB: SID=%x slot=%u context=%u identity=%u table=%llx GFSR=%x memory=Normal-NC-inner-shareable coherence=unverified\n",sid,plan.index,plan.bank,ok,pa,smmu.read(sm::kGfsr));
+        IOLog("NABU USB: SID=%x slot=%u context=%u identity=%u table=%llx GFSR=%x memory=WB-inner-shareable coherence=unverified\n",sid,plan.index,plan.bank,ok,pa,smmu.read(sm::kGfsr));
         return ok;
     }
 } hardware;
@@ -209,9 +209,25 @@ namespace {void reportRuntime(const nabu::UsbHostSnapshot &);}
 class NabuUsbXhci : public AppleUSBXHCI {
     OSDeclareDefaultStructors(NabuUsbXhci)
 public:
+    bool configureDmaCache() {
+        static_assert(sizeof(AppleUSBXHCI)==nabu::UsbControllerCachePolicy27::instanceBytes,"26C5035r cache fields");
+        struct Fields {
+            uint8_t *object;
+            uint32_t read(unsigned off){uint32_t value;__builtin_memcpy(&value,object+off,sizeof(value));return value;}
+            void write(unsigned off,uint32_t value){__builtin_memcpy(object+off,&value,sizeof(value));}
+        } fields{reinterpret_cast<uint8_t *>(this)};
+        nabu::UsbControllerCachePolicy27 policy;const bool ok=policy.install(fields);
+        IOLog("NABU USB: controller-cache dma=%08x->%08x client=%08x->%08x CPU=Normal-NC SMMU=WBWA verified=%u\n",
+            policy.oldDma,policy.dma,policy.oldClient,policy.client,ok);
+        return ok;
+    }
     uint32_t desiredPower() override {return 3;}
     uint32_t getBufferOptions(uint32_t options) const override {
-        return nabu::usbBufferOptions(AppleUSBXHCI::getBufferOptions(options));
+        const auto result=nabu::usbBufferOptions(AppleUSBXHCI::getBufferOptions(options));
+        static uint32_t reports=0;
+        if(__atomic_fetch_add(&reports,1,__ATOMIC_RELAXED)<8)
+            IOLog("NABU USB: client-cache requested=%08x effective=%08x policy=Normal-NC\n",options,result);
+        return result;
     }
     IOBufferMemoryDescriptor *createIOBuffer(uint32_t options,uint64_t size) override {
         // Preserve native allocation address masks/alignment and capabilities.
@@ -240,9 +256,12 @@ public:
         // 250ms poll after native recovery has already re-enabled RS.
         nabu::Usb2Core<Hardware> core(hardware);const auto before=core.snapshot();
         const auto result=AppleUSBXHCI::lowerOnePowerStateTo(state);const auto after=core.snapshot();
-        IOLog("NABU USB: power target=%lu result=%08x before_CMD=%08x before_STS=%08x after_CMD=%08x after_STS=%08x\n",
-            state,result,before.command,before.status,after.command,after.status);
-        if(result!=kIOReturnSuccess)reportRuntime(after);
+        static nabu::UsbPowerReportPolicy reports;
+        if(reports.sample(unsigned(state),uint32_t(result),after.command,after.status)) {
+            IOLog("NABU USB: power target=%lu result=%08x before_CMD=%08x before_STS=%08x after_CMD=%08x after_STS=%08x\n",
+                state,result,before.command,before.status,after.command,after.status);
+            if(result!=kIOReturnSuccess)reportRuntime(after);
+        }
         return result;
     }
     uint32_t regRead32(void *base,uint32_t off) override {
@@ -274,8 +293,12 @@ void reportRuntime(const nabu::UsbHostSnapshot &s) {
     IOLog("NABU USB: irq arrivals=%u forwarded=%u inactive=%u mask=%u unmask=%u errors=%u last=%08x logical_enabled=%u in_flight=%u\n",
         count(&usbIrqs.arrivals),count(&usbIrqs.forwarded),count(&usbIrqs.inactive),
         count(&usbIrqs.masks),count(&usbIrqs.unmasks),count(&usbIrqs.errors),count(&usbIrqs.lastStatus),nub?nub->interruptEnabled():false,count(&usbIrqs.inFlight));
-    IOLog("NABU USB: glue GCTL=%08x USB2=%08x BUS0=%08x BUS1=%08x CGCTL=%08x MASTER=%08x CFG=%08x UTMI=%08x SLEEP=%08x\n",
-        s.gctl,s.usb2,s.bus0,s.bus1,s.cgctl,hardware.gcc.read(0xf010),hardware.gcc.read(0xf078),hardware.gcc.read(0xf018),hardware.gcc.read(0xf014));
+    IOLog("NABU USB: glue GCTL=%08x USB2=%08x GUCTL=%08x GUCTL1=%08x BUS0=%08x BUS1=%08x CGCTL=%08x MASTER=%08x CFG=%08x UTMI=%08x SLEEP=%08x\n",
+        s.gctl,s.usb2,s.guctl,s.guctl1,s.bus0,s.bus1,s.cgctl,hardware.gcc.read(0xf010),hardware.gcc.read(0xf078),hardware.gcc.read(0xf018),hardware.gcc.read(0xf014));
+    const uint64_t dcbaa=uint64_t(s.dcbaaHi)<<32|s.dcbaaLo,erst=uint64_t(s.erstHi)<<32|s.erstLo;
+    IOLog("NABU USB: actual-ring-cache DCBAA=%x ERST=%x CPU_expected=6 SMMU_MAIR_expected=ff\n",
+        dcbaa?pmap_cache_attributes(unsigned(dcbaa>>PAGE_SHIFT)):~0u,
+        erst?pmap_cache_attributes(unsigned(erst>>PAGE_SHIFT)):~0u);
     if(hardware.dmaReady) {
         namespace sm=nabu_usb::smmu;const uint32_t cb=sm::context_offset(hardware.dmaGlobalPages,hardware.dmaBank);
         IOLog("NABU USB: dma SID=%x slot=%u CB=%u GFSR=%08x FSR=%08x FAR=%08x:%08x FSYNR0=%08x SCTLR=%08x TCR=%08x MAIR0=%08x route=%08x coherence=unverified\n",
@@ -298,7 +321,7 @@ bool publishHost(){
     bool ok=nub&&ranges&&zero&&nub->init();
     if(ok){nub->setDeviceMemory(ranges);nub->setName("usb-host0");nub->setProperty("bus-number",zero);
         nub->setProperty("AAPL,clock-id",0ull,32);ok=nub->attach(IOService::getPlatform());}
-    if(ok){nub->registerService();IOLog("NABU USB: NabuXhciNub published regs=0a600000 IRQ=165\n");host=new NabuUsbXhci;ok=host&&host->init()&&host->attach(nub);}
+    if(ok){nub->registerService();IOLog("NABU USB: NabuXhciNub published regs=0a600000 IRQ=165\n");host=new NabuUsbXhci;ok=host&&host->init()&&host->configureDmaCache()&&host->attach(nub);}
     if(ok){ok=host->start(nub);if(!ok)host->detach(nub);}
     OSSafeReleaseNULL(zero);OSSafeReleaseNULL(ranges);OSSafeReleaseNULL(range);
     if(!ok){OSSafeReleaseNULL(host);if(nub){nub->terminate(kIOServiceSynchronous);nub->release();nub=nullptr;}}

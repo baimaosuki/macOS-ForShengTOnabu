@@ -10,7 +10,7 @@ struct UsbHostSnapshot {
     bool valid=false,runtimeValid=false;
     uint32_t cap=0,command=0,status=0,crcrLo=0,crcrHi=0,dcbaaLo=0,dcbaaHi=0;
     uint32_t runtime=0,iman=0,erstSize=0,erstLo=0,erstHi=0,erdpLo=0,erdpHi=0;
-    uint32_t port[2]{},gctl=0,usb2=0,bus0=0,bus1=0,cgctl=0;
+    uint32_t port[2]{},gctl=0,usb2=0,guctl=0,guctl1=0,bus0=0,bus1=0,cgctl=0;
     bool haltPending() const {return valid && !(command&1) && !(status&1);}
     uint32_t signature() const {
         // Pointer traffic is not a reason to log each interrupt/frame.
@@ -141,12 +141,11 @@ public:
         // available to the USB bus engine, preserving other CGCTL fields.
         if(!update(B::Scratch,0x28,0x18,0x18))return false;
         phase("UTMI-clock-select");
-        // Missing PIPE clock otherwise stalls xHCI HCRST. Disable -> select -> enable.
-        if(!update(B::Scratch,8,0x100,0x100))return false;
+        // nabu NativeDwc3: route UTMI and software
+        // PHYSTATUS without pulsing CLK_DIS. That pulse has locked this nabu
+        // wrapper; the SM8550 eUSB2/QMP recipe is not this FEMTO clock path.
+        if(!update(B::Scratch,8,0x109,9))return false;
         io.delayUs(100);
-        if(!update(B::Scratch,8,9,9))return false;
-        io.delayUs(100);
-        if(!update(B::Scratch,8,0x100,0))return false;
         phase("controller-id");
         coreId_=io.read(B::Core,0xc120);
         const uint32_t ip=coreId_>>16;
@@ -209,6 +208,7 @@ public:
         unsigned ports=io.read(B::Core,4)>>24;if(ports>2)ports=2;
         for(unsigned i=0;i<ports;++i)s.port[i]=io.read(B::Core,s.cap+0x400+16*i);
         s.gctl=io.read(B::Core,0xc110);s.usb2=io.read(B::Core,0xc200);
+        s.guctl=io.read(B::Core,0xc12c);s.guctl1=io.read(B::Core,0xc11c);
         s.bus0=io.read(B::Core,0xc100);s.bus1=io.read(B::Core,0xc104);
         s.cgctl=io.read(B::Scratch,0x28);
         return s;
