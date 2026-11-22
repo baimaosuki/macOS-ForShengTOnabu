@@ -1,0 +1,72 @@
+version = 1
+[boot]
+timeout = -1
+default = "a640-metal"
+[kits]
+autoload = false
+[ui]
+scale = 3
+
+[[entry]]
+id = "a640-metal"
+title = "macOS 27.3 - A640 Metal GPU"
+type = "xnu"
+path = "Payloads/kernel.macho"
+initrd = "Payloads/scratch-data.img"
+args = "debug=0x14e kt_fixed_zones=120 -no_slto_panic use_contiguous_hint=0 native-source-storage=1 native-ufs-root=1 apfs-boot-shim=1 timebase-hz=24000000 offline-mobile-graphics-load=1 offline-legacy-register=1 offline-legacy-gop=1 offline-legacy-pm=1 offline-legacy-validate=1 offline-legacy-transfer=1 offline-legacy-cpu-present=1 offline-legacy-phase=4 vsync=60 aks=1 aks-sls=3 smp=1 armcpu-edge=1 log=1 nabu-log=1 nabu-log-token=cfef620840c9cd33251ee67608ca318d disable-watchdogd=1 no-lc=1 offline-key-events=1 ethernet=1 data-persist=2 nabu-session-observer=1 nabu-touch=1 nabu-usb-host=1 nabu-power-key=1 nabu-gpu=1 gpu-addon=1 fb-gpu=1 fb-bgra=1 nabu-gpu-scanout=1 dpu-scanout=2 gpu-power=9 gpu-metal=1 ca-triple-buffer=1 ca-free-wakeup=1 log-gpu=1"
+
+[[entry]]
+id = "a640-metal-init"
+title = "macOS 27.3 - Initialize Data + A640 Metal GPU"
+confirm = "Erase macOS Data and initialize it from the 27.3 seed, then boot with the A640 Metal GPU path?"
+confirm_titles = ["Initialize Data and boot (GPU)"]
+confirm_args = ["data-reset=1"]
+type = "xnu"
+path = "Payloads/kernel.macho"
+initrd = "Payloads/scratch-data.img"
+args = "debug=0x14e kt_fixed_zones=120 -no_slto_panic use_contiguous_hint=0 native-source-storage=1 native-ufs-root=1 apfs-boot-shim=1 timebase-hz=24000000 offline-mobile-graphics-load=1 offline-legacy-register=1 offline-legacy-gop=1 offline-legacy-pm=1 offline-legacy-validate=1 offline-legacy-transfer=1 offline-legacy-cpu-present=1 offline-legacy-phase=4 vsync=60 aks=1 aks-sls=3 smp=1 armcpu-edge=1 log=1 nabu-log=1 nabu-log-token=cfef620840c9cd33251ee67608ca318d disable-watchdogd=1 no-lc=1 offline-key-events=1 ethernet=1 data-persist=2 nabu-session-observer=1 nabu-touch=1 nabu-usb-host=1 nabu-power-key=1 nabu-gpu=1 gpu-addon=1 fb-gpu=1 fb-bgra=1 nabu-gpu-scanout=1 dpu-scanout=2 gpu-power=9 gpu-metal=1 ca-triple-buffer=1 ca-free-wakeup=1 log-gpu=1"
+
+[[entry]]
+id = "xnu"
+title = "macOS 27.3"
+type = "xnu"
+path = "Payloads/kernel.macho"
+initrd = "Payloads/scratch-data.img"
+args = "debug=0x14e kt_fixed_zones=120 -no_slto_panic use_contiguous_hint=0 native-source-storage=1 native-ufs-root=1 apfs-boot-shim=1 vc-text=1 exec-log=1 timebase-hz=24000000 offline-mobile-graphics-load=1 offline-legacy-register=1 offline-legacy-gop=1 offline-legacy-pm=1 offline-legacy-validate=1 offline-legacy-transfer=1 offline-legacy-cpu-present=1 offline-legacy-phase=4 vsync=60 aks=1 aks-sls=3 smp=1 armcpu-edge=1 log=1 nabu-log=1 nabu-log-token=cfef620840c9cd33251ee67608ca318d disable-watchdogd=1 no-lc=1 offline-key-events=1 ethernet=1 data-persist=2 nabu-session-observer=1 nabu-touch=1 nabu-usb-host=1 nabu-power-key=1"
+
+[[entry]]
+id = "coldstart"
+title = "macOS 27.3 - observe 900s then sync and halt"
+type = "xnu"
+path = "Payloads/kernel.macho"
+initrd = "Payloads/scratch-data.img"
+args = "debug=0x14e kt_fixed_zones=120 -no_slto_panic use_contiguous_hint=0 native-source-storage=1 native-ufs-root=1 apfs-boot-shim=1 vc-text=1 exec-log=1 timebase-hz=24000000 offline-mobile-graphics-load=1 offline-legacy-register=1 offline-legacy-gop=1 offline-legacy-pm=1 offline-legacy-validate=1 offline-legacy-transfer=1 offline-legacy-cpu-present=1 offline-legacy-phase=4 vsync=60 aks=1 aks-sls=3 smp=1 armcpu-edge=1 log=1 nabu-log=1 nabu-log-token=cfef620840c9cd33251ee67608ca318d disable-watchdogd=1 no-lc=1 offline-key-events=1 ethernet=1 data-persist=2 nabu-session-observer=1 nabu-clean-shutdown=900 nabu-touch=1 nabu-usb-host=1 nabu-power-key=1"
+
+[[entry]]
+id = "install"
+title = "Initialize macOS Data and boot"
+confirm = "Erase macOS Data and initialize it from the new 27.3 installation seed?"
+confirm_titles = ["Initialize Data and boot"]
+confirm_args = ["data-reset=1"]
+type = "xnu"
+path = "Payloads/kernel.macho"
+initrd = "Payloads/scratch-data.img"
+args = "debug=0x14e kt_fixed_zones=120 -no_slto_panic use_contiguous_hint=0 native-source-storage=1 native-ufs-root=1 apfs-boot-shim=1 vc-text=1 exec-log=1 timebase-hz=24000000 offline-mobile-graphics-load=1 offline-legacy-register=1 offline-legacy-gop=1 offline-legacy-pm=1 offline-legacy-validate=1 offline-legacy-transfer=1 offline-legacy-cpu-present=1 offline-legacy-phase=4 vsync=60 aks=1 aks-sls=3 smp=1 armcpu-edge=1 log=1 nabu-log=1 nabu-log-token=cfef620840c9cd33251ee67608ca318d disable-watchdogd=1 no-lc=1 offline-key-events=1 ethernet=1 data-persist=2 nabu-session-observer=1 nabu-touch=1 nabu-usb-host=1 nabu-power-key=1"
+
+[[entry]]
+id = "reset"
+title = "Restart"
+type = "action"
+action = "reset"
+
+[[entry]]
+id = "shutdown"
+title = "Power off"
+type = "action"
+action = "shutdown"
+
+[[driver]]
+path = "Drivers/DarwinBoot.efi"
+args = "replace-existing"
+required = true
+connect = false

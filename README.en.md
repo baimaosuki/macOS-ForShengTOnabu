@@ -1,6 +1,6 @@
 # macOS on Xiaomi Pad 5 · nabu
 
-[简体中文](README.md) · [Status](STATUS.md) · [Source map](REPOSITORY.md) · [Build notes](BUILDING.md) · [Credits and licenses](UPSTREAM.md)
+[简体中文](README.md) · [Status](STATUS.md) · [Progress](PROGRESS.md) · [ESP menu](INSTALLING.md) · [Source release](OPEN_SOURCE.md) · [Source map](REPOSITORY.md) · [Build notes](BUILDING.md) · [Credits and licenses](UPSTREAM.md)
 
 An experimental UniXNU-based macOS port for **Xiaomi Pad 5 (nabu, SM8150-AC, Adreno 640)**. The current OS target is **macOS 27.3 / 26C5035r**. This repository is an independent nabu integration maintained by baimaosuki; see the upstream acknowledgements.
 
@@ -19,7 +19,7 @@ An experimental UniXNU-based macOS port for **Xiaomi Pad 5 (nabu, SM8150-AC, Adr
 
 The main integration is in [`devices/nabu/`](devices/nabu/); shared platform code is in [`soc/sm8150/`](soc/sm8150/). The remaining framework and documentation are inherited from UniXNU. `main` is the public source snapshot; historical revisions remain in Git.
 
-The latest driver snapshot is [`be3ac67`](https://github.com/baimaosuki/macOS-ForShengTOnabu/commit/be3ac67a51e8d0a0da52b50e9a79cc3ab0297920), with successful [native CI 44984347125](https://github.com/baimaosuki/macOS-ForShengTOnabu/actions/runs/44984347125). This is build evidence, not USB or GPU hardware acceptance.
+The latest USB event-routing change is included in `main`; working mouse input still awaits device verification. The latest driver snapshot is [`bf88431`](https://github.com/baimaosuki/macOS-ForShengTOnabu/commit/bf8843104b08006a94056bc20156926a2c11800b), with successful [native CI 45012322361](https://github.com/baimaosuki/macOS-ForShengTOnabu/actions/runs/45012322361). This is build evidence, not USB or GPU hardware acceptance.
 
 The OS target remains 27.3; SDK26.5 is the compiler SDK used by the existing pipeline. SM8150 lacks hardware PAuth, so this port uses ordinary arm64 with Zeta PAC adaptations. See [BUILDING.md](BUILDING.md) for required local inputs and build limits. Current source does not include Apple OS images, device firmware, private signing keys or local accounts.
 

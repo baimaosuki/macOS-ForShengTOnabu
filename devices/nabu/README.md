@@ -16,3 +16,5 @@
 | 本地固件输入清单 | [proprietary-files.txt](proprietary-files.txt) |
 
 [构建说明](../../BUILDING.md) · [仓库导航](../../REPOSITORY.md) · [来源与许可](../../UPSTREAM.md)
+
+最新进度：[PROGRESS.md](../../PROGRESS.md)。ESP 对齐菜单与刷入规则：[INSTALLING.md](../../INSTALLING.md)。

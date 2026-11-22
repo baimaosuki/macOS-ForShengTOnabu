@@ -4,6 +4,7 @@ import argparse,hashlib,json,struct,tomllib,uuid,zlib
 from pathlib import Path
 from nabu_gpu_addon_contract import (shader_cache_contract, metal_publication_contract,
                                     METAL_PUBLISH_MARKER, METAL_PUBLISH_CONTENT)
+from nabu_boot_config27 import install as install_aligned_menu
 
 def decode(raw):
     magic,count,reserved,total=struct.unpack_from('<8sIIQ',raw)
@@ -69,11 +70,12 @@ def main():
     assert len(entry['args'].encode())<1024 and 'data-reset=1' not in tokens
     assert not any(e.get('id')==entry['id'] for e in config['entry'])
     menu.write_text(text+'\n[[entry]]\n'+''.join(k+' = '+json.dumps(v)+'\n' for k,v in entry.items()))
+    aligned_menu=install_aligned_menu(a.esp,tomllib.loads(menu.read_text()))
     result=dict(passed=True,signed_userspace_commit=report['source_commit'],
         addon_sha256=hashlib.sha256(addon.read_bytes()).hexdigest(),trust_sha256=hashlib.sha256(trust.read_bytes()).hexdigest(),
         preserved_entries=len(original),gpu_entries=len(merged)-len(original),owner_module_preserved=True,
         cpu_entry_preserved=True,gpu_entry=entry,shader_cache=cache_contract,
-        metal_publication=publication,hardware_tested=False)
+        metal_publication=publication,boot_menu=aligned_menu,hardware_tested=False)
     a.output.write_text(json.dumps(result,indent=2)+'\n');print(json.dumps(result,indent=2))
 
 if __name__=='__main__':main()

@@ -1,11 +1,11 @@
 # macOS on Xiaomi Pad 5 · nabu
 
-[English](README.en.md) · [当前状态](STATUS.md) · [源码导航](REPOSITORY.md) · [构建说明](BUILDING.md) · [上游与许可](UPSTREAM.md)
+[English](README.en.md) · [当前状态](STATUS.md) · [进度记录](PROGRESS.md) · [ESP 使用](INSTALLING.md) · [开源范围](OPEN_SOURCE.md) · [源码导航](REPOSITORY.md) · [构建说明](BUILDING.md) · [上游与许可](UPSTREAM.md)
 
 基于 UniXNU 的小米平板 5（**nabu / SM8150-AC / Adreno 640**）macOS 实验移植。当前目标为 **macOS 27.3 / 26C5035r**。本仓库是 nabu 的独立实验分支，由 baimaosuki 整理维护；上游项目见[致谢](UPSTREAM.md)。
 
 > **暂时停更 · 2026-11-22**
-> USB 不工作，触控工作，GPU 疑似在工作，仍缺多项驱动。恢复时间未定。
+> USB 不工作，触控工作，GPU 疑似在工作，仍缺多项驱动。最新补丁已发布源码，后续开发暂无恢复时间。
 
 ## 当前实机状态
 
@@ -33,7 +33,9 @@
 
 目标系统是 **27.3**；最近使用的 **SDK 26.5** 是编译工具版本，二者不是同一概念。SM8150 没有硬件 PAuth，当前路径使用普通 `arm64` 与 Zeta PAC 适配。详情见 [BUILDING.md](BUILDING.md)。
 
-最近一次驱动代码快照为 [`be3ac67`](https://github.com/baimaosuki/macOS-ForShengTOnabu/commit/be3ac67a51e8d0a0da52b50e9a79cc3ab0297920)，对应[内核 CI 44984347125](https://github.com/baimaosuki/macOS-ForShengTOnabu/actions/runs/44984347125) 已通过。该结果属于构建验证，**不代表 USB 已修复或 GPU 已完成实机验收**。
+最新 USB 事件路由修正已纳入 `main`，实机鼠标操作仍待验收。最近一次驱动代码快照为 [`bf88431`](https://github.com/baimaosuki/macOS-ForShengTOnabu/commit/bf8843104b08006a94056bc20156926a2c11800b)，对应[内核 CI 45012322361](https://github.com/baimaosuki/macOS-ForShengTOnabu/actions/runs/45012322361) 已通过。该结果属于构建验证，**不代表 USB 已修复或 GPU 已完成实机验收**。
+
+ESP 菜单采用 [`config/unixnu.aligned.toml`](config/unixnu.aligned.toml)：默认 A640 Metal GPU、UI scale=3、GPU 初始化项须确认。新版 ESP 包校验和已包含这份配置；旧包覆盖规则见 [INSTALLING.md](INSTALLING.md)。
 
 本仓库保留源码和构建记录。Apple 系统素材、ROOT/Data 镜像、设备固件、私钥和本机账号文件由构建者自行准备，不纳入当前源码快照。现有构建流程仍有本地输入和集成步骤，参见[构建边界](BUILDING.md#构建边界)。
 

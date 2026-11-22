@@ -4,6 +4,8 @@
 
 | 路径 | 用途 |
 | --- | --- |
+| [`config/unixnu.aligned.toml`](config/unixnu.aligned.toml) | 完整 GPU ESP 的默认启动项、菜单顺序、UI和显式Data初始化配置 |
+| [`PROGRESS.md`](PROGRESS.md) | 截至P047的进度与验证记录 |
 | [`devices/nabu/board.toml`](devices/nabu/board.toml) | macOS27.3 设备、构建、启动及持久 Data 配置 |
 | [`devices/nabu/dts/`](devices/nabu/dts/) | nabu 设备树 |
 | [`soc/sm8150/`](soc/sm8150/) | SM8150 共享平台、DTSI 和内核补丁 |
@@ -27,7 +29,7 @@
 
 - 旧默认 `26.5` 快照：[`44bb65d`](https://github.com/baimaosuki/macOS-ForShengTOnabu/commit/44bb65d0178f15382b65a837f8fe47078ec0caeb)。
 - 旧 `main` 快照：[`90db20a`](https://github.com/baimaosuki/macOS-ForShengTOnabu/commit/90db20aa35ef27d13b1b56ece1ed59f92a30f68b)。
-- 整理前的最新 nabu 驱动快照：[`be3ac67`](https://github.com/baimaosuki/macOS-ForShengTOnabu/commit/be3ac67a51e8d0a0da52b50e9a79cc3ab0297920)。
+- 当前最新 nabu 驱动快照：[`bf88431`](https://github.com/baimaosuki/macOS-ForShengTOnabu/commit/bf8843104b08006a94056bc20156926a2c11800b)。
 
 旧26.5历史中包含早期构建产物。当前 `main` 文件树不再携带这些产物；本轮整理保留历史，没有执行历史清洗。需要减少首次下载时可使用 `git clone --filter=blob:none`。
 

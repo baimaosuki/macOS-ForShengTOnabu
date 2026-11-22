@@ -54,7 +54,7 @@ export NABU_TOUCH_FIRMWARE_DIR=/absolute/path/to/local/nabu-touch
 已准备原始27.3 kernelcache和所需编译器/依赖时，相关入口包括：
 
 ```sh
-python3 -m pytest -q devices/nabu/tests/test_input27.py
+python3 -m pytest -q devices/nabu/tests/test_input27.py devices/nabu/tests/test_usb_transfer27.py devices/nabu/tests/test_usb_routing27.py devices/nabu/tests/test_boot_menu27.py
 python3 devices/nabu/tests/check-usb-allocations27.py   --kernelcache /absolute/path/to/kernelcache.release.mac17j.decompressed   --output /absolute/path/to/usb-allocation-verification.json
 ```
 
@@ -65,3 +65,18 @@ GPU、SMMU、PAC 与 signed-text 检查位于 [`devices/nabu/tests/`](devices/na
 当前集成仍需要本地预链接、原始系统素材、固件、签名/信任输入、UEFI 和 ESP 合成。仓库保留这些阶段的源码入口，尚未整理成面向新用户的一键安装发行流程。没有新的安装验证保证，USB 和 GPU 状态以 [STATUS.md](STATUS.md) 为准。
 
 普通启动使用持久 Data。`data-reset=1` 对应显式初始化 Data 的菜单/流程，不是普通启动参数；继续研究时应区分已有系统与初始化步骤。
+
+## 最终 ESP 菜单与打包
+
+[`integrate-gpu-esp27.py`](devices/nabu/scripts/integrate-gpu-esp27.py) 在合并已签名 GPU addon 后，自动安装仓库根目录的 [`config/unixnu.aligned.toml`](config/unixnu.aligned.toml)。这是完整 GPU ESP 的最终菜单阶段；通用 `./unixnu build payload` 只是中间产物，不能据此跳过 addon 集成。后续 FAT/ZIP/SHA256SUMS 必须对最终菜单计算。
+
+已有通过校验的 ESP ZIP，可用公开工具补入同一菜单并重算校验和：
+
+```sh
+python3 devices/nabu/scripts/align-esp-package27.py \
+  --input /path/to/original-esp.zip \
+  --output /path/to/esp-aligned.zip \
+  --report /path/to/menu-report.json
+```
+
+需要 Python3.11+、mtools、dosfstools。工具先验证输入 ZIP 的 CRC 与全部 EFI 哈希，再替换菜单、做 FAT 写入/读回、生成新 SHA256SUMS 并验证输出 ZIP。它不重编内核，也不访问设备分区。刷入步骤见 [INSTALLING.md](INSTALLING.md)。

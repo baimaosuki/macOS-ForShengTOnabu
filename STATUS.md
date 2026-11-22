@@ -20,10 +20,12 @@
 
 ## 最后保留的工程快照
 
-- 驱动源码：[`be3ac67`](https://github.com/baimaosuki/macOS-ForShengTOnabu/commit/be3ac67a51e8d0a0da52b50e9a79cc3ab0297920)。
-- 原生内核构建：[CI 44984347125](https://github.com/baimaosuki/macOS-ForShengTOnabu/actions/runs/44984347125)，已通过。
+- 驱动源码：[`bf88431`](https://github.com/baimaosuki/macOS-ForShengTOnabu/commit/bf8843104b08006a94056bc20156926a2c11800b)。
+- 原生内核构建：[CI 45012322361](https://github.com/baimaosuki/macOS-ForShengTOnabu/actions/runs/45012322361)，已通过。
 - 用户态 GPU 构建：复用 [`9488928`](https://github.com/baimaosuki/macOS-ForShengTOnabu/commit/9488928fe17c5d601ed19ea2fad3554244a6c325) 对应的[已签名构建](https://github.com/baimaosuki/macOS-ForShengTOnabu/actions/runs/44892556083)。
-- 最后 USB 修改：恢复 SMMU WBWA `MAIR0=0xff`，修正原生 ring/context/client 实际分配选项，并调整 nabu UTMI 时钟选择。**这些改动未取得 USB 可用的验收结论，USB 仍标为不工作。**
+- 最新 USB 修改：P046 真机记录显示控制传输 TRB 的完成事件目标为1；P047 将输入上下文和传输 TRB 路由到平台使用的0号环，保留原生完成处理。最新修正尚未取得鼠标可用的实机验收，USB 仍标为不工作。
+- 本地验证：10项 ASan/UBSan 测试、SDK26.5编译链接、原始27.3与本次ARM64路由回放；15项最终二进制检查、FAT读回、ZIP校验通过。
+- 启动菜单：4,909B 对齐版已纳入源码与最终GPU集成；默认 `a640-metal`、`[ui] scale=3`，初始化 Data 仅在显式确认后触发。详见 [INSTALLING.md](INSTALLING.md)。
 - 本地验证包含 SDK 编译链接、Host 测试、ARM64 回放和产物检查。**这些结果不替代真机验证，也不用于将 GPU 状态改为“已确认工作”。**
 
 ## 阅读历史记录
@@ -31,3 +33,5 @@
 `docs/` 与 `devices/nabu/gpu-port27.json` 保留不同阶段的工程快照，其中的“待验证”“未上机”或早期阶段说明有各自时间范围。当前对外状态统一以本文件为准。
 
 后续若有人继续适配，请分别记录源码提交、Host/CI 结果、设备日志及实际输入/渲染表现；只有新的实机证据才能更新上表。
+
+详细阶段、源码和实机证据边界见 [PROGRESS.md](PROGRESS.md)。当前发布范围与可复现限制见 [OPEN_SOURCE.md](OPEN_SOURCE.md)。
