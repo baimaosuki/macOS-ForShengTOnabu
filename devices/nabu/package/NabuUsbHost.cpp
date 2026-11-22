@@ -3,6 +3,7 @@
 #include "NabuInputHardware.h"
 #include "NabuUsb2Core.h"
 #include "NabuUsbDma.h"
+#include "NabuUsbTransfer.h"
 #include <IOKit/IOBufferMemoryDescriptor.h>
 #include "NabuUsbRole.h"
 #include "NabuRpmh.h"
@@ -24,6 +25,11 @@ IODMACommand *nabu_usb_dma_with_service(IODMACommand::SegmentFunction,
     IODMACommand::MappingOptions,void *);
 bool nabu_usb_dma_aligned_mapper(OSObject *,IODMACommand::Segment64,uint32_t,bool);
 unsigned int pmap_cache_attributes(unsigned int);
+int pmap_valid_page(unsigned int);
+vm_offset_t ml_vtophys(vm_offset_t);
+vm_map_address_t phystokv_range(uint64_t,vm_size_t *);
+vm_size_t ml_nofault_copy(vm_offset_t,vm_offset_t,vm_size_t);
+extern uint64_t gPhysBase,gPhysSize;
 void nabu_usb_static_init(void) __asm__("__GLOBAL__sub_I_NabuUsbHost.cpp");
 }
 namespace {
@@ -119,7 +125,7 @@ struct Hardware {
         IOLog("NABU USB: UFS slot2=%08x route=%08x CB1 preserved=%u USB slot=%u CB=%u\n",ufsSmr,ufsRoute,ufsPreserved,plan.index,plan.bank);
         if(!ufsPreserved)return false;
         dmaBank=plan.bank;dmaSlot=plan.index;dmaGlobalPages=info.global_pages;dmaReady=ok;
-        IOLog("NABU USB: SID=%x slot=%u context=%u identity=%u table=%llx GFSR=%x memory=WB-inner-shareable coherence=unverified\n",sid,plan.index,plan.bank,ok,pa,smmu.read(sm::kGfsr));
+        IOLog("NABU USB: SID=%x slot=%u context=%u identity=%u table=%llx GFSR=%x output=Normal-NC-inner-shareable table_walk=WBWA coherence=unverified\n",sid,plan.index,plan.bank,ok,pa,smmu.read(sm::kGfsr));
         return ok;
     }
 } hardware;
@@ -205,6 +211,47 @@ struct UsbRegisterIo {
     void complete() {asm volatile("dsb sy":::"memory");}
 };
 static_assert(kIOMapCacheMask==0xf00 && kIOMapWriteCombineCache==0x400,"USB cache ABI");
+namespace {
+nabu::UsbTransferTrace usbTransfers;
+struct UsbTraceIo {
+    uint32_t reg(unsigned off) const {return hardware.core.read(off);}
+    uint32_t status() const {const unsigned cap=reg(0)&255;return cap>=0x20 && cap<=0x80?reg(cap+4):~0u;}
+    unsigned cache(uint64_t pa) const {return pmap_cache_attributes(unsigned(pa>>PAGE_SHIFT));}
+    bool read(uint64_t pa,void *output,unsigned bytes) const {
+        // Do not trust a DMA pointer enough to fault the kernel. Bound every
+        // sample to DRAM, split at XNU physmap aperture/page boundaries and
+        // use the native no-fault accessor. No manual gVirtBase arithmetic.
+        if(!bytes || bytes>128 || pa<gPhysBase || pa-gPhysBase>=gPhysSize || bytes>gPhysSize-(pa-gPhysBase))return false;
+        auto *destination=static_cast<uint8_t *>(output);
+        while(bytes) {
+            if(!pmap_valid_page(unsigned(pa>>PAGE_SHIFT)))return false;
+            vm_size_t span=PAGE_SIZE-(pa&PAGE_MASK);if(span>bytes)span=bytes;
+            const auto address=phystokv_range(pa,&span);
+            if(!address || !span || span>bytes || ml_nofault_copy(address,reinterpret_cast<vm_offset_t>(destination),span)!=span)return false;
+            destination+=span;pa+=span;bytes-=unsigned(span);
+        }
+        return true;
+    }
+};
+bool usbRegisterOffset(void *base,unsigned offset,unsigned &result) {
+    // Native AppleUSBXHCI owns a different mapping from hardware.core.
+    // Resolve the real register PA; never compare unrelated kernel VAs.
+    const auto address=reinterpret_cast<vm_offset_t>(base)+offset;
+    const uint64_t pa=ml_vtophys(address);
+    if(pa<0xa600000 || pa>=0xa610000)return false;
+    result=unsigned(pa-0xa600000);return true;
+}
+void drainTransfers() {
+    nabu::UsbTraceRecord record;
+    for(unsigned i=0;i<64 && usbTransfers.take(record);++i) {
+        IOLog("NABU USB: transfer-trace seq=%u kind=%u addr=%llx related=%llx tag=%x STS=%08x cache=%x valid=%x trb=%08x,%08x,%08x,%08x sample=%08x,%08x,%08x,%08x\n",
+            record.sequence,unsigned(record.kind),record.address,record.related,record.tag,record.status,record.cache,record.valid,
+            record.trb.word[0],record.trb.word[1],record.trb.word[2],record.trb.word[3],record.bytes[0],record.bytes[1],record.bytes[2],record.bytes[3]);
+    }
+    static unsigned previous=0;const unsigned lost=usbTransfers.dropped();
+    if(lost!=previous){IOLog("NABU USB: transfer-trace dropped=%u (bounded nonblocking capture)\n",lost);previous=lost;}
+}
+}
 namespace {void reportRuntime(const nabu::UsbHostSnapshot &);}
 class NabuUsbXhci : public AppleUSBXHCI {
     OSDeclareDefaultStructors(NabuUsbXhci)
@@ -217,7 +264,7 @@ public:
             void write(unsigned off,uint32_t value){__builtin_memcpy(object+off,&value,sizeof(value));}
         } fields{reinterpret_cast<uint8_t *>(this)};
         nabu::UsbControllerCachePolicy27 policy;const bool ok=policy.install(fields);
-        IOLog("NABU USB: controller-cache dma=%08x->%08x client=%08x->%08x CPU=Normal-NC SMMU=WBWA verified=%u\n",
+        IOLog("NABU USB: controller-cache dma=%08x->%08x client=%08x->%08x CPU=Normal-NC SMMU=Normal-NC verified=%u\n",
             policy.oldDma,policy.dma,policy.oldClient,policy.client,ok);
         return ok;
     }
@@ -266,10 +313,19 @@ public:
     }
     uint32_t regRead32(void *base,uint32_t off) override {
         UsbRegisterIo io{reinterpret_cast<volatile uint32_t *>(base)};
-        return nabu::usbReadRegister32(io,off);
+        const auto value=nabu::usbReadRegister32(io,off);
+        unsigned location;
+        if(off==4 && usbRegisterOffset(base,off,location) && location==(hardware.core.read(0)&255)+4) {
+            UsbTraceIo trace;usbTransfers.status(trace,value);
+        }
+        return value;
     }
     void regWrite32(void *base,uint32_t off,uint32_t value) override {
         UsbRegisterIo io{reinterpret_cast<volatile uint32_t *>(base)};
+        unsigned location;
+        if(usbRegisterOffset(base,off,location)) {
+            io.writeBarrier();UsbTraceIo trace;usbTransfers.write32(trace,location,value);
+        }
         nabu::usbWriteRegister32(io,off,value);
     }
     uint64_t regRead64(void *base,uint32_t off) override {
@@ -278,6 +334,10 @@ public:
     }
     void regWrite64(void *base,uint32_t off,uint64_t value) override {
         UsbRegisterIo io{reinterpret_cast<volatile uint32_t *>(base)};
+        unsigned location;
+        if(usbRegisterOffset(base,off,location)) {
+            io.writeBarrier();UsbTraceIo trace;usbTransfers.write64(trace,location,value);
+        }
         nabu::usbWriteRegister64(io,off,value);
     }
 };
@@ -296,7 +356,7 @@ void reportRuntime(const nabu::UsbHostSnapshot &s) {
     IOLog("NABU USB: glue GCTL=%08x USB2=%08x GUCTL=%08x GUCTL1=%08x BUS0=%08x BUS1=%08x CGCTL=%08x MASTER=%08x CFG=%08x UTMI=%08x SLEEP=%08x\n",
         s.gctl,s.usb2,s.guctl,s.guctl1,s.bus0,s.bus1,s.cgctl,hardware.gcc.read(0xf010),hardware.gcc.read(0xf078),hardware.gcc.read(0xf018),hardware.gcc.read(0xf014));
     const uint64_t dcbaa=uint64_t(s.dcbaaHi)<<32|s.dcbaaLo,erst=uint64_t(s.erstHi)<<32|s.erstLo;
-    IOLog("NABU USB: actual-ring-cache DCBAA=%x ERST=%x CPU_expected=6 SMMU_MAIR_expected=ff\n",
+    IOLog("NABU USB: actual-ring-cache DCBAA=%x ERST=%x CPU_expected=6(Normal-NC) SMMU_MAIR_expected=44\n",
         dcbaa?pmap_cache_attributes(unsigned(dcbaa>>PAGE_SHIFT)):~0u,
         erst?pmap_cache_attributes(unsigned(erst>>PAGE_SHIFT)):~0u);
     if(hardware.dmaReady) {
@@ -358,6 +418,7 @@ void worker(void *,wait_result_t){
     nabu::UsbHostReportPolicy reports;uint64_t diagnosticMs=0;
     uint32_t previous=~0u;bool source=false;unsigned errorRounds=0;
     for(;;){
+        drainTransfers();
         const auto hostState=core.snapshot();
         uint32_t usbFault=0;
         if(hardware.dmaReady)usbFault=nabu::usbContextFaults(hardware.smmu.read(nabu_usb::smmu::context_offset(hardware.dmaGlobalPages,hardware.dmaBank)+0x58));

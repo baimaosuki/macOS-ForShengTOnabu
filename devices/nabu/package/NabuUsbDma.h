@@ -2,10 +2,13 @@
 #pragma once
 #include "NabuUsbSmmu.h"
 namespace nabu {
-// Keep the device-proven WBWA/shareable USB SMMU output attributes. Normal-NC
-// output regressed controller startup (p044: TF at IOVA0 and USBSTS.HSE).
-// CPU buffer cache policy and DMA ownership synchronization are independent.
-constexpr uint32_t usbDmaMair=0xff;
+// Non-snooping nabu USB: match the CPU's WCOMB/Normal-NC owned allocations.
+// p044 changed only the SMMU: the native ring allocator still bypassed the
+// convenience overrides. Keep the qualified native allocation fields below;
+// changing MAIR alone is not a complete non-coherent DMA implementation.
+// This is the output memory type, not the (WBWA) page-table-walk policy.
+constexpr uint32_t usbDmaMair=0x44;
+constexpr unsigned usbCpuDmaCache=6; // XNU VM_WIMG_WCOMB; COPYBACK is 2.
 // Owned rings and transfer buffers must use Normal-NC on this non-snooping
 // USB master. Do not combine a requested cache mode with the caller's mode.
 inline uint32_t usbBufferOptions(uint32_t options) {

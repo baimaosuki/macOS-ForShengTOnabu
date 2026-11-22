@@ -73,10 +73,11 @@ int main(){
  nabu::UsbPowerReportPolicy power;
  for(unsigned n=1;n<=130;++n)assert(power.sample(1,0xe00002e9,0,0x100d)==(n<=3 || n%64==0));
  assert(power.sample(1,0xe00002e9,0,0x18));assert(!power.sample(9,0,0,0));
- // Keep proven USB SMMU WBWA; CPU buffer coherency is a separate policy.
+ // Owned CPU mappings and USB SMMU output are both Normal-NC. The SMMU
+ // page-table walker remains WBWA; its table is explicitly cleaned.
  const uint64_t pte=nabu::usbIdentityBlock(3);
  assert(((pte>>2)&7)==0 && ((pte>>8)&3)==3 && (pte&(1u<<10)));
- assert(nabu::usbDmaMair==0xff);
+ assert(nabu::usbDmaMair==0x44 && nabu::usbCpuDmaCache==6);
  Bus bus;bus.core(0,0x40);bus.core(4,2u<<24);bus.core(0x18,0x1000);
  bus.core(0x40,0);bus.core(0x44,0);bus.core(0x458,0xdeadbeef);
  bus.core(0x440,0x0e000663);bus.core(0x450,0x200);bus.core(0x1020,3);
@@ -210,6 +211,7 @@ def check_actual_dma_allocation_and_failure_paths(tmp_path):
 #include <cstdint>
 #include <cstdio>
 #include "NabuUsbDma.h"
+#include "NabuUsbTransfer.h"
 using IOReturn=int;using IOOptionBits=uint32_t;
 constexpr int kIOReturnSuccess=0;constexpr unsigned PAGE_SHIFT=12;
 #define OSDeclareDefaultStructors(T)
@@ -250,7 +252,13 @@ static IODMACommand *nabu_usb_dma_with_service(IODMACommand::SegmentFunction out
  assert(out==kIODMACommandOutputHost64 && mapper==nabu_usb_dma_aligned_mapper && service && !ref);
  assert(options==IODMACommand::kNonCoherent);++factoryCalls;return failCommand?nullptr:&command;
 }
-struct Hardware{} hardware;
+struct Hardware{struct Core{unsigned read(unsigned){return 0;}}core;} hardware;
+struct UsbTraceIo {
+ unsigned reg(unsigned){return 0;}unsigned status(){return 0;}
+ unsigned cache(uint64_t){return 6;}bool read(uint64_t,void*,unsigned){return false;}
+};
+static nabu::UsbTransferTrace usbTransfers;
+static bool usbRegisterOffset(void*,unsigned,unsigned&){return false;}
 namespace nabu {
 struct UsbHostSnapshot{uint32_t command=0x40d,status=0;};
 template<class H>struct Usb2Core{explicit Usb2Core(H&){}UsbHostSnapshot snapshot(){return {};}};
