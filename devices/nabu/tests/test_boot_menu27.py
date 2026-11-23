@@ -71,3 +71,15 @@ def test_require_local_identity_and_reject_conflicts(tmp_path, monkeypatch, caps
         with pytest.raises(ValueError):
             menu.allocation_token(broken)
     assert first not in capsys.readouterr().out
+
+
+def test_explicit_first_build_without_esp_journal(tmp_path, monkeypatch):
+    monkeypatch.delenv('NABU_LOCAL_BOOT_CONFIG', raising=False)
+    raw = menu.ALIGNED_CONFIG.read_bytes()
+    reference = tomllib.loads(raw.decode())
+    report = menu.install(tmp_path, reference, without_persistent_log=True)
+    installed = (tmp_path / menu.MENU_PATH).read_bytes()
+    assert b'nabu-log=1' not in installed and b'nabu-log-token=' not in installed
+    assert b'nabu-log=0' in installed and b'log=1' in installed
+    assert not report['persistent_log_enabled']
+    assert not report['log_allocation_identity_preserved']

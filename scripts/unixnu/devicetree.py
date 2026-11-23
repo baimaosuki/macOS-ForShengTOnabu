@@ -293,6 +293,26 @@ def platform_node(name, table):
     return node(name, properties, children)
 
 
+NABU_GPU_FIRMWARE = {
+    'gmu-firmware': ('a640_gmu.bin', 37680, '3ff0c02708bbe78641db887fa62f3a7f9337934d0c2ce0b961ef7c43172591d2'),
+    'sqe-firmware': ('a630_sqe.fw', 32136, '36298bd53ea3666413d288a3a3f5266f67fcb6db038a0a481af5869d1c17859c'),
+    'zap-metadata': ('a640_zap.mdt', 6860, '5c5a956febabc8c8f3fc7b2cc48ae22bcab9ae25a9853c7cd0baadc9ec406882'),
+    'zap-shader': ('a640_zap.b02', 1968, 'e24a4f483b71ea19715910f01e1abf94280756df731cad05df48fd7714e34198'),
+}
+
+
+def nabu_gpu_firmware(directory):
+    """The hashes match NativeAdrenoResources' independent kernel-side checks."""
+    import hashlib
+    properties = []
+    for key, (name, size, expected) in NABU_GPU_FIRMWARE.items():
+        data = (Path(directory) / name).read_bytes()
+        if len(data) != size or hashlib.sha256(data).hexdigest() != expected:
+            raise Error(f'Unqualified NABU GPU firmware: {name}')
+        properties.append((key, data))
+    return properties
+
+
 def generate(dtb, config, *, unique_chip_id=None, data=False, trust=False, addon=False, root_policies=False):
     root = read_fdt(Path(dtb).read_bytes())
     entries = list(root.walk())
@@ -422,6 +442,11 @@ def generate(dtb, config, *, unique_chip_id=None, data=False, trust=False, addon
     for entry in roots:
         name = entry.strings('unixnu,adt-root')[0]
         properties = hardware_properties(entry, handles)
+        if 'nabu,private-gpu-firmware' in entry.properties:
+            directory = os.environ.get('NABU_GPU_FIRMWARE_DIR')
+            if not directory:
+                raise Error('NABU_GPU_FIRMWARE_DIR is required for the A640 payload')
+            properties += nabu_gpu_firmware(directory)
         if 'nabu,private-firmware' in entry.properties:
             # Proprietary firmware stays outside Git. A production payload must
             # supply the board-owned firmware; an empty placeholder is rejected.

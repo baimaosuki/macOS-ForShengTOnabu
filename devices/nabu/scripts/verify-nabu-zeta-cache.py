@@ -62,5 +62,6 @@ r = unittest.TextTestRunner(verbosity=2).run(suite)
 report = json.loads(a.report.read_text())
 a.output.write_text(json.dumps(dict(passed=r.wasSuccessful(), files=len(report['files']),
                                     edits=report['edits'], all_changed_words_decoded=True,
-                                    all_code_pages_hashed=True, hardware_tested=False), indent=2) + '\n')
+                                    all_code_pages_hashed=True, hardware_tested=False,
+                                    cache_report_sha256=hashlib.sha256(a.report.read_bytes()).hexdigest()), indent=2) + '\n')
 raise SystemExit(not r.wasSuccessful())

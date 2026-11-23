@@ -1,5 +1,7 @@
 # NABU macOS 27.3 zeta ordinary-pointer ABI
 
+This page describes the ABI. The repository-root [reconstruction guide](https://github.com/baimaosuki/macOS-ForShengTOnabu/blob/main/REPRODUCING.md) and [reproducibility audit](https://github.com/baimaosuki/macOS-ForShengTOnabu/blob/main/REPRODUCIBILITY.md) contain the operational sequence and distinguish Host checks from an unperformed fresh hardware qualification.
+
 The source is pinned to UniXNU-zeta `eb489285a1d9153872f00c93ebb519a269b249b5`. Original file hashes and the BSD-2-Clause-Patent license are retained under `devices/nabu/scripts/zeta_pac/`.
 
 Proven code is lowered offline. PAC/AUT/XPAC preserve ordinary unsigned pointers; PACGA returns zero. Authenticated control flow becomes BR/BLR/RET and admitted authenticated loads become LDR/LDUR. Unproven words remain unchanged and use an identically defined kernel exception fallback if executed. No hardware PAC keys or authentication security are provided. Non-PAC SHA3/DIT/SB compatibility remains enabled.

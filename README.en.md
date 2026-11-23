@@ -1,5 +1,7 @@
 # macOS on Xiaomi Pad 5 · nabu
 
+[PAC ROOT and ESP reconstruction guide (Chinese)](REPRODUCING.md) · [Reproducibility audit (Chinese)](REPRODUCIBILITY.md)
+
 [简体中文](README.md) · [Status](STATUS.md) · [Progress](PROGRESS.md) · [ESP menu](INSTALLING.md) · [Source release](OPEN_SOURCE.md) · [Privacy review](PRIVACY.md) · [Source map](REPOSITORY.md) · [Build notes](BUILDING.md) · [Credits and licenses](UPSTREAM.md)
 
 An experimental UniXNU-based macOS port for **Xiaomi Pad 5 (nabu, SM8150-AC, Adreno 640)**. The current OS target is **macOS 27.3 / 26C5035r**. This repository is an independent nabu integration maintained by baimaosuki; see the upstream acknowledgements.

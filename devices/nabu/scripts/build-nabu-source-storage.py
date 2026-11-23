@@ -101,8 +101,9 @@ def main():
     build_id = os.environ.get('UNIXNU_IPSW_BUILD')
     if not build_id:
         parser.error('UNIXNU_IPSW_BUILD is not set; run through unixnu build kernel')
-    policies = (args.policy_dir or tree / f'build/verified-root-{build_id}')
-    if not args.policy_dir and not policies.is_dir():
+    policy_override = args.policy_dir or os.environ.get('NABU_ROOT_POLICY_DIR')
+    policies = Path(policy_override) if policy_override else tree / f'build/verified-root-{build_id}'
+    if not policy_override and not policies.is_dir():
         # A clean checkout ships the signed headers in the assembled tree (scripts/policies, copied
         # from the device repository); the full block tables stay a local input of the userdata image.
         shipped = sorted(tree.glob(f'scripts/policies/*{build_id}'))

@@ -27,6 +27,7 @@ def encode(entries):
 
 def main():
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--esp',type=Path,required=True)
+    p.add_argument('--without-persistent-log',action='store_true',help='Explicit first-build mode: no preallocated ESP log/token; kernel log remains enabled')
     p.add_argument('--signed-userspace',type=Path,required=True);p.add_argument('--output',type=Path,required=True);a=p.parse_args()
     report=json.loads((a.signed_userspace/'verification.json').read_text())
     gpu=(a.signed_userspace/'gpuaddon.bin').read_bytes();owner=(a.signed_userspace/'owner-gpu.trustcache').read_bytes()
@@ -70,7 +71,7 @@ def main():
     assert len(entry['args'].encode())<1024 and 'data-reset=1' not in tokens
     assert not any(e.get('id')==entry['id'] for e in config['entry'])
     menu.write_text(text+'\n[[entry]]\n'+''.join(k+' = '+json.dumps(v)+'\n' for k,v in entry.items()))
-    aligned_menu=install_aligned_menu(a.esp,tomllib.loads(menu.read_text()))
+    aligned_menu=install_aligned_menu(a.esp,tomllib.loads(menu.read_text()),without_persistent_log=a.without_persistent_log)
     result=dict(passed=True,signed_userspace_commit=report['source_commit'],
         addon_sha256=hashlib.sha256(addon.read_bytes()).hexdigest(),trust_sha256=hashlib.sha256(trust.read_bytes()).hexdigest(),
         preserved_entries=len(original),gpu_entries=len(merged)-len(original),owner_module_preserved=True,

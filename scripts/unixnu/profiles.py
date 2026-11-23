@@ -1,5 +1,7 @@
 """Layered ARM64, SoC, OS, and device configuration."""
 from copy import deepcopy
+import os
+import re
 from pathlib import Path
 
 from .config import load_toml
@@ -70,6 +72,40 @@ def load(ctx, allow_fetch=False):
             node = node.get(key, {})
         node.pop(leaf, None)
     result.setdefault('board', {})['os_profile'] = os_name
+    root_profile = getattr(ctx.args, 'root_profile', None) or os.environ.get('UNIXNU_ROOT_PROFILE')
+    if root_profile:
+        overlay = load_toml(Path(root_profile).expanduser().resolve())
+        if not {'root'} <= set(overlay) <= {'root', 'payload'} or not isinstance(overlay['root'], dict):
+            raise Error('root profile needs [root] and optionally [payload] text_fixups')
+        expected = {name + suffix for name in ('os', 'systemos', 'app')
+                    for suffix in ('_volume_uuid', '_image_sha256')}
+        if set(overlay['root']) != expected:
+            raise Error('root profile needs all three image hashes and volume UUIDs')
+        import uuid
+        for key, value in overlay['root'].items():
+            if not isinstance(value, str):
+                raise Error('root profile values must be strings')
+            if key.endswith('_image_sha256') and not re.fullmatch('[0-9a-f]{64}', value):
+                raise Error('root profile has an invalid image SHA256')
+            if key.endswith('_volume_uuid'):
+                try:
+                    valid = str(uuid.UUID(value)).upper()
+                except ValueError as error:
+                    raise Error('root profile has an invalid volume UUID') from error
+                if valid != result.get('root', {}).get(key, '').upper():
+                    raise Error('root profile must preserve this OS profile\'s volume UUIDs')
+        result['root'] = merge(result.get('root', {}), overlay['root'])
+        if 'payload' in overlay:
+            payload = overlay['payload']
+            if set(payload) != {'text_fixups'} or not isinstance(payload['text_fixups'], list):
+                raise Error('root profile [payload] may override only text_fixups')
+            pattern = r'[A-Za-z0-9_.\-]{1,63},[0-9a-fA-F]{1,16},(?:[0-9a-fA-F]{2}){1,16},(?:[0-9a-fA-F]{2}){1,16}'
+            for fixup in payload['text_fixups']:
+                if not isinstance(fixup, str) or not re.fullmatch(pattern, fixup):
+                    raise Error('root profile has an invalid signed-text fixup')
+                if len(fixup.split(',')[2]) != len(fixup.split(',')[3]):
+                    raise Error('signed-text fixup changes the instruction range length')
+            result['payload']['text_fixups'] = payload['text_fixups']
     return result
 
 

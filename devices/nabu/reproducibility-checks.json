@@ -1,0 +1,37 @@
+{
+  "date": "2026-11-23",
+  "audit_base": "65f158baad06f4316f8118e6219179a42c4ad5fa",
+  "host_tests": {
+    "tests": 59,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "host_subtests": 7,
+  "documentation_site_build_passed": true,
+  "isolated_apfs_guest": {
+    "files_verified": 1,
+    "native_bsd_flags_verified": 1,
+    "clean_unmount": true,
+    "complete": true
+  },
+  "c_rsa_verification": {
+    "image_bytes": 67108864,
+    "blocks_verified": 16384,
+    "real_c_signature_and_block_verification": true
+  },
+  "host_tools": {
+    "apfsprogs": "b9c4cb404f88ffab6c4f260bbab29a8fb4784907",
+    "linux-apfs-rw": "6cf6de8ad6fa4cb634a700b5d0436d73ee01942c",
+    "apfs-fuse": "66b86bd525e8cb90f9012543be89b1f092b75cf3"
+  },
+  "verification_limits": {
+    "full_27_3_root_conversion_run": false,
+    "macos_sdk_build_run": false,
+    "native_ci_triggered": false,
+    "tablet_boot_tested": false,
+    "acl_xattr_equivalence_verified": false
+  },
+  "guide": "REPRODUCING.md",
+  "remaining_gaps": "REPRODUCIBILITY.md"
+}

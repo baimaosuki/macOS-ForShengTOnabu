@@ -28,6 +28,7 @@ def common():
     p.add_argument('--uefi', metavar='DIR', help='Mu-Silicium checkout for the device (uefi-sheng); or UNIXNU_UEFI')
     p.add_argument('--edk2', metavar='DIR', help='Mu_Basecore checkout; or UNIXNU_EDK2')
     p.add_argument('--kernelcache', metavar='FILE', help='original decompressed kernelcache; or UNIXNU_KERNELCACHE')
+    p.add_argument('--root-profile', metavar='FILE', help='local [root] image hashes/UUIDs; or UNIXNU_ROOT_PROFILE')
     p.add_argument('--skip-prelink', action='store_true', help='kernel/prelink: copy the built native kernel to kernel.macho without adding kernelcache kexts')
     p.add_argument('--skip-preflight', action='store_true', help='skip the board preflight scripts of the firmware step')
     p.add_argument('--kernel', metavar='FILE', help='prelinked kernel Mach-O for the payload (default: the kernel step output)')

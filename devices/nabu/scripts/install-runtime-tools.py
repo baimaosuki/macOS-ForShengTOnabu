@@ -20,6 +20,8 @@ with tarfile.open(archive) as bundle:
     member = next(m for m in bundle if m.name == 'ipsw' or m.name.endswith('/ipsw'))
     (target / 'ipsw').write_bytes(bundle.extractfile(member).read())
 (target / 'ipsw').chmod(0o755)
-with Path(os.environ['GITHUB_PATH']).open('a') as stream:
-    stream.write(str(target) + '\n')
+if os.environ.get('GITHUB_PATH'):
+    with Path(os.environ['GITHUB_PATH']).open('a') as stream:
+        stream.write(str(target) + '\n')
 print('ipsw3.1.749 Intel release SHA256 verified')
+print(f'Local shell: add {target} to PATH')

@@ -11,6 +11,9 @@ a640_zap.b02
 
 # NABU_TOUCH_FIRMWARE_DIR
 novatek_nt36523_k82_fw01.bin
+# Also consumed by scripts/unixnu/devicetree.py (not firmware substitutes):
+partitions.bin
+crc-bank.bin
 
 # Separate local inputs: original27.3 IPSW/kernelcache, UEFI, ROOT/Data,
 # signing material and any generated accounts. See BUILDING.md.

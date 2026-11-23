@@ -21,6 +21,8 @@
 
 现有内容足以公开研究板级实现、查看补丁、运行相应Host测试，并在准备好SDK和本地输入后继续构建。**目前没有面向全新设备的一键安装发行流程，也未完成在干净环境中从零生成整套ROOT/ESP的复现验收。**
 
+2026-11-23重新克隆审计后，补入 [从输入到PAC ROOT/ESP的操作指南](REPRODUCING.md) 和所需host工具。每处原有缺口、已补代码及仍未验收的条件列在 [REPRODUCIBILITY.md](REPRODUCIBILITY.md)，不能把这次补文档/工具表述为已完成从零实机复现。
+
 ## 必须另外准备的输入
 
 - 原始macOS27.3系统素材、kernelcache、系统卷/ROOT、Data seed。

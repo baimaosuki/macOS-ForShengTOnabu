@@ -59,6 +59,7 @@ unixnu.local.toml
 /downloads/
 /firmware/
 /.ci-cache/
+/.ci/
 *.nabu
 *.dtbo
 *.trustcache

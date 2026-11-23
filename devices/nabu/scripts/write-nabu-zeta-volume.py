@@ -49,6 +49,7 @@ def main(argv=None):
     require(a.container.is_file() and a.kernel.is_file() and a.module.is_file(), 'missing guest/container input')
     require(not a.report.exists(), 'report already exists')
     plan = json.loads(a.plan.read_text())
+    require(not plan.get('bsd_flags_pending', False), 'native BSD-flags step is required')
     lines = ['#!/bin/sh', 'set -e']
     for entry in plan.get('directories', []):
         target = safe_target(entry['path'])
@@ -141,7 +142,9 @@ def main(argv=None):
                   native_bsd_flags_verified=len(native_flags),
                   failures=failures, clean_unmount=markers, exit_status=run.returncode,
                   complete=not failures and markers and 'NABU-APFS FAIL' not in text and run.returncode == 0,
-                  plan_sha256=digest(a.plan), console=str(console), hardware_tested=False)
+                  plan_sha256=digest(a.plan), console=str(console), hardware_tested=False,
+                  container_sha256=digest(a.container),
+                  file_hashes={entry['path']: entry['sha256'] for entry in files})
     a.report.write_text(json.dumps(result, indent=2) + '\n')
     print(json.dumps(result))
     return 0 if result['complete'] else 1

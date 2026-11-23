@@ -4,6 +4,7 @@
 The seed and unattended test account are encrypted for the local recipient
 before artifact upload. No installed or previous Data volume is read.
 """
+import argparse
 import hashlib
 import json
 import os
@@ -23,7 +24,19 @@ from unixnu.util import sha256_file
 
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--recipient', type=Path, required=True,
+                        help='Your RSA public PEM; its private key must remain local')
+    args = parser.parse_args()
     assert platform.machine() == 'x86_64' and platform.system() == 'Darwin'
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    recipient = args.recipient.read_bytes()
+    public = serialization.load_pem_public_key(recipient)
+    if not isinstance(public, rsa.RSAPublicKey) or public.key_size < 3072:
+        raise ValueError('Use an RSA recipient key of at least 3072 bits')
+    recipient = public.public_bytes(serialization.Encoding.PEM,
+                                    serialization.PublicFormat.SubjectPublicKeyInfo)
     ctx = Context(cli.parser().parse_args(['build', 'runtime', '-D', str(ROOT / 'devices/nabu'), '--os', 'macos-27']))
     output = ROOT / 'out/fresh-runtime'
     output.mkdir(parents=True, exist_ok=True)
@@ -69,7 +82,6 @@ def main():
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import padding
     from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
-    recipient = (ROOT / 'devices/nabu/runtime-recipient.pem').read_bytes()
     key, nonce = secrets.token_bytes(32), secrets.token_bytes(12)
     encryptor = Cipher(algorithms.AES(key), modes.GCM(nonce)).encryptor()
     encrypted = output / 'runtime.enc'
@@ -77,7 +89,6 @@ def main():
         while block := inp.read(8 << 20):
             out.write(encryptor.update(block))
         out.write(encryptor.finalize())
-    public = serialization.load_pem_public_key(recipient)
     wrapped = public.encrypt(key, padding.OAEP(mgf=padding.MGF1(hashes.SHA256()), algorithm=hashes.SHA256(), label=None))
     envelope = dict(algorithm='RSA-OAEP-SHA256+AES256-GCM', nonce=nonce.hex(), tag=encryptor.tag.hex(),
                     wrapped_key=wrapped.hex(), recipient_sha256=hashlib.sha256(recipient).hexdigest(),

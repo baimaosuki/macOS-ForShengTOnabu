@@ -1,5 +1,7 @@
 # macOS on Xiaomi Pad 5 · nabu
 
+[从源码制作PAC ROOT与ESP](REPRODUCING.md) · [复现审计与仍缺的条件](REPRODUCIBILITY.md)
+
 [English](README.en.md) · [当前状态](STATUS.md) · [进度记录](PROGRESS.md) · [ESP 使用](INSTALLING.md) · [开源范围](OPEN_SOURCE.md) · [脱敏记录](PRIVACY.md) · [源码导航](REPOSITORY.md) · [构建说明](BUILDING.md) · [上游与许可](UPSTREAM.md)
 
 基于 UniXNU 的小米平板 5（**nabu / SM8150-AC / Adreno 640**）macOS 实验移植。当前目标为 **macOS 27.3 / 26C5035r**。本仓库是 nabu 的独立实验分支，由 baimaosuki 整理维护；上游项目见[致谢](UPSTREAM.md)。

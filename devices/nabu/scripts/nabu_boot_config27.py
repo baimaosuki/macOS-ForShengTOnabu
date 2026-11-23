@@ -84,7 +84,7 @@ def validate(raw, reference=None):
     return config
 
 
-def install(esp, reference=None, local_boot_config=None):
+def install(esp, reference=None, local_boot_config=None, without_persistent_log=False):
     raw = ALIGNED_CONFIG.read_bytes()
     digest = hashlib.sha256(raw).hexdigest()
     if digest != ALIGNED_SHA256:
@@ -92,14 +92,23 @@ def install(esp, reference=None, local_boot_config=None):
     config = validate(raw, reference)
     configured = local_boot_config or os.environ.get('NABU_LOCAL_BOOT_CONFIG')
     local = tomllib.loads(Path(configured).read_text()) if configured else None
-    token = allocation_token(reference, local)
+    token = None if without_persistent_log else allocation_token(reference, local)
     wants_log = any('nabu-log=1' in entry.get('args', '').split() for entry in config['entry'])
-    if wants_log and token is None:
+    if wants_log and token is None and not without_persistent_log:
         raise ValueError('Log allocation identity required: preserve an existing ESP menu or set NABU_LOCAL_BOOT_CONFIG')
     # The published template has no device identity. Materialize it only in
     # the local artifact, preserving the existing allocation and menu layout.
     if token:
         raw = raw.replace(b'nabu-log=1 ', b'nabu-log=1 nabu-log-token=' + token.encode() + b' ')
+    if without_persistent_log:
+        raw = raw.replace(b'nabu-log=1 ', b'nabu-log=0 ')
+        if reference is not None:
+            import copy
+            reference = copy.deepcopy(reference)
+            for entry in reference.get('entry', []):
+                if 'args' in entry:
+                    entry['args'] = ' '.join('nabu-log=0' if v == 'nabu-log=1' else v
+                                             for v in entry['args'].split())
     config = validate(raw, reference)
     menu = Path(esp) / MENU_PATH
     menu.parent.mkdir(parents=True, exist_ok=True)
@@ -108,6 +117,7 @@ def install(esp, reference=None, local_boot_config=None):
         raise OSError('Aligned menu readback mismatch')
     return dict(path=MENU_PATH.as_posix(), bytes=len(raw), sha256=hashlib.sha256(raw).hexdigest(),
                 template_sha256=digest, log_allocation_identity_preserved=token is not None,
+                persistent_log_enabled=not without_persistent_log,
                 default=config['boot']['default'], ui_scale=config['ui']['scale'],
                 entry_order=[entry['id'] for entry in config['entry']],
                 data_reset_confirmation_only=True)

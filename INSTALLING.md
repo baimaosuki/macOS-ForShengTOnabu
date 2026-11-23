@@ -2,6 +2,8 @@
 
 适用于现有 nabu macOS27.3 / 26C5035r 环境的 ESP 更新。本文不包含首次分区、ROOT安装或其他设备刷机流程。
 
+从原始系统制作PAC ROOT、准备引导与手动刷入的流程见 [REPRODUCING.md](REPRODUCING.md)。新构建没有预分配ESP日志时可显式关闭该journal；已有设备更新仍应保留原token。
+
 ## 固定菜单
 
 仓库中的 [`config/unixnu.aligned.toml`](config/unixnu.aligned.toml) 为已脱敏的公共模板，4,669字节；设备日志分配标识在本地安装时补入。

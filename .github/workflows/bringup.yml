@@ -6,6 +6,18 @@ on:
         type: choice
         options: [native, runtime, boot-tools, gpu-userspace]
         default: native
+      runtime_recipient:
+        description: 'Repository path to your RSA public PEM; required only for runtime'
+        type: string
+        default: ''
+      root_policy_dir:
+        description: 'Repository path to your generated public policy headers/anchor (native)'
+        type: string
+        default: ''
+      root_profile:
+        description: 'Repository path to matching generated root.local.toml (native)'
+        type: string
+        default: ''
 permissions:
   contents: read
 concurrency:
@@ -41,6 +53,8 @@ jobs:
     env:
       HOMEBREW_NO_AUTO_UPDATE: 1
       GITHUB_TOKEN: ${{ github.token }}
+      NABU_ROOT_POLICY_DIR: ${{ inputs.root_policy_dir }}
+      UNIXNU_ROOT_PROFILE: ${{ inputs.root_profile }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -61,12 +75,25 @@ jobs:
           echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
           python3 -m pip install numpy==2.2.6 capstone==5.0.7 unicorn==2.1.4
       - name: Select the fresh NABU profile
-        run: ./unixnu defconfig nabu_macos27_defconfig -D devices/nabu --os macos-27
+        run: |
+          test -n "$NABU_ROOT_POLICY_DIR"
+          test -n "$UNIXNU_ROOT_PROFILE"
+          test -f "$UNIXNU_ROOT_PROFILE"
+          for window in OS SystemOS App; do
+            test -f "$NABU_ROOT_POLICY_DIR/$window/trusted-key.bin"
+            test -f "$NABU_ROOT_POLICY_DIR/$window/manifest.header.bin"
+            test -f "$NABU_ROOT_POLICY_DIR/$window/verification.json"
+          done
+          export NABU_ROOT_POLICY_DIR="$GITHUB_WORKSPACE/$NABU_ROOT_POLICY_DIR"
+          export UNIXNU_ROOT_PROFILE="$GITHUB_WORKSPACE/$UNIXNU_ROOT_PROFILE"
+          echo "NABU_ROOT_POLICY_DIR=$NABU_ROOT_POLICY_DIR" >> "$GITHUB_ENV"
+          echo "UNIXNU_ROOT_PROFILE=$UNIXNU_ROOT_PROFILE" >> "$GITHUB_ENV"
+          ./unixnu defconfig nabu_macos27_defconfig -D devices/nabu --os macos-27
       - uses: actions/cache/restore@v4
         id: kernel-cache
         with:
-          key: nabu27-native-v1-${{ runner.arch }}-${{ hashFiles('patches/**', 'profiles/**', 'devices/nabu/patches/**', 'devices/nabu/compat/pac/**', 'devices/nabu/configs/**', 'soc/sm8150/patches/**') }}-${{ github.sha }}
-          restore-keys: nabu27-native-v1-${{ runner.arch }}-
+          key: nabu27-native-v2-${{ runner.arch }}-${{ hashFiles('patches/**', 'profiles/**', 'devices/nabu/patches/**', 'devices/nabu/compat/pac/**', 'devices/nabu/configs/**', 'soc/sm8150/patches/**') }}-${{ github.sha }}
+          restore-keys: nabu27-native-v2-${{ runner.arch }}-
           path: |
             out/feeds/
             out/nabu/**/xnu-inputs.json
@@ -150,7 +177,12 @@ jobs:
           git submodule update --init -- drivers/DarwinBoot
           ./unixnu defconfig nabu_macos27_defconfig -D devices/nabu --os macos-27
       - name: Build new Data and signed upstream boot shims
-        run: python3 devices/nabu/scripts/build-fresh-runtime.py
+        env:
+          NABU_RUNTIME_RECIPIENT: ${{ inputs.runtime_recipient }}
+        run: |
+          test -n "$NABU_RUNTIME_RECIPIENT"
+          test -f "$NABU_RUNTIME_RECIPIENT"
+          python3 devices/nabu/scripts/build-fresh-runtime.py --recipient "$NABU_RUNTIME_RECIPIENT"
       - uses: actions/upload-artifact@v4
         with:
           name: nabu27-runtime-encrypted

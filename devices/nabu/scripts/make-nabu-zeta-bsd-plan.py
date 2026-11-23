@@ -36,6 +36,7 @@ if a.reader:
     if a.metadata_only:
         plan = dict(files=[], directories=[], symlinks=[])
     plan['bsd_flags'] = flags
+    plan['bsd_flags_pending'] = False
     a.output.write_text(json.dumps(plan, indent=2) + '\n')
     print(f'{a.output.name}: extracted {len(flags)} BSD flags; restricted={sum(bool(f["flags"] & 0x80000) for f in flags)}')
     raise SystemExit(0)
@@ -60,6 +61,7 @@ with a.image.open('rb') as f:
 if a.metadata_only:
     plan = dict(files=[], directories=[], symlinks=[])
 plan['bsd_flags'] = flags
+plan['bsd_flags_pending'] = False
 plan['original_volume'] = dict(name=volume.name, role=volume.role)
 a.output.write_text(json.dumps(plan, indent=2) + '\n')
 print(f'{a.output.name}: extracted {len(flags)} BSD flags; restricted={sum(bool(f["flags"] & 0x80000) for f in flags)}')

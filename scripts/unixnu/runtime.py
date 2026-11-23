@@ -83,7 +83,7 @@ def prepare(ctx, kernel_build=False):
     trust = owner or getattr(args, 'trust_cache', None)
     addon = getattr(args, 'gpu_addon', None)
     want_addon = spec.get('gpu_addon', True)
-    if addon and not want_addon:
+    if addon and not want_addon and not spec.get('boot_shims'):
         raise Error('this OS profile builds no GPU addon ([payload.runtime] gpu_addon = false)')
     for name, path in [('Data seed', args.data_ramdisk), ('trust bundle', trust), ('GPU addon', addon)]:
         if path and not Path(path).expanduser().is_file():

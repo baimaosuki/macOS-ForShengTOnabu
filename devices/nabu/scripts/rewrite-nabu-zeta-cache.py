@@ -40,6 +40,8 @@ def main(argv=None):
     require(not any(e.get('unlowerable') for e in entries), 'proven cache code has unsupported PAC instructions')
     tool = module('zeta_cache_rewriter_macos', 'rewrite-zeta-dyld-cache.py')
     cache = tool.dc.Cache(a.cache)
+    require(set(summary['images']) == {path for _, path in cache.images},
+            'cache proof must cover every image; a partial --only proof is not a production input')
     require([f.path.name for f in cache.files] == [e['name'] for e in inputs['files']], 'proof input manifest omits cache files')
     tool.rebuilt_signature = rebuilt_signature
     tool.signature_length = signature_length

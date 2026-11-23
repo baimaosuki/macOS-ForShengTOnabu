@@ -1,5 +1,7 @@
 # NABU macOS 27.3 的 zeta 普通指针 ABI
 
+本文解释ABI。实际从原始IPSW到PAC ROOT、签名策略及ESP的命令见仓库根目录 [REPRODUCING.md](https://github.com/baimaosuki/macOS-ForShengTOnabu/blob/main/REPRODUCING.md)，已发现缺项与验证边界见 [REPRODUCIBILITY.md](https://github.com/baimaosuki/macOS-ForShengTOnabu/blob/main/REPRODUCIBILITY.md)。
+
 来源固定为 UniXNU-zeta `eb489285a1d9153872f00c93ebb519a269b249b5`，许可及原始文件 SHA-256 位于 `devices/nabu/scripts/zeta_pac/`。
 
 生产策略是离线识别代码并改写 PAC 指令：PAC/AUT/XPAC 保持普通指针不变，PACGA 返回 0，鉴权跳转/返回转普通跳转/返回，支持的鉴权加载转 LDR/LDUR。无法证明是代码的数据不改写，剩余代码使用语义相同的内核异常兼容路径。没有硬件 PAC 密钥或密码学鉴权保护。SHA3/DIT/SB 等非 PAC 兼容保留。

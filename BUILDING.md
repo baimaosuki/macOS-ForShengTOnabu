@@ -2,6 +2,8 @@
 
 当前项目[暂时停更](STATUS.md)。以下记录已有源码入口与构建边界，供继续研究使用。
 
+从原始27.3输入制作PAC ROOT、运行时和ESP，先读 [完整操作指南](REPRODUCING.md) 及 [复现缺项审计](REPRODUCIBILITY.md)。原先只列源码入口的说明不足以从零复现；新增命令与工具的Host验证不代替完整macOS构建和设备验收。
+
 ## 版本与工具链
 
 | 项目 | 当前基线 |
@@ -34,7 +36,7 @@ python3 devices/nabu/scripts/compile-bootstrap.py --full
 | `gpu-userspace` | Turnip / M2V / Metal bundle 的构建与签名检查 |
 | `runtime` | 为本地接收方加密的运行时输入 |
 
-`runtime` 的公钥接收方由维护者配置，现有工作流不是面向所有使用者的通用运行时下载入口。继续构建者需要配置自己的接收方和本地输入；私钥、账号与解密后产物不进 Git。
+`runtime` 必须传入自己的RSA公钥路径，解密用本机私钥；公开维护者公钥不能让你解密维护者旧产物。native工作流须显式传自己的root policy目录及匹配root profile。具体参数与本地流程见 [REPRODUCING.md](REPRODUCING.md)。私钥、账号与解密后产物不进Git。
 
 ## 固件与系统输入
 
